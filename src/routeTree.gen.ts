@@ -13,11 +13,13 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenticated/performance'
+import { Route as AuthenticatedOtApprovalsRouteImport } from './routes/_authenticated/ot-approvals'
 import { Route as AuthenticatedLeavesRouteImport } from './routes/_authenticated/leaves'
 import { Route as AuthenticatedDtrRouteImport } from './routes/_authenticated/dtr'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/_admin'
 import { Route as AuthenticatedAdminPerformanceAdminRouteImport } from './routes/_authenticated/_admin/performance-admin'
+import { Route as AuthenticatedAdminOrgChartRouteImport } from './routes/_authenticated/_admin/org-chart'
 import { Route as AuthenticatedAdminKpiBuilderRouteImport } from './routes/_authenticated/_admin/kpi-builder'
 import { Route as AuthenticatedAdminEmployeesRouteImport } from './routes/_authenticated/_admin/employees'
 import { Route as AuthenticatedAdminCutoffsRouteImport } from './routes/_authenticated/_admin/cutoffs'
@@ -44,6 +46,12 @@ const AuthenticatedPerformanceRoute =
     path: '/performance',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedOtApprovalsRoute =
+  AuthenticatedOtApprovalsRouteImport.update({
+    id: '/ot-approvals',
+    path: '/ot-approvals',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedLeavesRoute = AuthenticatedLeavesRouteImport.update({
   id: '/leaves',
   path: '/leaves',
@@ -67,6 +75,12 @@ const AuthenticatedAdminPerformanceAdminRoute =
   AuthenticatedAdminPerformanceAdminRouteImport.update({
     id: '/performance-admin',
     path: '/performance-admin',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
+const AuthenticatedAdminOrgChartRoute =
+  AuthenticatedAdminOrgChartRouteImport.update({
+    id: '/org-chart',
+    path: '/org-chart',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
 const AuthenticatedAdminKpiBuilderRoute =
@@ -106,11 +120,13 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/dtr': typeof AuthenticatedDtrRoute
   '/leaves': typeof AuthenticatedLeavesRoute
+  '/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/performance': typeof AuthenticatedPerformanceRoute
   '/cutoff-approval': typeof AuthenticatedAdminCutoffApprovalRoute
   '/cutoffs': typeof AuthenticatedAdminCutoffsRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
+  '/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
   '/cutoff-approval/$id': typeof AuthenticatedAdminCutoffApprovalIdRoute
 }
@@ -120,11 +136,13 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/dtr': typeof AuthenticatedDtrRoute
   '/leaves': typeof AuthenticatedLeavesRoute
+  '/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/performance': typeof AuthenticatedPerformanceRoute
   '/cutoff-approval': typeof AuthenticatedAdminCutoffApprovalRoute
   '/cutoffs': typeof AuthenticatedAdminCutoffsRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
+  '/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
   '/cutoff-approval/$id': typeof AuthenticatedAdminCutoffApprovalIdRoute
 }
@@ -137,11 +155,13 @@ export interface FileRoutesById {
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/dtr': typeof AuthenticatedDtrRoute
   '/_authenticated/leaves': typeof AuthenticatedLeavesRoute
+  '/_authenticated/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
   '/_authenticated/_admin/cutoff-approval': typeof AuthenticatedAdminCutoffApprovalRoute
   '/_authenticated/_admin/cutoffs': typeof AuthenticatedAdminCutoffsRoute
   '/_authenticated/_admin/employees': typeof AuthenticatedAdminEmployeesRoute
   '/_authenticated/_admin/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
+  '/_authenticated/_admin/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/_authenticated/_admin/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
   '/_authenticated/_admin/cutoff-approval_/$id': typeof AuthenticatedAdminCutoffApprovalIdRoute
 }
@@ -153,11 +173,13 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/dtr'
     | '/leaves'
+    | '/ot-approvals'
     | '/performance'
     | '/cutoff-approval'
     | '/cutoffs'
     | '/employees'
     | '/kpi-builder'
+    | '/org-chart'
     | '/performance-admin'
     | '/cutoff-approval/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -167,11 +189,13 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/dtr'
     | '/leaves'
+    | '/ot-approvals'
     | '/performance'
     | '/cutoff-approval'
     | '/cutoffs'
     | '/employees'
     | '/kpi-builder'
+    | '/org-chart'
     | '/performance-admin'
     | '/cutoff-approval/$id'
   id:
@@ -183,11 +207,13 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard'
     | '/_authenticated/dtr'
     | '/_authenticated/leaves'
+    | '/_authenticated/ot-approvals'
     | '/_authenticated/performance'
     | '/_authenticated/_admin/cutoff-approval'
     | '/_authenticated/_admin/cutoffs'
     | '/_authenticated/_admin/employees'
     | '/_authenticated/_admin/kpi-builder'
+    | '/_authenticated/_admin/org-chart'
     | '/_authenticated/_admin/performance-admin'
     | '/_authenticated/_admin/cutoff-approval_/$id'
   fileRoutesById: FileRoutesById
@@ -228,6 +254,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPerformanceRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/ot-approvals': {
+      id: '/_authenticated/ot-approvals'
+      path: '/ot-approvals'
+      fullPath: '/ot-approvals'
+      preLoaderRoute: typeof AuthenticatedOtApprovalsRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/leaves': {
       id: '/_authenticated/leaves'
       path: '/leaves'
@@ -261,6 +294,13 @@ declare module '@tanstack/react-router' {
       path: '/performance-admin'
       fullPath: '/performance-admin'
       preLoaderRoute: typeof AuthenticatedAdminPerformanceAdminRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
+    '/_authenticated/_admin/org-chart': {
+      id: '/_authenticated/_admin/org-chart'
+      path: '/org-chart'
+      fullPath: '/org-chart'
+      preLoaderRoute: typeof AuthenticatedAdminOrgChartRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
     '/_authenticated/_admin/kpi-builder': {
@@ -306,6 +346,7 @@ interface AuthenticatedAdminRouteChildren {
   AuthenticatedAdminCutoffsRoute: typeof AuthenticatedAdminCutoffsRoute
   AuthenticatedAdminEmployeesRoute: typeof AuthenticatedAdminEmployeesRoute
   AuthenticatedAdminKpiBuilderRoute: typeof AuthenticatedAdminKpiBuilderRoute
+  AuthenticatedAdminOrgChartRoute: typeof AuthenticatedAdminOrgChartRoute
   AuthenticatedAdminPerformanceAdminRoute: typeof AuthenticatedAdminPerformanceAdminRoute
   AuthenticatedAdminCutoffApprovalIdRoute: typeof AuthenticatedAdminCutoffApprovalIdRoute
 }
@@ -315,6 +356,7 @@ const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
   AuthenticatedAdminCutoffsRoute: AuthenticatedAdminCutoffsRoute,
   AuthenticatedAdminEmployeesRoute: AuthenticatedAdminEmployeesRoute,
   AuthenticatedAdminKpiBuilderRoute: AuthenticatedAdminKpiBuilderRoute,
+  AuthenticatedAdminOrgChartRoute: AuthenticatedAdminOrgChartRoute,
   AuthenticatedAdminPerformanceAdminRoute:
     AuthenticatedAdminPerformanceAdminRoute,
   AuthenticatedAdminCutoffApprovalIdRoute:
@@ -329,6 +371,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedDtrRoute: typeof AuthenticatedDtrRoute
   AuthenticatedLeavesRoute: typeof AuthenticatedLeavesRoute
+  AuthenticatedOtApprovalsRoute: typeof AuthenticatedOtApprovalsRoute
   AuthenticatedPerformanceRoute: typeof AuthenticatedPerformanceRoute
 }
 
@@ -337,6 +380,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedDtrRoute: AuthenticatedDtrRoute,
   AuthenticatedLeavesRoute: AuthenticatedLeavesRoute,
+  AuthenticatedOtApprovalsRoute: AuthenticatedOtApprovalsRoute,
   AuthenticatedPerformanceRoute: AuthenticatedPerformanceRoute,
 }
 

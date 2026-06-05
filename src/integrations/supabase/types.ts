@@ -27,6 +27,7 @@ export type Database = {
           id: string
           is_absent: boolean
           is_leave: boolean
+          is_undertime: boolean
           late_minutes: number
           leave_type: string | null
           locked_at: string | null
@@ -38,8 +39,10 @@ export type Database = {
           ot_status: Database["public"]["Enums"]["ot_approval_status"]
           overtime_hours: number
           rejection_reason: string | null
+          shift_label: string | null
           time_in: string | null
           time_out: string | null
+          undertime_minutes: number
           updated_at: string
           work_date: string
         }
@@ -55,6 +58,7 @@ export type Database = {
           id?: string
           is_absent?: boolean
           is_leave?: boolean
+          is_undertime?: boolean
           late_minutes?: number
           leave_type?: string | null
           locked_at?: string | null
@@ -66,8 +70,10 @@ export type Database = {
           ot_status?: Database["public"]["Enums"]["ot_approval_status"]
           overtime_hours?: number
           rejection_reason?: string | null
+          shift_label?: string | null
           time_in?: string | null
           time_out?: string | null
+          undertime_minutes?: number
           updated_at?: string
           work_date: string
         }
@@ -83,6 +89,7 @@ export type Database = {
           id?: string
           is_absent?: boolean
           is_leave?: boolean
+          is_undertime?: boolean
           late_minutes?: number
           leave_type?: string | null
           locked_at?: string | null
@@ -94,8 +101,10 @@ export type Database = {
           ot_status?: Database["public"]["Enums"]["ot_approval_status"]
           overtime_hours?: number
           rejection_reason?: string | null
+          shift_label?: string | null
           time_in?: string | null
           time_out?: string | null
+          undertime_minutes?: number
           updated_at?: string
           work_date?: string
         }
@@ -167,9 +176,6 @@ export type Database = {
           locked_at: string | null
           missing_dtr_count: number
           overtime_hours: number
-          payslip_path: string | null
-          payslip_uploaded_at: string | null
-          payslip_uploaded_by: string | null
           rejection_reason: string | null
           submitted_at: string | null
           total_days_submitted: number
@@ -191,9 +197,6 @@ export type Database = {
           locked_at?: string | null
           missing_dtr_count?: number
           overtime_hours?: number
-          payslip_path?: string | null
-          payslip_uploaded_at?: string | null
-          payslip_uploaded_by?: string | null
           rejection_reason?: string | null
           submitted_at?: string | null
           total_days_submitted?: number
@@ -215,9 +218,6 @@ export type Database = {
           locked_at?: string | null
           missing_dtr_count?: number
           overtime_hours?: number
-          payslip_path?: string | null
-          payslip_uploaded_at?: string | null
-          payslip_uploaded_by?: string | null
           rejection_reason?: string | null
           submitted_at?: string | null
           total_days_submitted?: number
@@ -234,6 +234,123 @@ export type Database = {
           },
           {
             foreignKeyName: "subs_employee_profile_fk"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      org_nodes: {
+        Row: {
+          created_at: string
+          employee_id: string
+          id: string
+          is_dept_head: boolean
+          parent_id: string | null
+          position_x: number
+          position_y: number
+          team_label: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          employee_id: string
+          id?: string
+          is_dept_head?: boolean
+          parent_id?: string | null
+          position_x?: number
+          position_y?: number
+          team_label?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          employee_id?: string
+          id?: string
+          is_dept_head?: boolean
+          parent_id?: string | null
+          position_x?: number
+          position_y?: number
+          team_label?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_nodes_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_nodes_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "org_nodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ot_approval_requests: {
+        Row: {
+          created_at: string
+          dh_approver_id: string | null
+          dh_decided_at: string | null
+          dh_notes: string | null
+          dtr_id: string
+          employee_id: string
+          id: string
+          is_approver_id: string | null
+          is_decided_at: string | null
+          is_notes: string | null
+          requested_hours: number
+          status: string
+          step: string
+          work_date: string
+        }
+        Insert: {
+          created_at?: string
+          dh_approver_id?: string | null
+          dh_decided_at?: string | null
+          dh_notes?: string | null
+          dtr_id: string
+          employee_id: string
+          id?: string
+          is_approver_id?: string | null
+          is_decided_at?: string | null
+          is_notes?: string | null
+          requested_hours: number
+          status?: string
+          step?: string
+          work_date: string
+        }
+        Update: {
+          created_at?: string
+          dh_approver_id?: string | null
+          dh_decided_at?: string | null
+          dh_notes?: string | null
+          dtr_id?: string
+          employee_id?: string
+          id?: string
+          is_approver_id?: string | null
+          is_decided_at?: string | null
+          is_notes?: string | null
+          requested_hours?: number
+          status?: string
+          step?: string
+          work_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ot_approval_requests_dtr_id_fkey"
+            columns: ["dtr_id"]
+            isOneToOne: false
+            referencedRelation: "daily_time_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ot_approval_requests_employee_id_fkey"
             columns: ["employee_id"]
             isOneToOne: false
             referencedRelation: "profiles"

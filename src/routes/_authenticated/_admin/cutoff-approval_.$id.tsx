@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDate, formatDateTime, type ApprovalStatus, STATUS_LABEL } from "@/lib/dtr";
-import { ArrowLeft, Check, X, AlertTriangle, Unlock, FileText, Upload, Trash2, Download } from "lucide-react";
+import { ArrowLeft, Check, X, AlertTriangle, Unlock } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/_admin/cutoff-approval_/$id")({
@@ -214,15 +214,6 @@ function DetailPage() {
         </CardContent>
       </Card>
 
-      <PayslipCard
-        submissionId={sub.id}
-        employeeId={sub.employee_id}
-        cutoffId={sub.cutoff_id}
-        payslipPath={(sub as { payslip_path?: string | null }).payslip_path ?? null}
-        uploadedAt={(sub as { payslip_uploaded_at?: string | null }).payslip_uploaded_at ?? null}
-        userId={user?.id}
-      />
-
       <Card>
         <CardHeader><CardTitle className="text-lg">DTR entries ({dtrs?.length ?? 0})</CardTitle></CardHeader>
         <CardContent className="p-0 overflow-x-auto">
@@ -383,123 +374,3 @@ function Metric({ label, value, warn }: { label: string; value: React.ReactNode;
   );
 }
 
-function PayslipCard({
-  submissionId, employeeId, cutoffId, payslipPath, uploadedAt, userId,
-}: {
-  submissionId: string; employeeId: string; cutoffId: string;
-  payslipPath: string | null; uploadedAt: string | null; userId?: string;
-}) {
-  const qc = useQueryClient();
-  const [busy, setBusy] = useState(false);
-
-  const handleUpload = async (file: File) => {
-    if (!userId) return;
-    setBusy(true);
-    try {
-      const ext = file.name.split(".").pop()?.toLowerCase() || "pdf";
-      const path = `${employeeId}/${cutoffId}-${Date.now()}.${ext}`;
-      // Remove existing file if present
-      if (payslipPath) await supabase.storage.from("payslips").remove([payslipPath]);
-      const { error: upErr } = await supabase.storage
-        .from("payslips")
-        .upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
-      if (upErr) throw upErr;
-      const { error } = await supabase
-        .from("dtr_cutoff_submissions")
-        .update({
-          payslip_path: path,
-          payslip_uploaded_at: new Date().toISOString(),
-          payslip_uploaded_by: userId,
-        } as never)
-        .eq("id", submissionId);
-      if (error) throw error;
-      toast.success("Payslip uploaded");
-      qc.invalidateQueries({ queryKey: ["sub-detail", submissionId] });
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    if (!payslipPath) return;
-    const { data, error } = await supabase.storage
-      .from("payslips").createSignedUrl(payslipPath, 60);
-    if (error || !data) { toast.error(error?.message ?? "Failed"); return; }
-    window.open(data.signedUrl, "_blank");
-  };
-
-  const handleRemove = async () => {
-    if (!payslipPath) return;
-    if (!confirm("Remove this payslip?")) return;
-    setBusy(true);
-    try {
-      await supabase.storage.from("payslips").remove([payslipPath]);
-      const { error } = await supabase
-        .from("dtr_cutoff_submissions")
-        .update({ payslip_path: null, payslip_uploaded_at: null, payslip_uploaded_by: null } as never)
-        .eq("id", submissionId);
-      if (error) throw error;
-      toast.success("Payslip removed");
-      qc.invalidateQueries({ queryKey: ["sub-detail", submissionId] });
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
-        <CardTitle className="text-lg flex items-center gap-2">
-          <FileText className="h-4 w-4" /> Payslip
-        </CardTitle>
-        {payslipPath && uploadedAt && (
-          <span className="text-xs text-muted-foreground">Uploaded {formatDateTime(uploadedAt)}</span>
-        )}
-      </CardHeader>
-      <CardContent>
-        {payslipPath ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleDownload}>
-              <Download className="mr-1 h-4 w-4" /> Download
-            </Button>
-            <label>
-              <input
-                type="file"
-                accept="application/pdf,image/*"
-                className="hidden"
-                disabled={busy}
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.currentTarget.value = ""; }}
-              />
-              <Button variant="outline" size="sm" disabled={busy} asChild>
-                <span><Upload className="mr-1 h-4 w-4" /> Replace</span>
-              </Button>
-            </label>
-            <Button variant="destructive" size="sm" onClick={handleRemove} disabled={busy}>
-              <Trash2 className="mr-1 h-4 w-4" /> Remove
-            </Button>
-          </div>
-        ) : (
-          <div>
-            <p className="mb-3 text-sm text-muted-foreground">
-              Attach the employee's payslip (PDF or image) for this cut-off. They'll see a download button on their dashboard.
-            </p>
-            <label className="inline-flex">
-              <input
-                type="file"
-                accept="application/pdf,image/*"
-                className="hidden"
-                disabled={busy}
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.currentTarget.value = ""; }}
-              />
-              <Button disabled={busy} asChild>
-                <span><Upload className="mr-1 h-4 w-4" /> {busy ? "Uploading…" : "Upload payslip"}</span>
-              </Button>
-            </label>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}

@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { StatusBadge } from "@/components/StatusBadge";
 import { APPROVAL_STATUSES, formatDate, toCsv, downloadCsv, type ApprovalStatus, STATUS_LABEL } from "@/lib/dtr";
 import { useAuth } from "@/hooks/use-auth";
-import { Check, X, AlertTriangle, Download, ChevronRight, Upload, FileText, Trash2 } from "lucide-react";
+import { Check, X, AlertTriangle, Download, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/_admin/cutoff-approval")({ component: CutoffApproval });
@@ -35,8 +35,6 @@ function CutoffApproval() {
       return data ?? [];
     },
   });
-  const [uploadingId, setUploadingId] = useState<string | null>(null);
-
   const [filters, setFilters] = useState({
     cutoff: "all", status: "all", department: "all", employee: "",
     from: "", to: "",
@@ -255,7 +253,6 @@ function CutoffApproval() {
                 <th className="px-3 py-2 text-right">Leave</th>
                 <th className="px-3 py-2 text-right">Missing</th>
                 <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-left">Payslip</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -287,15 +284,6 @@ function CutoffApproval() {
                   </td>
                   <td className="px-3 py-2"><StatusBadge status={r.approval_status as ApprovalStatus} /></td>
                   <td className="px-3 py-2">
-                    <PayslipCell
-                      row={r}
-                      userId={user?.id}
-                      busy={uploadingId === r.id}
-                      setBusy={(b) => setUploadingId(b ? r.id : null)}
-                      onChanged={() => qc.invalidateQueries({ queryKey: ["all-subs"] })}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
                     <Button asChild size="sm" variant="ghost">
                       <Link to="/cutoff-approval/$id" params={{ id: r.id }}>
                         Review <ChevronRight className="ml-1 h-4 w-4" />
@@ -305,7 +293,7 @@ function CutoffApproval() {
                 </tr>
               ))}
               {!filtered.length && (
-                <tr><td colSpan={15} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                <tr><td colSpan={14} className="px-6 py-10 text-center text-sm text-muted-foreground">
                   No submissions match your filters.
                 </td></tr>
               )}
@@ -364,105 +352,3 @@ function OtApprovalSummary({ summary }: { summary?: { total: number; pending: nu
   );
 }
 
-type SubRow = {
-  id: string;
-  employee_id: string;
-  cutoff_id: string;
-  cutoff?: { cutoff_name: string } | null;
-};
-
-function PayslipCell({ row, userId, busy, setBusy, onChanged }: {
-  row: SubRow & Record<string, unknown>;
-  userId?: string;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  onChanged: () => void;
-}) {
-  const payslipPath = (row as { payslip_path?: string | null }).payslip_path ?? null;
-
-  const handleFile = async (file: File) => {
-    if (!userId) { toast.error("Sign in required"); return; }
-    setBusy(true);
-    try {
-      const ext = file.name.split(".").pop() || "pdf";
-      const path = `${row.employee_id}/${row.cutoff_id}-${Date.now()}.${ext}`;
-      if (payslipPath) await supabase.storage.from("payslips").remove([payslipPath]);
-      const { error: upErr } = await supabase.storage.from("payslips")
-        .upload(path, file, { upsert: true, contentType: file.type || undefined });
-      if (upErr) throw upErr;
-      const { error } = await supabase.from("dtr_cutoff_submissions")
-        .update({
-          payslip_path: path,
-          payslip_uploaded_at: new Date().toISOString(),
-          payslip_uploaded_by: userId,
-        } as never)
-        .eq("id", row.id);
-      if (error) throw error;
-      toast.success("Payslip uploaded");
-      onChanged();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    if (!payslipPath) return;
-    const { data, error } = await supabase.storage
-      .from("payslips").createSignedUrl(payslipPath, 60);
-    if (error || !data) { toast.error(error?.message ?? "Failed"); return; }
-    window.open(data.signedUrl, "_blank");
-  };
-
-  const handleRemove = async () => {
-    if (!payslipPath) return;
-    if (!confirm("Remove this payslip?")) return;
-    setBusy(true);
-    try {
-      await supabase.storage.from("payslips").remove([payslipPath]);
-      const { error } = await supabase.from("dtr_cutoff_submissions")
-        .update({ payslip_path: null, payslip_uploaded_at: null, payslip_uploaded_by: null } as never)
-        .eq("id", row.id);
-      if (error) throw error;
-      toast.success("Payslip removed");
-      onChanged();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-1">
-      {payslipPath ? (
-        <>
-          <Button size="sm" variant="ghost" onClick={handleDownload} title="Download payslip">
-            <FileText className="h-4 w-4 text-accent" />
-          </Button>
-          <label className="inline-flex">
-            <input type="file" className="hidden" accept="application/pdf,image/*"
-              disabled={busy}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
-            <span className="inline-flex h-8 cursor-pointer items-center rounded-md px-2 text-xs text-muted-foreground hover:bg-secondary">
-              Replace
-            </span>
-          </label>
-          <Button size="sm" variant="ghost" onClick={handleRemove} title="Remove">
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
-        </>
-      ) : (
-        <label className="inline-flex">
-          <input type="file" className="hidden" accept="application/pdf,image/*"
-            disabled={busy}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
-          <span className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border px-2 text-xs hover:bg-secondary">
-            <Upload className="h-3.5 w-3.5" /> {busy ? "Uploading…" : "Attach"}
-          </span>
-        </label>
-      )}
-    </div>
-  );
-}

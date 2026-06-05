@@ -1,13 +1,15 @@
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentCutoff, getMyDTRs, getMySubmission } from "@/lib/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDate, type ApprovalStatus } from "@/lib/dtr";
-import { Clock3, AlertCircle, CalendarCheck, Send, Plane, FileText, Download } from "lucide-react";
+import { Clock3, AlertCircle, CalendarCheck, Send, Plane } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({ component: Dashboard });
@@ -15,6 +17,8 @@ export const Route = createFileRoute("/_authenticated/dashboard")({ component: D
 function Dashboard() {
   const { user, isHR } = useAuth();
   const qc = useQueryClient();
+
+  const today = new Date().toISOString().slice(0, 10);
 
   const { data: cutoff } = useQuery({ queryKey: ["cutoff", "current"], queryFn: getCurrentCutoff, enabled: !isHR });
   const { data: dtrs } = useQuery({
@@ -42,21 +46,87 @@ function Dashboard() {
     },
   });
 
-  const { data: pastSubs } = useQuery({
-    queryKey: ["my-submissions", user?.id],
-    enabled: !!user && !isHR,
+  // Today's attendance entry
+  const { data: todayEntry, refetch: refetchToday } = useQuery({
+    queryKey: ["dtr-today", user?.id, today],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("dtr_cutoff_submissions")
-        .select(`id, approval_status, total_hours, total_days_submitted, overtime_hours,
-          late_count, absent_count, leave_days, submitted_at, approved_at,
-          payslip_path, payslip_uploaded_at, cutoff_id,
-          cutoff:payroll_cutoffs(id, cutoff_name, start_date, end_date, payout_date)`)
+        .from("daily_time_reports")
+        .select("id, time_in, time_out, hours_worked, shift_label, is_undertime, undertime_minutes")
         .eq("employee_id", user!.id)
-        .order("created_at", { ascending: false });
+        .eq("work_date", today)
+        .maybeSingle();
       if (error) throw error;
-      return data ?? [];
+      return data;
     },
+    enabled: !!user && !isHR,
+  });
+
+  const [showShiftPicker, setShowShiftPicker] = useState(false);
+
+  const clockIn = useMutation({
+    mutationFn: async (shiftLabel: "7-4" | "8-5" | "9-6") => {
+      const now = new Date();
+      const timeIn = now.toTimeString().slice(0, 5); // "HH:MM"
+      const { data: cutoffRow } = await supabase
+        .from("payroll_cutoffs")
+        .select("id")
+        .lte("start_date", today)
+        .gte("end_date", today)
+        .order("start_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const { error } = await supabase.from("daily_time_reports").insert({
+        employee_id: user!.id,
+        work_date: today,
+        time_in: timeIn,
+        shift_label: shiftLabel,
+        cutoff_id: cutoffRow?.id ?? null,
+        is_undertime: false,
+        undertime_minutes: 0,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Clocked in!");
+      refetchToday();
+      qc.invalidateQueries({ queryKey: ["dtrs"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const clockOut = useMutation({
+    mutationFn: async () => {
+      const now = new Date();
+      const timeOut = now.toTimeString().slice(0, 5);
+      const [ih, im] = (todayEntry!.time_in!).split(":").map(Number);
+      const [oh, om] = timeOut.split(":").map(Number);
+      const totalMins = (oh * 60 + om) - (ih * 60 + im);
+      const hoursWorked = Math.max(0, Math.round(totalMins / 60 * 100) / 100);
+      const STANDARD = 9;
+      const isUndertime = hoursWorked < STANDARD;
+      const undertimeMins = isUndertime ? Math.round(STANDARD * 60 - totalMins) : 0;
+      const { error } = await supabase
+        .from("daily_time_reports")
+        .update({
+          time_out: timeOut,
+          hours_worked: hoursWorked,
+          is_undertime: isUndertime,
+          undertime_minutes: undertimeMins,
+        })
+        .eq("id", todayEntry!.id);
+      if (error) throw error;
+      return { hoursWorked, isUndertime, undertimeMins };
+    },
+    onSuccess: (result) => {
+      toast.success("Clocked out!");
+      refetchToday();
+      qc.invalidateQueries({ queryKey: ["dtrs"] });
+      if (result.isUndertime) {
+        toast.warning(`Undertime: ${result.undertimeMins} min short of 9 hrs`);
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const submitForApproval = useMutation({
@@ -104,22 +174,6 @@ function Dashboard() {
   const canSubmit = !!cutoff && daysSubmitted > 0
     && ["draft","rejected","needs_correction"].includes(status);
 
-  const payslipPath = (submission as { payslip_path?: string | null } | null | undefined)?.payslip_path ?? null;
-  const downloadPayslip = async () => {
-    if (!payslipPath) return;
-    const { data, error } = await supabase.storage
-      .from("payslips").createSignedUrl(payslipPath, 60);
-    if (error || !data) { toast.error(error?.message ?? "Failed"); return; }
-    window.open(data.signedUrl, "_blank");
-  };
-
-  const downloadPayslipPath = async (path: string) => {
-    const { data, error } = await supabase.storage
-      .from("payslips").createSignedUrl(path, 60);
-    if (error || !data) { toast.error(error?.message ?? "Failed"); return; }
-    window.open(data.signedUrl, "_blank");
-  };
-
   const leaveDays = (a: string, b: string) =>
     Math.max(1, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1);
   const leavesAll = myLeaves ?? [];
@@ -127,7 +181,6 @@ function Dashboard() {
   const leavesPending = leavesAll.filter((l) => l.status === "pending");
   const totalApprovedDays = leavesApproved.reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
   const totalPendingDays = leavesPending.reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
-  const today = new Date().toISOString().slice(0, 10);
   const upcomingLeaves = leavesAll
     .filter((l) => (l.status === "approved" || l.status === "pending") && l.end_date >= today)
     .sort((a, b) => a.start_date.localeCompare(b.start_date))
@@ -149,6 +202,9 @@ function Dashboard() {
   const vlRemaining = Math.max(0, VL_ENTITLEMENT - vlUsed);
   const slRemaining = Math.max(0, SL_ENTITLEMENT - slUsed);
 
+  const clockedIn = !!todayEntry?.time_in;
+  const clockedOut = !!todayEntry?.time_out;
+
   if (isHR) return <Navigate to="/cutoff-approval" />;
 
   return (
@@ -160,6 +216,61 @@ function Dashboard() {
           Track your daily attendance and submit your cut-off DTR for HR approval.
         </p>
       </div>
+
+      {!isHR && (
+        <Card className="border-primary/20 bg-gradient-to-br from-card to-secondary/30">
+          <CardContent className="flex flex-col items-center gap-4 py-8">
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Today's Attendance</p>
+
+            {/* Not clocked in yet */}
+            {!clockedIn && (
+              <Button size="lg" className="h-16 w-48 text-lg font-semibold"
+                onClick={() => setShowShiftPicker(true)}
+                disabled={clockIn.isPending}>
+                <Clock3 className="mr-2 h-5 w-5" /> Clock In
+              </Button>
+            )}
+
+            {/* Clocked in, not out */}
+            {clockedIn && !clockedOut && (
+              <div className="flex flex-col items-center gap-3">
+                <p className="text-sm text-muted-foreground">
+                  In at <span className="font-semibold text-foreground">{todayEntry!.time_in}</span>
+                  {' · '}{todayEntry!.shift_label} shift
+                </p>
+                <Button size="lg" variant="destructive" className="h-16 w-48 text-lg font-semibold"
+                  onClick={() => clockOut.mutate()}
+                  disabled={clockOut.isPending}>
+                  <Clock3 className="mr-2 h-5 w-5" /> Clock Out
+                </Button>
+              </div>
+            )}
+
+            {/* Done for the day */}
+            {clockedIn && clockedOut && (
+              <div className="flex flex-col items-center gap-2 text-center">
+                <p className="text-sm font-medium">
+                  {todayEntry!.time_in} → {todayEntry!.time_out}
+                  {' · '}<span className="font-semibold">{Number(todayEntry!.hours_worked).toFixed(2)} hrs</span>
+                  {' · '}{todayEntry!.shift_label} shift
+                </p>
+                {todayEntry!.is_undertime && (
+                  <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning-foreground">
+                    <AlertCircle className="h-4 w-4" />
+                    Undertime — {todayEntry!.undertime_minutes} min short
+                  </div>
+                )}
+                {!todayEntry!.is_undertime && Number(todayEntry!.hours_worked) >= 10 && (
+                  <div className="flex items-center gap-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-1.5 text-sm">
+                    <span>You worked {Number(todayEntry!.hours_worked).toFixed(2)} hrs — consider filing OT</span>
+                    <Link to="/ot-approvals" className="underline underline-offset-2 font-medium">File OT →</Link>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="overflow-hidden border-primary/10 bg-gradient-to-br from-card via-card to-secondary/40">
         <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -205,18 +316,6 @@ function Dashboard() {
               <span className="text-xs text-warning-foreground">Correction: {submission.correction_notes}</span>
             )}
           </div>
-          {payslipPath && (
-            <div className="mt-4 flex items-center justify-between rounded-md border bg-background/60 p-3">
-              <div className="flex items-center gap-2 text-sm">
-                <FileText className="h-4 w-4 text-accent" />
-                <span className="font-medium">Payslip available</span>
-                <span className="text-muted-foreground">for {cutoff?.cutoff_name}</span>
-              </div>
-              <Button size="sm" variant="outline" onClick={downloadPayslip}>
-                <Download className="mr-1 h-4 w-4" /> Download
-              </Button>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -262,11 +361,6 @@ function Dashboard() {
         </CardContent>
       </Card>
 
-      <PastCutoffsSection
-        subs={pastSubs ?? []}
-        currentCutoffId={cutoff?.id ?? null}
-        onDownload={downloadPayslipPath}
-      />
       <div>
         <h2 className="font-display text-2xl">Recent entries</h2>
         <div className="mt-4 overflow-hidden rounded-lg border bg-card">
@@ -308,6 +402,24 @@ function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Shift picker dialog */}
+      <Dialog open={showShiftPicker} onOpenChange={setShowShiftPicker}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Select your shift for today</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 py-4">
+            {(["7-4", "8-5", "9-6"] as const).map((s) => (
+              <Button key={s} variant="outline" size="lg"
+                className="h-14 text-base"
+                onClick={() => { setShowShiftPicker(false); clockIn.mutate(s); }}>
+                {s === "7-4" ? "7:00 AM – 4:00 PM" : s === "8-5" ? "8:00 AM – 5:00 PM" : "9:00 AM – 6:00 PM"}
+              </Button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -361,87 +473,5 @@ function LeaveBalance({ label, code, used, total, remaining, year }: {
         {used} used (approved + pending)
       </p>
     </div>
-  );
-}
-
-type PastSub = {
-  id: string;
-  approval_status: string;
-  total_hours: number;
-  total_days_submitted: number;
-  overtime_hours: number;
-  late_count: number;
-  absent_count: number;
-  leave_days: number;
-  submitted_at: string | null;
-  approved_at: string | null;
-  payslip_path: string | null;
-  payslip_uploaded_at: string | null;
-  cutoff_id: string;
-  cutoff: { id: string; cutoff_name: string; start_date: string; end_date: string; payout_date: string | null } | null;
-};
-
-function PastCutoffsSection({ subs, currentCutoffId, onDownload }: {
-  subs: PastSub[]; currentCutoffId: string | null; onDownload: (path: string) => void;
-}) {
-  const past = subs.filter((s) => s.cutoff_id !== currentCutoffId);
-  return (
-    <Card>
-      <CardHeader>
-        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">History</p>
-        <CardTitle className="mt-1 font-display text-2xl flex items-center gap-2">
-          <CalendarCheck className="h-5 w-5 text-accent" /> Past cut-offs & payslips
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {past.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No past cut-offs yet.</p>
-        ) : (
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 text-left">Cut-off</th>
-                  <th className="px-4 py-2 text-left">Period</th>
-                  <th className="px-4 py-2 text-right">Hours</th>
-                  <th className="px-4 py-2 text-right">OT</th>
-                  <th className="px-4 py-2 text-left">Status</th>
-                  <th className="px-4 py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {past.map((s) => (
-                  <tr key={s.id} className="border-t">
-                    <td className="px-4 py-2 font-medium">{s.cutoff?.cutoff_name ?? "—"}</td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {s.cutoff ? `${formatDate(s.cutoff.start_date)} – ${formatDate(s.cutoff.end_date)}` : "—"}
-                    </td>
-                    <td className="px-4 py-2 text-right">{Number(s.total_hours).toFixed(2)}</td>
-                    <td className="px-4 py-2 text-right">{Number(s.overtime_hours).toFixed(2)}</td>
-                    <td className="px-4 py-2">
-                      <StatusBadge status={s.approval_status as ApprovalStatus} />
-                    </td>
-                    <td className="px-4 py-2">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button asChild variant="ghost" size="sm">
-                          <Link to="/dtr">View DTR</Link>
-                        </Button>
-                        {s.payslip_path ? (
-                          <Button size="sm" variant="outline" onClick={() => onDownload(s.payslip_path!)}>
-                            <Download className="mr-1 h-3.5 w-3.5" /> Payslip
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">No payslip</span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
   );
 }
