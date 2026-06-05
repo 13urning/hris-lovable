@@ -451,6 +451,7 @@ export type Database = {
           employee_code: string | null
           full_name: string
           id: string
+          must_change_password: boolean
           position: string | null
           sl_credits: number
           updated_at: string
@@ -464,6 +465,7 @@ export type Database = {
           employee_code?: string | null
           full_name?: string
           id: string
+          must_change_password?: boolean
           position?: string | null
           sl_credits?: number
           updated_at?: string
@@ -477,6 +479,7 @@ export type Database = {
           employee_code?: string | null
           full_name?: string
           id?: string
+          must_change_password?: boolean
           position?: string | null
           sl_credits?: number
           updated_at?: string
