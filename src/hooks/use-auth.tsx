@@ -29,10 +29,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [rolesLoading, setRolesLoading] = useState(true);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
       setUser(s?.user ?? null);
-      if (s?.user) {
+
+      if (event === 'SIGNED_OUT') {
+        setRoles([]);
+        setRolesLoading(false);
+        return;
+      }
+
+      // Only re-fetch roles on fresh sign-in events — not on token refresh or other passive events
+      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && s?.user) {
         setRolesLoading(true);
         setTimeout(() => {
           supabase.from("user_roles").select("role").eq("user_id", s.user.id)
@@ -41,9 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setRolesLoading(false);
             });
         }, 0);
-      } else {
-        setRoles([]);
-        setRolesLoading(false);
       }
     });
 

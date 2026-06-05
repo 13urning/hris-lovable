@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -92,6 +92,7 @@ function PerformanceAdminPage() {
   const [behavioralPatches, setBehavioralPatches] = useState<Record<string, { gh_rating: number | null; gh_comments: string }>>({});
   const [groupHeadNotes, setGroupHeadNotes] = useState("");
   const [expandedEvals, setExpandedEvals] = useState<Set<string>>(new Set());
+  const [ratingFilter, setRatingFilter] = useState<string | null>(null);
 
   const [periodForm, setPeriodForm] = useState({
     title: "", period_type: "quarterly", start_date: "", end_date: "",
@@ -380,6 +381,8 @@ function PerformanceAdminPage() {
     });
   };
 
+  useEffect(() => setRatingFilter(null), [activePeriod?.id]);
+
   if (loading || rolesLoading) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
@@ -402,10 +405,33 @@ function PerformanceAdminPage() {
     );
   }
 
+  // Count by overall_rating (non-null)
+  const ratingCounts = evaluations.reduce<Record<string, number>>((acc, e) => {
+    if (e.overall_rating) {
+      acc[e.overall_rating] = (acc[e.overall_rating] ?? 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  // Count by key statuses
+  const statusCounts = {
+    self_assessed: evaluations.filter((e) => e.status === "self_assessed").length,
+    approved: evaluations.filter((e) => e.status === "approved").length,
+    pending_self_assessment: evaluations.filter((e) => e.status === "pending_self_assessment").length,
+  };
+
+  // Filtered list
+  const filteredEvaluations = ratingFilter
+    ? evaluations.filter((e) =>
+        e.overall_rating === ratingFilter ||
+        e.status === ratingFilter
+      )
+    : evaluations;
+
   const evalsByStatus = {
-    pending: evaluations.filter((e) => e.status === "pending_self_assessment"),
-    self_assessed: evaluations.filter((e) => e.status === "self_assessed"),
-    approved: evaluations.filter((e) => e.status === "approved"),
+    pending: filteredEvaluations.filter((e) => e.status === "pending_self_assessment"),
+    self_assessed: filteredEvaluations.filter((e) => e.status === "self_assessed"),
+    approved: filteredEvaluations.filter((e) => e.status === "approved"),
   };
 
   return (
@@ -490,6 +516,79 @@ function PerformanceAdminPage() {
                 </div>
               ))}
             </div>
+
+            {evaluations.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {/* Rating chips */}
+                {Object.entries(ratingCounts).map(([rating, count]) => (
+                  <button
+                    key={rating}
+                    onClick={() => setRatingFilter(ratingFilter === rating ? null : rating)}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      ratingFilter === rating
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card border-border hover:bg-secondary"
+                    }`}
+                  >
+                    {rating}
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                      ratingFilter === rating ? "bg-primary-foreground/20 text-primary-foreground" : "bg-secondary text-muted-foreground"
+                    }`}>{count}</span>
+                  </button>
+                ))}
+
+                {/* Status chips — only show if count > 0 */}
+                {statusCounts.pending_self_assessment > 0 && (
+                  <button
+                    onClick={() => setRatingFilter(ratingFilter === "pending_self_assessment" ? null : "pending_self_assessment")}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      ratingFilter === "pending_self_assessment"
+                        ? "bg-warning text-warning-foreground border-warning"
+                        : "bg-warning/10 border-warning/30 text-warning-foreground hover:bg-warning/20"
+                    }`}
+                  >
+                    Pending Self-Assessment
+                    <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] font-bold">{statusCounts.pending_self_assessment}</span>
+                  </button>
+                )}
+                {statusCounts.self_assessed > 0 && (
+                  <button
+                    onClick={() => setRatingFilter(ratingFilter === "self_assessed" ? null : "self_assessed")}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      ratingFilter === "self_assessed"
+                        ? "bg-accent text-accent-foreground border-accent"
+                        : "bg-accent/10 border-accent/30 text-accent hover:bg-accent/20"
+                    }`}
+                  >
+                    Awaiting Group Head
+                    <span className="rounded-full bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold">{statusCounts.self_assessed}</span>
+                  </button>
+                )}
+                {statusCounts.approved > 0 && (
+                  <button
+                    onClick={() => setRatingFilter(ratingFilter === "approved" ? null : "approved")}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      ratingFilter === "approved"
+                        ? "bg-success text-white border-success"
+                        : "bg-success/10 border-success/30 text-success hover:bg-success/20"
+                    }`}
+                  >
+                    Approved
+                    <span className="rounded-full bg-success/20 px-1.5 py-0.5 text-[10px] font-bold">{statusCounts.approved}</span>
+                  </button>
+                )}
+
+                {/* Clear filter button — only when a filter is active */}
+                {ratingFilter && (
+                  <button
+                    onClick={() => setRatingFilter(null)}
+                    className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-secondary"
+                  >
+                    Clear filter ×
+                  </button>
+                )}
+              </div>
+            )}
 
             <Tabs defaultValue="self_assessed">
               <TabsList>

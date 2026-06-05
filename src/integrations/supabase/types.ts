@@ -442,7 +442,9 @@ export type Database = {
           full_name: string
           id: string
           position: string | null
+          sl_credits: number
           updated_at: string
+          vl_credits: number
         }
         Insert: {
           created_at?: string
@@ -452,7 +454,9 @@ export type Database = {
           full_name?: string
           id: string
           position?: string | null
+          sl_credits?: number
           updated_at?: string
+          vl_credits?: number
         }
         Update: {
           created_at?: string
@@ -462,7 +466,9 @@ export type Database = {
           full_name?: string
           id?: string
           position?: string | null
+          sl_credits?: number
           updated_at?: string
+          vl_credits?: number
         }
         Relationships: []
       }

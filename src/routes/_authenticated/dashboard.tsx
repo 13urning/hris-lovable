@@ -32,6 +32,35 @@ function Dashboard() {
     enabled: !!user && !!cutoff && !isHR,
   });
 
+  const { data: myOTRequests } = useQuery({
+    queryKey: ["my-ot-requests", user?.id],
+    enabled: !!user && !isHR,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ot_approval_requests")
+        .select("id, work_date, requested_hours, status, step, created_at")
+        .eq("employee_id", user!.id)
+        .order("created_at", { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const { data: myProfile } = useQuery({
+    queryKey: ["my-profile", user?.id],
+    enabled: !!user && !isHR,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("vl_credits, sl_credits")
+        .eq("id", user!.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const { data: myLeaves } = useQuery({
     queryKey: ["my-leaves", user?.id],
     enabled: !!user && !isHR,
@@ -186,9 +215,9 @@ function Dashboard() {
     .sort((a, b) => a.start_date.localeCompare(b.start_date))
     .slice(0, 3);
 
-  // Annual leave entitlements (per regular employee)
-  const VL_ENTITLEMENT = 10;
-  const SL_ENTITLEMENT = 10;
+  // Annual leave entitlements — sourced from profile, fallback to 10
+  const VL_ENTITLEMENT = myProfile?.vl_credits ?? 10;
+  const SL_ENTITLEMENT = myProfile?.sl_credits ?? 10;
   const currentYear = new Date().getFullYear();
   const inCurrentYear = (iso: string) => new Date(iso).getFullYear() === currentYear;
   const usedDaysByType = (type: "VL" | "SL") =>
@@ -218,58 +247,93 @@ function Dashboard() {
       </div>
 
       {!isHR && (
-        <Card className="border-primary/20 bg-gradient-to-br from-card to-secondary/30">
-          <CardContent className="flex flex-col items-center gap-4 py-8">
-            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Today's Attendance</p>
+        <>
+          <Card className="border-primary/20 bg-gradient-to-br from-card to-secondary/30">
+            <CardContent className="flex flex-col items-center gap-4 py-8">
+              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Today's Attendance</p>
 
-            {/* Not clocked in yet */}
-            {!clockedIn && (
-              <Button size="lg" className="h-16 w-48 text-lg font-semibold"
-                onClick={() => setShowShiftPicker(true)}
-                disabled={clockIn.isPending}>
-                <Clock3 className="mr-2 h-5 w-5" /> Clock In
-              </Button>
-            )}
-
-            {/* Clocked in, not out */}
-            {clockedIn && !clockedOut && (
-              <div className="flex flex-col items-center gap-3">
-                <p className="text-sm text-muted-foreground">
-                  In at <span className="font-semibold text-foreground">{todayEntry!.time_in}</span>
-                  {' · '}{todayEntry!.shift_label} shift
-                </p>
-                <Button size="lg" variant="destructive" className="h-16 w-48 text-lg font-semibold"
-                  onClick={() => clockOut.mutate()}
-                  disabled={clockOut.isPending}>
-                  <Clock3 className="mr-2 h-5 w-5" /> Clock Out
+              {/* Not clocked in yet */}
+              {!clockedIn && (
+                <Button size="lg" className="h-16 w-48 text-lg font-semibold"
+                  onClick={() => setShowShiftPicker(true)}
+                  disabled={clockIn.isPending}>
+                  <Clock3 className="mr-2 h-5 w-5" /> Clock In
                 </Button>
-              </div>
-            )}
+              )}
 
-            {/* Done for the day */}
-            {clockedIn && clockedOut && (
-              <div className="flex flex-col items-center gap-2 text-center">
-                <p className="text-sm font-medium">
-                  {todayEntry!.time_in} → {todayEntry!.time_out}
-                  {' · '}<span className="font-semibold">{Number(todayEntry!.hours_worked).toFixed(2)} hrs</span>
-                  {' · '}{todayEntry!.shift_label} shift
-                </p>
-                {todayEntry!.is_undertime && (
-                  <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning-foreground">
-                    <AlertCircle className="h-4 w-4" />
-                    Undertime — {todayEntry!.undertime_minutes} min short
-                  </div>
-                )}
-                {!todayEntry!.is_undertime && Number(todayEntry!.hours_worked) >= 10 && (
-                  <div className="flex items-center gap-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-1.5 text-sm">
-                    <span>You worked {Number(todayEntry!.hours_worked).toFixed(2)} hrs — consider filing OT</span>
-                    <Link to="/ot-approvals" className="underline underline-offset-2 font-medium">File OT →</Link>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              {/* Clocked in, not out */}
+              {clockedIn && !clockedOut && (
+                <div className="flex flex-col items-center gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    In at <span className="font-semibold text-foreground">{todayEntry!.time_in}</span>
+                    {' · '}{todayEntry!.shift_label} shift
+                  </p>
+                  <Button size="lg" variant="destructive" className="h-16 w-48 text-lg font-semibold"
+                    onClick={() => clockOut.mutate()}
+                    disabled={clockOut.isPending}>
+                    <Clock3 className="mr-2 h-5 w-5" /> Clock Out
+                  </Button>
+                </div>
+              )}
+
+              {/* Done for the day */}
+              {clockedIn && clockedOut && (
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <p className="text-sm font-medium">
+                    {todayEntry!.time_in} → {todayEntry!.time_out}
+                    {' · '}<span className="font-semibold">{Number(todayEntry!.hours_worked).toFixed(2)} hrs</span>
+                    {' · '}{todayEntry!.shift_label} shift
+                  </p>
+                  {todayEntry!.is_undertime && (
+                    <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning-foreground">
+                      <AlertCircle className="h-4 w-4" />
+                      Undertime — {todayEntry!.undertime_minutes} min short
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {(myOTRequests?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="font-display text-lg flex items-center gap-2">
+                  <Clock3 className="h-4 w-4 text-accent" /> My OT Requests
+                </CardTitle>
+                <Link to="/ot-approvals" className="text-xs text-accent underline underline-offset-2">View all →</Link>
+              </CardHeader>
+              <CardContent className="p-0">
+                <table className="w-full text-sm">
+                  <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Date</th>
+                      <th className="px-4 py-2 text-right">Hrs Requested</th>
+                      <th className="px-4 py-2 text-left">Step</th>
+                      <th className="px-4 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myOTRequests!.map((r) => (
+                      <tr key={r.id} className="border-t">
+                        <td className="px-4 py-2">{formatDate(r.work_date)}</td>
+                        <td className="px-4 py-2 text-right">{Number(r.requested_hours).toFixed(2)}</td>
+                        <td className="px-4 py-2 text-xs uppercase text-muted-foreground">{r.step === 'is' ? 'IS Review' : 'Dept Head Review'}</td>
+                        <td className="px-4 py-2">
+                          <span className={
+                            r.status === 'approved' ? 'rounded bg-success/15 px-2 py-0.5 text-xs text-success' :
+                            r.status === 'rejected' ? 'rounded bg-destructive/15 px-2 py-0.5 text-xs text-destructive' :
+                            'rounded bg-warning/20 px-2 py-0.5 text-xs text-warning-foreground'
+                          }>{r.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       <Card className="overflow-hidden border-primary/10 bg-gradient-to-br from-card via-card to-secondary/40">
@@ -389,6 +453,7 @@ function Dashboard() {
                     <td className="px-4 py-2">
                       {d.is_absent ? <span className="text-destructive">Absent</span>
                         : d.is_leave ? <span className="text-accent">Leave</span>
+                        : (d as { is_undertime?: boolean }).is_undertime ? <span className="text-warning-foreground">Undertime</span>
                         : <span className="text-muted-foreground">Present</span>}
                     </td>
                   </tr>

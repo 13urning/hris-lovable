@@ -247,16 +247,13 @@ function AttendancePage() {
                           )}
                         </td>
                         <td className="px-4 py-2">
-                          {d.is_absent ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-destructive">
-                              <AlertTriangle className="h-3 w-3" />
-                              Absent
-                            </span>
-                          ) : d.is_leave ? (
-                            <span className="text-xs text-muted-foreground">{flag}</span>
-                          ) : (
-                            <span className="text-xs text-success">Present</span>
-                          )}
+                          {d.is_absent
+                            ? <span className="flex items-center gap-1 text-destructive"><AlertTriangle className="h-3 w-3" />Absent</span>
+                            : d.is_leave
+                            ? <span className="text-accent">Leave ({d.leave_type ?? ""})</span>
+                            : row.is_undertime
+                            ? <span className="text-warning-foreground font-medium">Undertime</span>
+                            : <span className="text-muted-foreground">Present</span>}
                         </td>
                         <td className="px-4 py-2 text-right">
                           {showFileOt && (

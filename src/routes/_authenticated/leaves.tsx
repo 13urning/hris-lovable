@@ -37,6 +37,7 @@ const LEAVE_TYPES = [
   { value: "BL", label: "Bereavement Leave" },
   { value: "ML", label: "Maternity Leave" },
   { value: "PL", label: "Paternity Leave" },
+  { value: "WP", label: "Without Pay" },
   { value: "Other", label: "Other" },
 ];
 
@@ -75,6 +76,7 @@ const LEAVE_TONE: Record<string, string> = {
   BL: "bg-muted text-muted-foreground border-border",
   ML: "bg-success/15 text-success border-success/30",
   PL: "bg-success/15 text-success border-success/30",
+  WP: "bg-muted text-muted-foreground border-border",
   Other: "bg-secondary text-secondary-foreground border-border",
 };
 
