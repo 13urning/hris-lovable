@@ -46,7 +46,8 @@
       "Bash(npx tsc *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Regor\\\\Documents\\\\Claude Projects\\\\hris-lovable\" -Force)",
       "Bash(Select-Object Name, PSIsContainer)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "mcp__2499252b-f9f9-44b2-aec4-7a76ef2e512b__deploy_edge_function"
     ]
   }
 }
