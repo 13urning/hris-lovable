@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate, Link } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -168,7 +168,6 @@ function AttendancePage() {
                     <th className="px-4 py-2 text-right">OT hrs</th>
                     <th className="px-4 py-2 text-left">OT Status</th>
                     <th className="px-4 py-2 text-left">Flag</th>
-                    <th className="px-4 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -183,10 +182,6 @@ function AttendancePage() {
                     const isUndertime = !!row.is_undertime;
                     const undertimeMins = Number(row.undertime_minutes ?? 0);
                     const otHours = Number(d.overtime_hours ?? 0);
-                    const showFileOt =
-                      otHours > 0 &&
-                      row.ot_status !== "approved" &&
-                      row.ot_status !== "rejected";
                     const flag = d.is_absent
                       ? "Absent"
                       : d.is_leave
@@ -254,16 +249,6 @@ function AttendancePage() {
                             : row.is_undertime
                             ? <span className="text-warning-foreground font-medium">Undertime</span>
                             : <span className="text-muted-foreground">Present</span>}
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          {showFileOt && (
-                            <Link
-                              to="/ot-approvals"
-                              className="inline-flex items-center rounded border border-border px-2 py-0.5 text-xs font-medium text-foreground transition-colors hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            >
-                              File OT
-                            </Link>
-                          )}
                         </td>
                       </tr>
                     );

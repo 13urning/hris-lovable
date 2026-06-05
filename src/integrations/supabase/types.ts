@@ -298,48 +298,57 @@ export type Database = {
           dh_approver_id: string | null
           dh_decided_at: string | null
           dh_notes: string | null
-          dtr_id: string
+          dtr_id: string | null
           employee_id: string
           id: string
           is_approver_id: string | null
           is_decided_at: string | null
           is_notes: string | null
+          pre_approved_id: string | null
+          request_type: string
           requested_hours: number
           status: string
           step: string
-          work_date: string
+          target_month: string | null
+          work_date: string | null
         }
         Insert: {
           created_at?: string
           dh_approver_id?: string | null
           dh_decided_at?: string | null
           dh_notes?: string | null
-          dtr_id: string
+          dtr_id?: string | null
           employee_id: string
           id?: string
           is_approver_id?: string | null
           is_decided_at?: string | null
           is_notes?: string | null
+          pre_approved_id?: string | null
+          request_type?: string
           requested_hours: number
           status?: string
           step?: string
-          work_date: string
+          target_month?: string | null
+          work_date?: string | null
         }
         Update: {
           created_at?: string
           dh_approver_id?: string | null
           dh_decided_at?: string | null
           dh_notes?: string | null
-          dtr_id?: string
+          dtr_id?: string | null
           employee_id?: string
           id?: string
           is_approver_id?: string | null
           is_decided_at?: string | null
           is_notes?: string | null
+          pre_approved_id?: string | null
+          request_type?: string
           requested_hours?: number
           status?: string
           step?: string
-          work_date?: string
+          target_month?: string | null
+          work_date?: string | null
         }
         Relationships: [
           {

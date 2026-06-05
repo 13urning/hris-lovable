@@ -20,6 +20,13 @@ function Dashboard() {
 
   const today = new Date().toISOString().slice(0, 10);
 
+  const firstOfMonth = today.slice(0, 7) + '-01'; // YYYY-MM-01
+  const firstOfNextMonth = (() => {
+    const d = new Date(firstOfMonth);
+    d.setMonth(d.getMonth() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
   const { data: cutoff } = useQuery({ queryKey: ["cutoff", "current"], queryFn: getCurrentCutoff, enabled: !isHR });
   const { data: dtrs } = useQuery({
     queryKey: ["dtrs", user?.id, cutoff?.id],
@@ -32,20 +39,42 @@ function Dashboard() {
     enabled: !!user && !!cutoff && !isHR,
   });
 
-  const { data: myOTRequests } = useQuery({
-    queryKey: ["my-ot-requests", user?.id],
+  const { data: otBudgets } = useQuery({
+    queryKey: ['ot-budget', user?.id, firstOfMonth],
     enabled: !!user && !isHR,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select("id, work_date, requested_hours, status, step, created_at")
-        .eq("employee_id", user!.id)
-        .order("created_at", { ascending: false })
-        .limit(5);
+        .from('ot_approval_requests')
+        .select('id, requested_hours, target_month, status')
+        .eq('employee_id', user!.id)
+        .eq('request_type', 'pre_approved')
+        .eq('status', 'approved')
+        .eq('target_month', firstOfMonth);
       if (error) throw error;
       return data ?? [];
     },
   });
+
+  const { data: otFiled } = useQuery({
+    queryKey: ['ot-filed', user?.id, firstOfMonth],
+    enabled: !!user && !isHR,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ot_approval_requests')
+        .select('id, requested_hours, pre_approved_id')
+        .eq('employee_id', user!.id)
+        .eq('request_type', 'actual');
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const totalApprovedOT = (otBudgets ?? []).reduce((s, b) => s + Number(b.requested_hours), 0);
+  const budgetIds = new Set((otBudgets ?? []).map(b => b.id));
+  const totalFiledOT = (otFiled ?? [])
+    .filter(f => f.pre_approved_id && budgetIds.has(f.pre_approved_id))
+    .reduce((s, f) => s + Number(f.requested_hours), 0);
+  const remainingOT = Math.max(0, totalApprovedOT - totalFiledOT);
 
   const { data: myProfile } = useQuery({
     queryKey: ["my-profile", user?.id],
@@ -295,43 +324,46 @@ function Dashboard() {
             </CardContent>
           </Card>
 
-          {(myOTRequests?.length ?? 0) > 0 && (
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
+          {!isHR && totalApprovedOT > 0 && (
+            <Card className="border-accent/20">
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="font-display text-lg flex items-center gap-2">
-                  <Clock3 className="h-4 w-4 text-accent" /> My OT Requests
+                  <Clock3 className="h-4 w-4 text-accent" /> OT Budget — {new Date(firstOfMonth + 'T00:00:00').toLocaleString('default', { month: 'long', year: 'numeric' })}
                 </CardTitle>
                 <Link to="/ot-approvals" className="text-xs text-accent underline underline-offset-2">View all →</Link>
               </CardHeader>
-              <CardContent className="p-0">
-                <table className="w-full text-sm">
-                  <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-right">Hrs Requested</th>
-                      <th className="px-4 py-2 text-left">Step</th>
-                      <th className="px-4 py-2 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {myOTRequests!.map((r) => (
-                      <tr key={r.id} className="border-t">
-                        <td className="px-4 py-2">{formatDate(r.work_date)}</td>
-                        <td className="px-4 py-2 text-right">{Number(r.requested_hours).toFixed(2)}</td>
-                        <td className="px-4 py-2 text-xs uppercase text-muted-foreground">{r.step === 'is' ? 'IS Review' : 'Dept Head Review'}</td>
-                        <td className="px-4 py-2">
-                          <span className={
-                            r.status === 'approved' ? 'rounded bg-success/15 px-2 py-0.5 text-xs text-success' :
-                            r.status === 'rejected' ? 'rounded bg-destructive/15 px-2 py-0.5 text-xs text-destructive' :
-                            'rounded bg-warning/20 px-2 py-0.5 text-xs text-warning-foreground'
-                          }>{r.status}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-md border bg-background/60 p-3 text-center">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Approved</p>
+                    <p className="mt-1 font-display text-2xl">{totalApprovedOT.toFixed(1)}<span className="text-sm text-muted-foreground"> hrs</span></p>
+                  </div>
+                  <div className="rounded-md border bg-background/60 p-3 text-center">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Used</p>
+                    <p className="mt-1 font-display text-2xl">{totalFiledOT.toFixed(1)}<span className="text-sm text-muted-foreground"> hrs</span></p>
+                  </div>
+                  <div className={`rounded-md border p-3 text-center ${remainingOT <= 0 ? 'border-destructive/30 bg-destructive/5' : 'border-success/30 bg-success/5'}`}>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Remaining</p>
+                    <p className={`mt-1 font-display text-2xl ${remainingOT <= 0 ? 'text-destructive' : 'text-success'}`}>
+                      {remainingOT.toFixed(1)}<span className="text-sm text-muted-foreground"> hrs</span>
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    className="h-full rounded-full bg-accent transition-all"
+                    style={{ width: `${Math.min(100, totalApprovedOT > 0 ? (totalFiledOT / totalApprovedOT) * 100 : 0)}%` }}
+                  />
+                </div>
               </CardContent>
             </Card>
+          )}
+
+          {!isHR && totalApprovedOT === 0 && (
+            <div className="flex items-center justify-between rounded-md border border-border/50 bg-secondary/30 px-4 py-2.5 text-sm text-muted-foreground">
+              <span>No approved OT budget for this month.</span>
+              <Link to="/ot-approvals" className="text-xs text-accent underline underline-offset-2">Request OT →</Link>
+            </div>
           )}
         </>
       )}
