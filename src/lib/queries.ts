@@ -1,78 +1,32 @@
 import { supabase } from "@/integrations/supabase/client";
 
-export async function getCurrentCutoff() {
-  const today = new Date().toISOString().slice(0, 10);
+/** Fetch all DTRs for an employee in a given month (YYYY-MM). */
+export async function getMyDTRsByMonth(employeeId: string, yearMonth: string) {
+  const [y, m] = yearMonth.split("-").map(Number);
+  const startDate = `${yearMonth}-01`;
+  const lastDay = new Date(y, m, 0).getDate();
+  const endDate = `${yearMonth}-${String(lastDay).padStart(2, "0")}`;
   const { data, error } = await supabase
-    .from("payroll_cutoffs")
-    .select("*")
-    .lte("start_date", today)
-    .gte("end_date", today)
-    .order("start_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
-}
-
-export async function getAllCutoffs() {
-  const { data, error } = await supabase
-    .from("payroll_cutoffs")
-    .select("*")
-    .order("start_date", { ascending: false });
-  if (error) throw error;
-  return data ?? [];
-}
-
-export async function getMyDTRs(employeeId: string, cutoffId: string | null) {
-  let q = supabase
     .from("daily_time_reports")
     .select("*")
     .eq("employee_id", employeeId)
-    .order("work_date", { ascending: false });
-  if (cutoffId) q = q.eq("cutoff_id", cutoffId);
-  const { data, error } = await q;
+    .gte("work_date", startDate)
+    .lte("work_date", endDate)
+    .order("work_date", { ascending: true });
   if (error) throw error;
   return data ?? [];
 }
 
-export async function getMySubmission(employeeId: string, cutoffId: string) {
+/** Fetch the most recent N days of DTRs for an employee (used on the dashboard). */
+export async function getRecentDTRs(employeeId: string, days = 14) {
+  const since = new Date();
+  since.setDate(since.getDate() - days);
   const { data, error } = await supabase
-    .from("dtr_cutoff_submissions")
+    .from("daily_time_reports")
     .select("*")
     .eq("employee_id", employeeId)
-    .eq("cutoff_id", cutoffId)
-    .maybeSingle();
+    .gte("work_date", since.toISOString().slice(0, 10))
+    .order("work_date", { ascending: false });
   if (error) throw error;
-  return data;
-}
-
-export type SubmissionWithRelations = {
-  id: string;
-  employee_id: string;
-  cutoff_id: string;
-  approval_status: string;
-  submitted_at: string | null;
-  total_days_submitted: number;
-  total_hours: number;
-  late_count: number;
-  absent_count: number;
-  overtime_hours: number;
-  leave_days: number;
-  missing_dtr_count: number;
-  approved_at: string | null;
-  rejection_reason: string | null;
-  correction_notes: string | null;
-  profile: { full_name: string; department: string; email: string | null } | null;
-  cutoff: { cutoff_name: string; start_date: string; end_date: string; payout_date: string | null } | null;
-};
-
-export async function getAllSubmissions(): Promise<SubmissionWithRelations[]> {
-  const { data, error } = await supabase
-    .from("dtr_cutoff_submissions")
-    .select(`*,
-      profile:profiles!subs_employee_profile_fk(full_name, department, email),
-      cutoff:payroll_cutoffs(cutoff_name, start_date, end_date, payout_date)`)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data ?? []) as unknown as SubmissionWithRelations[];
+  return data ?? [];
 }

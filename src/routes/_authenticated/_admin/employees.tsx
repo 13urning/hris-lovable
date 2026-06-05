@@ -13,7 +13,7 @@ export const Route = createFileRoute("/_authenticated/_admin/employees")({ compo
 
 type Row = {
   id: string; full_name: string; email: string | null; department: string;
-  employee_code: string | null; position: string | null;
+  employee_code: string | null; position: string | null; company: string | null;
   vl_credits: number | null; sl_credits: number | null;
   roles: ("employee"|"hr"|"admin")[];
 };
@@ -37,7 +37,7 @@ function EmployeesPage() {
   });
 
   const updateProfile = useMutation({
-    mutationFn: async ({ id, field, value }: { id: string; field: "full_name"|"department"|"employee_code"|"position"|"vl_credits"|"sl_credits"; value: string | number }) => {
+    mutationFn: async ({ id, field, value }: { id: string; field: "full_name"|"department"|"employee_code"|"position"|"company"|"vl_credits"|"sl_credits"; value: string | number }) => {
       const { error } = await supabase
         .from("profiles")
         .update({ [field]: value } as never)
@@ -86,6 +86,7 @@ function EmployeesPage() {
                 <th className="px-3 py-2 text-left">Name</th>
                 <th className="px-3 py-2 text-left">Email</th>
                 <th className="px-3 py-2 text-left">Code</th>
+                <th className="px-3 py-2 text-left">Company</th>
                 <th className="px-3 py-2 text-left">Department</th>
                 <th className="px-3 py-2 text-left">Position</th>
                 <th className="px-3 py-2 text-left">VL Credits</th>
@@ -107,6 +108,11 @@ function EmployeesPage() {
                     <td className="px-3 py-2">
                       <Input defaultValue={r.employee_code ?? ""} className="h-8 w-28" onBlur={(e) => e.target.value !== (r.employee_code ?? "") &&
                         updateProfile.mutate({ id: r.id, field: "employee_code", value: e.target.value })} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <Input defaultValue={r.company ?? ""} className="h-8" placeholder="—"
+                        onBlur={(e) => e.target.value !== (r.company ?? "") &&
+                          updateProfile.mutate({ id: r.id, field: "company", value: e.target.value })} />
                     </td>
                     <td className="px-3 py-2">
                       <Input defaultValue={r.department} className="h-8" onBlur={(e) => e.target.value !== r.department &&

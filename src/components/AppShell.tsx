@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
-  LogOut, Clock3, LayoutDashboard, Users, CalendarRange, ClipboardCheck,
+  LogOut, Clock3, LayoutDashboard, Users,
   Plane, BarChart3, Target, Menu, GitBranch, Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -70,10 +70,7 @@ export function AppShell() {
       {drawerItem("/dashboard", "Dashboard", LayoutDashboard)}
 
       {sectionLabel("Attendance")}
-      {isHR && drawerItem("/cutoff-approval", "Cut Off Approval", ClipboardCheck)}
-      {isHR && drawerItem("/cutoffs", "Cutoffs", CalendarRange)}
-      {/* Regular employees see their own DTR in this section */}
-      {!isElevated && drawerItem("/dtr", "Attendance", Clock3)}
+      {drawerItem("/dtr", "Attendance", Clock3)}
 
       {sectionLabel("People")}
       {isHR && drawerItem("/employees", "Employees", Users)}
@@ -123,6 +120,14 @@ export function AppShell() {
               {navItem("/dtr", "Attendance", Clock3)}
               {navItem("/leaves", "Leaves", Plane)}
               {navItem("/performance", "Performance", BarChart3)}
+              {navItem("/ot-approvals", "OT Approvals", Timer)}
+            </nav>
+          )}
+          {/* Center: horizontal nav for HR/admin, md+ only */}
+          {isElevated && (
+            <nav className="hidden items-center gap-1 md:flex">
+              {navItem("/dashboard", "Dashboard", LayoutDashboard)}
+              {navItem("/dtr", "Attendance", Clock3)}
               {navItem("/ot-approvals", "OT Approvals", Timer)}
             </nav>
           )}

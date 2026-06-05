@@ -13,5 +13,5 @@ function Index() {
       </div>
     );
   }
-  return <Navigate to={isAuthenticated ? (isHR ? "/cutoff-approval" : "/dashboard") : "/login"} />;
+  return <Navigate to={isAuthenticated ? "/dashboard" : "/login"} />;
 }

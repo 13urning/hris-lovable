@@ -32,7 +32,21 @@
       "Bash(find . -maxdepth 4 -name \"output\" -type d -not -path \"*/node_modules/*\")",
       "Bash(ls dist *)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git config *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git remote *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(bun add *)",
+      "Bash(bun.cmd add *)",
+      "Bash(powershell -Command \"cd 'C:\\\\Users\\\\Regor\\\\Documents\\\\Claude Projects\\\\hris-lovable'; bun add @xyflow/react\")",
+      "Bash(vercel ls *)",
+      "Bash(git reset *)",
+      "Bash(npx tsc *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Regor\\\\Documents\\\\Claude Projects\\\\hris-lovable\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(git rm *)"
     ]
   }
 }

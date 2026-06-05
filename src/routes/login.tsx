@@ -18,7 +18,7 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
 
-  if (!loading && isAuthenticated) return <Navigate to={isHR ? "/cutoff-approval" : "/dashboard"} />;
+  if (!loading && isAuthenticated) return <Navigate to="/dashboard" />;
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true);
@@ -42,7 +42,7 @@ function LoginPage() {
         <img src={tidalLogo} alt="Tidal Solutions" className="mx-auto mb-8 h-10 w-auto" />
           <h2 className="font-display text-3xl">Sign in</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Access your DTR and cutoff submissions.
+            Monitor attendance, leaves, OT, and performance.
           </p>
           <Tabs defaultValue="signin" className="mt-8">
             <TabsList className="grid grid-cols-2">
