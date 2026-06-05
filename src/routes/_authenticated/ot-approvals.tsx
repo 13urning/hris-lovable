@@ -263,6 +263,12 @@ function OTApprovalsPage() {
     ? Math.max(0, selectedBudget.requested_hours - usedForSelected)
     : 0;
 
+  const nextMonthIso = nextMonthValue() + "-01";
+  const nextMonthBudget = useMemo(
+    () => (myBudgets ?? []).find((b) => b.target_month === nextMonthIso) ?? null,
+    [myBudgets, nextMonthIso],
+  );
+
   // ── Section 3: Pending IS approvals ─────────────────────────────────────
   const { data: isRequests, isLoading: isLoading_ } = useQuery({
     queryKey: ["ot-requests-is", user?.id],
@@ -520,14 +526,97 @@ function OTApprovalsPage() {
         </div>
       </div>
 
-      {/* ── Section 1: Pre-Approved OT Budgets ──────────────────────────── */}
+      {/* ── New Section: Pre-Approved OT for Next Month ─────────────────── */}
+      {!isHR && (
+        <Card className="border-primary/30">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="font-display text-2xl flex items-center gap-2">
+                <CalendarClock className="h-5 w-5 text-primary" />
+                Pre-Approved OT — {formatMonth(nextMonthIso)}
+              </CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Request approval for OT hours to be used next month. Once approved,
+                these become your OT allocation and deduct as you log actual hours.
+              </p>
+            </div>
+            {!nextMonthBudget && (
+              <Button
+                onClick={() => {
+                  setBudgetForm({ month: nextMonthValue(), requested_hours: 8, notes: "" });
+                  setBudgetDialogOpen(true);
+                }}
+              >
+                <Send className="mr-2 h-4 w-4" /> Request OT Hours
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent>
+            {myBudgetsLoading ? (
+              <div className="text-sm text-muted-foreground">Loading…</div>
+            ) : nextMonthBudget ? (
+              <div className="flex flex-wrap items-center gap-6">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Requested</p>
+                  <p className="text-2xl font-bold tabular-nums">{nextMonthBudget.requested_hours}h</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
+                  <div className="mt-0.5"><StatusBadge status={nextMonthBudget.status} /></div>
+                </div>
+                {nextMonthBudget.status === "pending" && (
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Awaiting</p>
+                    <div className="mt-0.5"><StepBadge step={nextMonthBudget.step} /></div>
+                  </div>
+                )}
+                {nextMonthBudget.status === "approved" && (() => {
+                  const used = usedHoursById[nextMonthBudget.id] ?? 0;
+                  const remaining = Math.max(0, nextMonthBudget.requested_hours - used);
+                  return (
+                    <>
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Used</p>
+                        <p className="text-lg font-semibold tabular-nums text-muted-foreground">{used}h</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Remaining</p>
+                        <p className={`text-lg font-semibold tabular-nums ${remaining === 0 ? "text-destructive" : "text-success"}`}>
+                          {remaining}h
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
+                {nextMonthBudget.status === "rejected" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setBudgetForm({ month: nextMonthValue(), requested_hours: 8, notes: "" });
+                      setBudgetDialogOpen(true);
+                    }}
+                  >
+                    <Send className="mr-2 h-4 w-4" /> Request Again
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No OT budget requested for {formatMonth(nextMonthIso)} yet.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Section 1: Pre-Approved OT Budget History ───────────────────── */}
       {!isHR && (
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
             <CardTitle className="font-display text-2xl flex items-center gap-2">
-              <Clock3 className="h-5 w-5" /> Pre-Approved OT Budgets
+              <Clock3 className="h-5 w-5" /> OT Budget History
             </CardTitle>
-            <Button onClick={() => setBudgetDialogOpen(true)}>
+            <Button variant="outline" onClick={() => setBudgetDialogOpen(true)}>
               <Send className="mr-2 h-4 w-4" /> Request OT Budget
             </Button>
           </CardHeader>
@@ -541,38 +630,45 @@ function OTApprovalsPage() {
                 <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 text-left">Month</th>
-                    <th className="px-4 py-2 text-right">Hours Requested</th>
+                    <th className="px-4 py-2 text-right">Approved</th>
+                    <th className="px-4 py-2 text-right">Used</th>
+                    <th className="px-4 py-2 text-right">Remaining</th>
                     <th className="px-4 py-2 text-left">Step</th>
                     <th className="px-4 py-2 text-left">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {myBudgets.map((r) => (
-                    <tr key={r.id} className="border-t">
-                      <td className="px-4 py-2 font-medium">
-                        {formatMonth(r.target_month)}
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        {r.requested_hours}h
-                      </td>
-                      <td className="px-4 py-2">
-                        {r.status === "pending" ? (
-                          <StepBadge step={r.step} />
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-4 py-2">
-                        <StatusBadge status={r.status} />
-                      </td>
-                    </tr>
-                  ))}
+                  {myBudgets.map((r) => {
+                    const used = r.status === "approved" ? (usedHoursById[r.id] ?? 0) : null;
+                    const remaining = used !== null ? Math.max(0, r.requested_hours - used) : null;
+                    return (
+                      <tr key={r.id} className="border-t">
+                        <td className="px-4 py-2 font-medium">{formatMonth(r.target_month)}</td>
+                        <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">
+                          {used !== null ? `${used}h` : "—"}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          {remaining !== null ? (
+                            <span className={remaining === 0 ? "text-destructive font-medium" : "text-success font-medium"}>
+                              {remaining}h
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td className="px-4 py-2">
+                          {r.status === "pending" ? <StepBadge step={r.step} /> : "—"}
+                        </td>
+                        <td className="px-4 py-2">
+                          <StatusBadge status={r.status} />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             ) : (
               <div className="px-6 py-10 text-center text-sm text-muted-foreground">
-                No OT budget requests yet. Click "Request OT Budget" to get
-                started.
+                No OT budget requests yet. Click "Request OT Budget" to get started.
               </div>
             )}
           </CardContent>

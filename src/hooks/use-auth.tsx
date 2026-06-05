@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -10,6 +10,7 @@ type AuthState = {
   roles: AppRole[];
   loading: boolean;
   rolesLoading: boolean;
+  rolesInitialized: boolean;
   isAuthenticated: boolean;
   isHR: boolean;
   isAdmin: boolean;
@@ -27,6 +28,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [rolesLoading, setRolesLoading] = useState(true);
+  const [rolesInitialized, setRolesInitialized] = useState(false);
+  // Ref so the onAuthStateChange closure can read the live value without re-subscribing
+  const rolesInitializedRef = useRef(false);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
@@ -39,14 +43,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Only re-fetch roles on fresh sign-in events — not on token refresh or other passive events
       if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && s?.user) {
-        setRolesLoading(true);
+        // Only show the loading indicator during the very first role fetch.
+        // On subsequent tab-refocus SIGNED_IN events the roles are already known,
+        // so we silently refresh them in the background without flipping rolesLoading.
+        if (!rolesInitializedRef.current) setRolesLoading(true);
         setTimeout(() => {
           supabase.from("user_roles").select("role").eq("user_id", s.user.id)
             .then(({ data }) => {
               setRoles((data ?? []).map((r) => r.role as AppRole));
               setRolesLoading(false);
+              rolesInitializedRef.current = true;
+              setRolesInitialized(true);
             });
         }, 0);
       }
@@ -61,9 +69,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .then(({ data }) => {
             setRoles((data ?? []).map((r) => r.role as AppRole));
             setRolesLoading(false);
+            rolesInitializedRef.current = true;
+            setRolesInitialized(true);
           });
       } else {
         setRolesLoading(false);
+        rolesInitializedRef.current = true;
+        setRolesInitialized(true);
       }
       setLoading(false);
     });
@@ -90,7 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => { await supabase.auth.signOut(); };
 
   const value: AuthState = {
-    user, session, roles, loading, rolesLoading,
+    user, session, roles, loading, rolesLoading, rolesInitialized,
     isAuthenticated: !!user,
     isHR: roles.includes("hr") || roles.includes("admin"),
     isAdmin: roles.includes("admin"),

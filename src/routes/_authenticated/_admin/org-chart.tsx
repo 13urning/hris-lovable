@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -127,7 +127,13 @@ function OrgChartPage() {
   });
 
   // ── Hydrate React Flow state once remote data is ready ──────────────────
+  // Use a ref so this only ever runs once — if orgNodes refetches (e.g. after
+  // a background token refresh causes a component remount), we do NOT reset
+  // the canvas and lose unsaved work.
+  const isHydrated = useRef(false);
+
   useEffect(() => {
+    if (isHydrated.current) return;
     if (!orgNodes.length || !profiles.length) return;
 
     const profileMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
@@ -159,6 +165,7 @@ function OrgChartPage() {
 
     setNodes(initialNodes);
     setEdges(initialEdges);
+    isHydrated.current = true;
   }, [orgNodes, profiles, setNodes, setEdges]);
 
   // ── Unsaved-changes tracking ─────────────────────────────────────────────

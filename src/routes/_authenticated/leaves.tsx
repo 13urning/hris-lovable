@@ -37,7 +37,7 @@ const LEAVE_TYPES = [
   { value: "BL", label: "Bereavement Leave" },
   { value: "ML", label: "Maternity Leave" },
   { value: "PL", label: "Paternity Leave" },
-  { value: "WP", label: "Without Pay" },
+  { value: "WP", label: "Leave without Pay" },
   { value: "Other", label: "Other" },
 ];
 
