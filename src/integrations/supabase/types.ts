@@ -454,8 +454,10 @@ export type Database = {
           must_change_password: boolean
           position: string | null
           sl_credits: number
+          sl_remaining: number | null
           updated_at: string
           vl_credits: number
+          vl_remaining: number | null
         }
         Insert: {
           created_at?: string
@@ -468,8 +470,10 @@ export type Database = {
           must_change_password?: boolean
           position?: string | null
           sl_credits?: number
+          sl_remaining?: number | null
           updated_at?: string
           vl_credits?: number
+          vl_remaining?: number | null
         }
         Update: {
           created_at?: string
@@ -482,8 +486,10 @@ export type Database = {
           must_change_password?: boolean
           position?: string | null
           sl_credits?: number
+          sl_remaining?: number | null
           updated_at?: string
           vl_credits?: number
+          vl_remaining?: number | null
         }
         Relationships: []
       }

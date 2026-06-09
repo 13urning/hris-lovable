@@ -22,6 +22,7 @@ type Row = {
   id: string; full_name: string; email: string | null; department: string;
   employee_code: string | null; position: string | null; company: string | null;
   vl_credits: number | null; sl_credits: number | null;
+  vl_remaining: number | null; sl_remaining: number | null;
   roles: ("employee" | "hr" | "admin")[];
   vl_used: number;
   sl_used: number;
@@ -205,16 +206,14 @@ function EmployeesPage() {
     mutationFn: async ({ row, edits }: { row: Row; edits: Record<string, string | number> }) => {
       const patches: Record<string, string | number> = {};
       for (const [field, value] of Object.entries(edits)) {
-        if (field === "vl_remaining") {
-          // Remaining takes precedence — back-calculate total
-          patches.vl_credits = Number(value) + row.vl_used;
-        } else if (field === "sl_remaining") {
-          patches.sl_credits = Number(value) + row.sl_used;
-        } else if (field === "vl_total") {
-          // Only apply total if remaining wasn't also explicitly set
-          if (!edits.vl_remaining) patches.vl_credits = Number(value);
+        if (field === "vl_total") {
+          patches.vl_credits = Number(value);
         } else if (field === "sl_total") {
-          if (!edits.sl_remaining) patches.sl_credits = Number(value);
+          patches.sl_credits = Number(value);
+        } else if (field === "vl_remaining") {
+          patches.vl_remaining = Number(value);
+        } else if (field === "sl_remaining") {
+          patches.sl_remaining = Number(value);
         } else {
           patches[field] = value;
         }
@@ -437,7 +436,7 @@ function EmployeesPage() {
                         onChange={(e) => setEdit(r.id, "vl_total", e.target.value)}
                       />
                     </td>
-                    {/* VL Remaining — editable; reflects pending total if total was edited */}
+                    {/* VL Remaining — stored independently, editable */}
                     <td className="px-3 py-2">
                       <input
                         type="number"
@@ -447,7 +446,7 @@ function EmployeesPage() {
                         value={
                           pendingEdits[r.id]?.vl_remaining !== undefined
                             ? Number(pendingEdits[r.id].vl_remaining)
-                            : effectiveVLTotal - r.vl_used
+                            : (r.vl_remaining ?? effectiveVLTotal)
                         }
                         onChange={(e) => setEdit(r.id, "vl_remaining", e.target.value)}
                       />
@@ -463,7 +462,7 @@ function EmployeesPage() {
                         onChange={(e) => setEdit(r.id, "sl_total", e.target.value)}
                       />
                     </td>
-                    {/* SL Remaining — editable; reflects pending total if total was edited */}
+                    {/* SL Remaining — stored independently, editable */}
                     <td className="px-3 py-2">
                       <input
                         type="number"
@@ -473,7 +472,7 @@ function EmployeesPage() {
                         value={
                           pendingEdits[r.id]?.sl_remaining !== undefined
                             ? Number(pendingEdits[r.id].sl_remaining)
-                            : effectiveSLTotal - r.sl_used
+                            : (r.sl_remaining ?? effectiveSLTotal)
                         }
                         onChange={(e) => setEdit(r.id, "sl_remaining", e.target.value)}
                       />

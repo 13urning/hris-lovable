@@ -65,7 +65,7 @@ function Dashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("vl_credits, sl_credits")
+        .select("vl_credits, sl_credits, vl_remaining, sl_remaining")
         .eq("id", user!.id)
         .maybeSingle();
       if (error) throw error;
@@ -177,6 +177,9 @@ function Dashboard() {
 
   const VL_ENTITLEMENT = myProfile?.vl_credits ?? 10;
   const SL_ENTITLEMENT = myProfile?.sl_credits ?? 10;
+  // Remaining is stored independently by admin; fall back to entitlement if not yet set
+  const vlRemaining = myProfile?.vl_remaining ?? VL_ENTITLEMENT;
+  const slRemaining = myProfile?.sl_remaining ?? SL_ENTITLEMENT;
   const currentYear = new Date().getFullYear();
   const inCurrentYear = (iso: string) => new Date(iso).getFullYear() === currentYear;
   const usedDaysByType = (type: "VL" | "SL") =>
@@ -185,8 +188,6 @@ function Dashboard() {
       .reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
   const vlUsed = usedDaysByType("VL");
   const slUsed = usedDaysByType("SL");
-  const vlRemaining = Math.max(0, VL_ENTITLEMENT - vlUsed);
-  const slRemaining = Math.max(0, SL_ENTITLEMENT - slUsed);
 
   const clockedIn = !!todayEntry?.time_in;
   const clockedOut = !!todayEntry?.time_out;
