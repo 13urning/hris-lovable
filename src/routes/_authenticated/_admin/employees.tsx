@@ -129,6 +129,7 @@ function EmployeesPage() {
 
   // Existing employee list state
   const [search, setSearch] = useState("");
+  const [savingAll, setSavingAll] = useState(false);
 
   // Pending edits — keyed by row id, then field name
   const [pendingEdits, setPendingEdits] = useState<Record<string, Record<string, string | number>>>({});
@@ -364,10 +365,8 @@ function EmployeesPage() {
                 <th className="px-3 py-2 text-left">Company</th>
                 <th className="px-3 py-2 text-left">Department</th>
                 <th className="px-3 py-2 text-left">Position</th>
-                <th className="px-3 py-2 text-right">VL Used</th>
                 <th className="px-3 py-2 text-right">VL Total</th>
                 <th className="px-3 py-2 text-right">VL Remaining</th>
-                <th className="px-3 py-2 text-right">SL Used</th>
                 <th className="px-3 py-2 text-right">SL Total</th>
                 <th className="px-3 py-2 text-right">SL Remaining</th>
                 <th className="px-3 py-2 text-left">Role</th>
@@ -427,10 +426,6 @@ function EmployeesPage() {
                         onChange={(e) => setEdit(r.id, "position", e.target.value)}
                       />
                     </td>
-                    {/* VL Used — read-only */}
-                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                      {r.vl_used}
-                    </td>
                     {/* VL Total — editable */}
                     <td className="px-3 py-2">
                       <input
@@ -456,10 +451,6 @@ function EmployeesPage() {
                         }
                         onChange={(e) => setEdit(r.id, "vl_remaining", e.target.value)}
                       />
-                    </td>
-                    {/* SL Used — read-only */}
-                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
-                      {r.sl_used}
                     </td>
                     {/* SL Total — editable */}
                     <td className="px-3 py-2">
