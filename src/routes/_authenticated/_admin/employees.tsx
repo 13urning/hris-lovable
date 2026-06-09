@@ -142,6 +142,7 @@ function EmployeesPage() {
   };
 
   const isDirty = (id: string) => !!(pendingEdits[id] && Object.keys(pendingEdits[id]).length > 0);
+  const dirtyCount = Object.keys(pendingEdits).length;
 
   // Import dialog state
   const [importOpen, setImportOpen] = useState(false);
@@ -204,9 +205,15 @@ function EmployeesPage() {
       const patches: Record<string, string | number> = {};
       for (const [field, value] of Object.entries(edits)) {
         if (field === "vl_remaining") {
+          // Remaining takes precedence — back-calculate total
           patches.vl_credits = Number(value) + row.vl_used;
         } else if (field === "sl_remaining") {
           patches.sl_credits = Number(value) + row.sl_used;
+        } else if (field === "vl_total") {
+          // Only apply total if remaining wasn't also explicitly set
+          if (!edits.vl_remaining) patches.vl_credits = Number(value);
+        } else if (field === "sl_total") {
+          if (!edits.sl_remaining) patches.sl_credits = Number(value);
         } else {
           patches[field] = value;
         }
@@ -216,7 +223,6 @@ function EmployeesPage() {
     },
     onSuccess: (_data, { row }) => {
       clearEdit(row.id);
-      toast.success("Saved");
       qc.invalidateQueries({ queryKey: ["employees"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -237,6 +243,22 @@ function EmployeesPage() {
     onSuccess: () => { toast.success("Role updated"); qc.invalidateQueries({ queryKey: ["employees"] }); },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  async function handleSaveAll() {
+    const dirtyRows = (data ?? []).filter((r) => isDirty(r.id));
+    if (!dirtyRows.length) return;
+    setSavingAll(true);
+    try {
+      for (const r of dirtyRows) {
+        await saveRow.mutateAsync({ row: r, edits: pendingEdits[r.id] });
+      }
+      toast.success(`Saved ${dirtyRows.length} employee${dirtyRows.length !== 1 ? "s" : ""}`);
+    } catch {
+      // individual errors already shown via onError
+    } finally {
+      setSavingAll(false);
+    }
+  }
 
   // ── Import handlers ────────────────────────────────────────────────────────
 
@@ -315,14 +337,22 @@ function EmployeesPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
+        <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">
           <CardTitle>{filtered.length} {filtered.length === 1 ? "person" : "people"}</CardTitle>
-          <Input
-            className="max-w-xs"
-            placeholder="Search name, email, company…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <div className="flex items-center gap-2">
+            {dirtyCount > 0 && (
+              <Button size="sm" onClick={handleSaveAll} disabled={savingAll}>
+                <Save className="mr-1.5 h-3.5 w-3.5" />
+                {savingAll ? "Saving…" : `Save ${dirtyCount} change${dirtyCount !== 1 ? "s" : ""}`}
+              </Button>
+            )}
+            <Input
+              className="max-w-xs"
+              placeholder="Search name, email, company…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
@@ -335,21 +365,27 @@ function EmployeesPage() {
                 <th className="px-3 py-2 text-left">Department</th>
                 <th className="px-3 py-2 text-left">Position</th>
                 <th className="px-3 py-2 text-right">VL Used</th>
+                <th className="px-3 py-2 text-right">VL Total</th>
                 <th className="px-3 py-2 text-right">VL Remaining</th>
                 <th className="px-3 py-2 text-right">SL Used</th>
+                <th className="px-3 py-2 text-right">SL Total</th>
                 <th className="px-3 py-2 text-right">SL Remaining</th>
                 <th className="px-3 py-2 text-left">Role</th>
-                <th className="px-3 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => {
                 const role: "employee" | "hr" | "admin" =
                   r.roles.includes("admin") ? "admin" : r.roles.includes("hr") ? "hr" : "employee";
-                const dirty = isDirty(r.id);
-                const saving = saveRow.isPending && saveRow.variables?.row.id === r.id;
+                // Effective totals — use pending edit if the admin has changed the total field
+                const effectiveVLTotal = pendingEdits[r.id]?.vl_total !== undefined
+                  ? Number(pendingEdits[r.id].vl_total)
+                  : (r.vl_credits ?? 10);
+                const effectiveSLTotal = pendingEdits[r.id]?.sl_total !== undefined
+                  ? Number(pendingEdits[r.id].sl_total)
+                  : (r.sl_credits ?? 10);
                 return (
-                  <tr key={r.id} className="border-t">
+                  <tr key={r.id} className={`border-t ${isDirty(r.id) ? "bg-primary/5" : ""}`}>
                     {/* Name */}
                     <td className="px-3 py-2">
                       <Input
@@ -395,7 +431,18 @@ function EmployeesPage() {
                     <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
                       {r.vl_used}
                     </td>
-                    {/* VL Remaining — editable */}
+                    {/* VL Total — editable */}
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={365}
+                        className="w-16 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-border focus:border-border focus:outline-none text-right font-medium"
+                        value={effectiveVLTotal}
+                        onChange={(e) => setEdit(r.id, "vl_total", e.target.value)}
+                      />
+                    </td>
+                    {/* VL Remaining — editable; reflects pending total if total was edited */}
                     <td className="px-3 py-2">
                       <input
                         type="number"
@@ -405,7 +452,7 @@ function EmployeesPage() {
                         value={
                           pendingEdits[r.id]?.vl_remaining !== undefined
                             ? Number(pendingEdits[r.id].vl_remaining)
-                            : (r.vl_credits ?? 10) - r.vl_used
+                            : effectiveVLTotal - r.vl_used
                         }
                         onChange={(e) => setEdit(r.id, "vl_remaining", e.target.value)}
                       />
@@ -414,7 +461,18 @@ function EmployeesPage() {
                     <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
                       {r.sl_used}
                     </td>
-                    {/* SL Remaining — editable */}
+                    {/* SL Total — editable */}
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={365}
+                        className="w-16 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-border focus:border-border focus:outline-none text-right font-medium"
+                        value={effectiveSLTotal}
+                        onChange={(e) => setEdit(r.id, "sl_total", e.target.value)}
+                      />
+                    </td>
+                    {/* SL Remaining — editable; reflects pending total if total was edited */}
                     <td className="px-3 py-2">
                       <input
                         type="number"
@@ -424,7 +482,7 @@ function EmployeesPage() {
                         value={
                           pendingEdits[r.id]?.sl_remaining !== undefined
                             ? Number(pendingEdits[r.id].sl_remaining)
-                            : (r.sl_credits ?? 10) - r.sl_used
+                            : effectiveSLTotal - r.sl_used
                         }
                         onChange={(e) => setEdit(r.id, "sl_remaining", e.target.value)}
                       />
@@ -443,32 +501,6 @@ function EmployeesPage() {
                           <SelectItem value="admin">Admin</SelectItem>
                         </SelectContent>
                       </Select>
-                    </td>
-                    {/* Actions — Save / Cancel when dirty */}
-                    <td className="px-3 py-2">
-                      {dirty && (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            className="h-7 px-2"
-                            disabled={saving}
-                            onClick={() => saveRow.mutate({ row: r, edits: pendingEdits[r.id] })}
-                          >
-                            <Save className="h-3.5 w-3.5 mr-1" />
-                            {saving ? "Saving…" : "Save"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            disabled={saving}
-                            onClick={() => clearEdit(r.id)}
-                            aria-label="Cancel edits"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      )}
                     </td>
                   </tr>
                 );
