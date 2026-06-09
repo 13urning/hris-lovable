@@ -109,7 +109,7 @@ export function AppShell() {
             <Link to="/dashboard" className="flex items-center gap-2">
               <img src={tidalLogo} alt="Tidal Solutions" className="h-8 w-auto" />
               <span className="hidden text-xs uppercase tracking-[0.2em] text-muted-foreground sm:inline">
-                / DTR
+                Wave HRIS
               </span>
             </Link>
           </div>
