@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Download, Upload, Check, X, Copy, Users } from "lucide-react";
+import { Download, Upload, Check, X, Copy, Users, Save } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/_admin/employees")({ component: EmployeesPage });
@@ -23,6 +23,8 @@ type Row = {
   employee_code: string | null; position: string | null; company: string | null;
   vl_credits: number | null; sl_credits: number | null;
   roles: ("employee" | "hr" | "admin")[];
+  vl_used: number;
+  sl_used: number;
 };
 
 type ImportRow = {
@@ -128,6 +130,19 @@ function EmployeesPage() {
   // Existing employee list state
   const [search, setSearch] = useState("");
 
+  // Pending edits — keyed by row id, then field name
+  const [pendingEdits, setPendingEdits] = useState<Record<string, Record<string, string | number>>>({});
+
+  const setEdit = (id: string, field: string, value: string | number) => {
+    setPendingEdits((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), [field]: value } }));
+  };
+
+  const clearEdit = (id: string) => {
+    setPendingEdits((prev) => { const next = { ...prev }; delete next[id]; return next; });
+  };
+
+  const isDirty = (id: string) => !!(pendingEdits[id] && Object.keys(pendingEdits[id]).length > 0);
+
   // Import dialog state
   const [importOpen, setImportOpen] = useState(false);
   const [importStep, setImportStep] = useState<"upload" | "preview" | "results">("upload");
@@ -143,21 +158,67 @@ function EmployeesPage() {
       const { data: profiles, error } = await supabase.from("profiles").select("*").order("full_name");
       if (error) throw error;
       const { data: roles } = await supabase.from("user_roles").select("user_id, role");
-      return (profiles ?? []).map((p) => ({
-        ...p,
-        roles: (roles ?? []).filter((r) => r.user_id === p.id).map((r) => r.role as Row["roles"][number]),
-      }));
+      const { data: leaves } = await supabase.from("leave_requests").select("employee_id, leave_type, start_date, end_date, status");
+
+      const currentYear = new Date().getFullYear();
+      const inCurrentYear = (iso: string) => {
+        try {
+          return new Date(iso).getFullYear() === currentYear;
+        } catch {
+          return false;
+        }
+      };
+
+      const leaveDays = (a: string, b: string) => {
+        try {
+          return Math.max(1, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1);
+        } catch {
+          return 0;
+        }
+      };
+
+      return (profiles ?? []).map((p) => {
+        const userRoles = (roles ?? []).filter((r) => r.user_id === p.id).map((r) => r.role as Row["roles"][number]);
+        const userLeaves = (leaves ?? []).filter((l) => l.employee_id === p.id);
+
+        const vl_used = userLeaves
+          .filter((l) => l.leave_type === "VL" && (l.status === "approved" || l.status === "pending") && inCurrentYear(l.start_date))
+          .reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
+
+        const sl_used = userLeaves
+          .filter((l) => l.leave_type === "SL" && (l.status === "approved" || l.status === "pending") && inCurrentYear(l.start_date))
+          .reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
+
+        return {
+          ...p,
+          roles: userRoles,
+          vl_used,
+          sl_used,
+        };
+      });
     },
   });
 
-  const updateProfile = useMutation({
-    mutationFn: async ({
-      id, field, value,
-    }: { id: string; field: "full_name" | "department" | "employee_code" | "position" | "company" | "vl_credits" | "sl_credits"; value: string | number }) => {
-      const { error } = await supabase.from("profiles").update({ [field]: value } as never).eq("id", id);
+  const saveRow = useMutation({
+    mutationFn: async ({ row, edits }: { row: Row; edits: Record<string, string | number> }) => {
+      const patches: Record<string, string | number> = {};
+      for (const [field, value] of Object.entries(edits)) {
+        if (field === "vl_remaining") {
+          patches.vl_credits = Number(value) + row.vl_used;
+        } else if (field === "sl_remaining") {
+          patches.sl_credits = Number(value) + row.sl_used;
+        } else {
+          patches[field] = value;
+        }
+      }
+      const { error } = await supabase.from("profiles").update(patches as never).eq("id", row.id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["employees"] }),
+    onSuccess: (_data, { row }) => {
+      clearEdit(row.id);
+      toast.success("Saved");
+      qc.invalidateQueries({ queryKey: ["employees"] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -238,25 +299,30 @@ function EmployeesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">People</p>
-        <h1 className="mt-1 font-display text-4xl">Employees</h1>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">People</p>
+          <h1 className="mt-1 font-display text-4xl">Employees</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={downloadTemplate}>
+            <Download className="mr-2 h-4 w-4" /> Download Template
+          </Button>
+          <Button onClick={() => { resetImport(); setImportOpen(true); }}>
+            <Users className="mr-2 h-4 w-4" /> Import Employees
+          </Button>
+        </div>
       </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>{filtered.length} {filtered.length === 1 ? "person" : "people"}</CardTitle>
-          <div className="flex items-center gap-2">
-            <Input
-              className="max-w-xs"
-              placeholder="Search name, email, company…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <Button variant="outline" onClick={() => { resetImport(); setImportOpen(true); }}>
-              <Users className="mr-2 h-4 w-4" /> Import Employees
-            </Button>
-          </div>
+          <Input
+            className="max-w-xs"
+            placeholder="Search name, email, company…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-sm">
@@ -268,56 +334,108 @@ function EmployeesPage() {
                 <th className="px-3 py-2 text-left">Company</th>
                 <th className="px-3 py-2 text-left">Department</th>
                 <th className="px-3 py-2 text-left">Position</th>
-                <th className="px-3 py-2 text-left">VL</th>
-                <th className="px-3 py-2 text-left">SL</th>
+                <th className="px-3 py-2 text-right">VL Used</th>
+                <th className="px-3 py-2 text-right">VL Remaining</th>
+                <th className="px-3 py-2 text-right">SL Used</th>
+                <th className="px-3 py-2 text-right">SL Remaining</th>
                 <th className="px-3 py-2 text-left">Role</th>
+                <th className="px-3 py-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => {
                 const role: "employee" | "hr" | "admin" =
                   r.roles.includes("admin") ? "admin" : r.roles.includes("hr") ? "hr" : "employee";
+                const dirty = isDirty(r.id);
+                const saving = saveRow.isPending && saveRow.variables?.row.id === r.id;
                 return (
                   <tr key={r.id} className="border-t">
+                    {/* Name */}
                     <td className="px-3 py-2">
-                      <Input defaultValue={r.full_name} className="h-8"
-                        onBlur={(e) => e.target.value !== r.full_name &&
-                          updateProfile.mutate({ id: r.id, field: "full_name", value: e.target.value })} />
+                      <Input
+                        className="h-8"
+                        value={String(pendingEdits[r.id]?.full_name ?? r.full_name)}
+                        onChange={(e) => setEdit(r.id, "full_name", e.target.value)}
+                      />
                     </td>
+                    {/* Email — read-only */}
                     <td className="px-3 py-2 text-muted-foreground text-xs">{r.email}</td>
+                    {/* Code — read-only, auto-generated */}
                     <td className="px-3 py-2">
-                      <Input defaultValue={r.employee_code ?? ""} className="h-8 w-24"
-                        onBlur={(e) => e.target.value !== (r.employee_code ?? "") &&
-                          updateProfile.mutate({ id: r.id, field: "employee_code", value: e.target.value })} />
+                      <span className="text-xs font-mono bg-secondary/60 px-1.5 py-0.5 rounded">
+                        {r.employee_code ?? "—"}
+                      </span>
                     </td>
+                    {/* Company */}
                     <td className="px-3 py-2">
-                      <Input defaultValue={r.company ?? ""} className="h-8" placeholder="—"
-                        onBlur={(e) => e.target.value !== (r.company ?? "") &&
-                          updateProfile.mutate({ id: r.id, field: "company", value: e.target.value })} />
+                      <Input
+                        className="h-8"
+                        placeholder="—"
+                        value={String(pendingEdits[r.id]?.company ?? (r.company ?? ""))}
+                        onChange={(e) => setEdit(r.id, "company", e.target.value)}
+                      />
                     </td>
+                    {/* Department */}
                     <td className="px-3 py-2">
-                      <Input defaultValue={r.department} className="h-8"
-                        onBlur={(e) => e.target.value !== r.department &&
-                          updateProfile.mutate({ id: r.id, field: "department", value: e.target.value })} />
+                      <Input
+                        className="h-8"
+                        value={String(pendingEdits[r.id]?.department ?? r.department)}
+                        onChange={(e) => setEdit(r.id, "department", e.target.value)}
+                      />
                     </td>
+                    {/* Position */}
                     <td className="px-3 py-2">
-                      <Input defaultValue={r.position ?? ""} className="h-8"
-                        onBlur={(e) => e.target.value !== (r.position ?? "") &&
-                          updateProfile.mutate({ id: r.id, field: "position", value: e.target.value })} />
+                      <Input
+                        className="h-8"
+                        value={String(pendingEdits[r.id]?.position ?? (r.position ?? ""))}
+                        onChange={(e) => setEdit(r.id, "position", e.target.value)}
+                      />
                     </td>
-                    <td className="px-4 py-2">
-                      <input type="number" min={0} max={365} defaultValue={r.vl_credits ?? 10}
-                        className="w-14 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-border focus:border-border focus:outline-none"
-                        onBlur={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v !== (r.vl_credits ?? 10)) updateProfile.mutate({ id: r.id, field: "vl_credits", value: v }); }} />
+                    {/* VL Used — read-only */}
+                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                      {r.vl_used}
                     </td>
-                    <td className="px-4 py-2">
-                      <input type="number" min={0} max={365} defaultValue={r.sl_credits ?? 10}
-                        className="w-14 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-border focus:border-border focus:outline-none"
-                        onBlur={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v !== (r.sl_credits ?? 10)) updateProfile.mutate({ id: r.id, field: "sl_credits", value: v }); }} />
-                    </td>
+                    {/* VL Remaining — editable */}
                     <td className="px-3 py-2">
-                      <Select value={role} disabled={!isAdmin}
-                        onValueChange={(v) => setRole.mutate({ userId: r.id, role: v as "employee" | "hr" | "admin" })}>
+                      <input
+                        type="number"
+                        min={-100}
+                        max={365}
+                        className="w-16 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-border focus:border-border focus:outline-none text-right font-medium text-accent"
+                        value={
+                          pendingEdits[r.id]?.vl_remaining !== undefined
+                            ? Number(pendingEdits[r.id].vl_remaining)
+                            : (r.vl_credits ?? 10) - r.vl_used
+                        }
+                        onChange={(e) => setEdit(r.id, "vl_remaining", e.target.value)}
+                      />
+                    </td>
+                    {/* SL Used — read-only */}
+                    <td className="px-3 py-2 text-right text-muted-foreground tabular-nums">
+                      {r.sl_used}
+                    </td>
+                    {/* SL Remaining — editable */}
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={-100}
+                        max={365}
+                        className="w-16 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-border focus:border-border focus:outline-none text-right font-medium text-accent"
+                        value={
+                          pendingEdits[r.id]?.sl_remaining !== undefined
+                            ? Number(pendingEdits[r.id].sl_remaining)
+                            : (r.sl_credits ?? 10) - r.sl_used
+                        }
+                        onChange={(e) => setEdit(r.id, "sl_remaining", e.target.value)}
+                      />
+                    </td>
+                    {/* Role — saves immediately */}
+                    <td className="px-3 py-2">
+                      <Select
+                        value={role}
+                        disabled={!isAdmin}
+                        onValueChange={(v) => setRole.mutate({ userId: r.id, role: v as "employee" | "hr" | "admin" })}
+                      >
                         <SelectTrigger className="w-28 h-8"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="employee">Employee</SelectItem>
@@ -325,6 +443,32 @@ function EmployeesPage() {
                           <SelectItem value="admin">Admin</SelectItem>
                         </SelectContent>
                       </Select>
+                    </td>
+                    {/* Actions — Save / Cancel when dirty */}
+                    <td className="px-3 py-2">
+                      {dirty && (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            className="h-7 px-2"
+                            disabled={saving}
+                            onClick={() => saveRow.mutate({ row: r, edits: pendingEdits[r.id] })}
+                          >
+                            <Save className="h-3.5 w-3.5 mr-1" />
+                            {saving ? "Saving…" : "Save"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0"
+                            disabled={saving}
+                            onClick={() => clearEdit(r.id)}
+                            aria-label="Cancel edits"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -350,37 +494,34 @@ function EmployeesPage() {
 
           {/* Step 1: Upload */}
           {importStep === "upload" && (
-            <div className="space-y-6 py-2">
-              <div className="rounded-lg border border-dashed p-6 text-center space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Fill in the CSV template with employee data, then upload it here.
-                  Accounts will be created automatically and temporary passwords generated for each employee.
-                </p>
-                <Button variant="outline" onClick={downloadTemplate}>
-                  <Download className="mr-2 h-4 w-4" /> Download Template
+            <div className="space-y-5 py-2">
+              <p className="text-sm text-muted-foreground">
+                Use the <strong>Download Template</strong> button on the Employees page to get the CSV,
+                fill it in, then upload it below. Accounts will be created automatically with
+                temporary passwords you can distribute to each employee.
+              </p>
+
+              <div className="rounded-lg border border-dashed p-8 flex flex-col items-center gap-3 text-center">
+                <Upload className="h-8 w-8 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Upload your filled CSV</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Columns: email, full_name, employee_code, company, department, position, vl_credits, sl_credits</p>
+                </div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <Button onClick={() => fileRef.current?.click()}>
+                  <Upload className="mr-2 h-4 w-4" /> Choose CSV File
                 </Button>
               </div>
 
-              <div className="space-y-2">
-                <Label>Upload filled CSV</Label>
-                <div className="flex items-center gap-3">
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
-                  <Button onClick={() => fileRef.current?.click()}>
-                    <Upload className="mr-2 h-4 w-4" /> Choose CSV File
-                  </Button>
-                </div>
-              </div>
-
-              <div className="rounded-md bg-secondary/40 p-4 text-xs text-muted-foreground space-y-1">
-                <p className="font-medium text-foreground">Template columns</p>
-                <p><span className="font-medium">Required:</span> email, full_name</p>
-                <p><span className="font-medium">Optional:</span> employee_code, company, department, position, vl_credits (default 10), sl_credits (default 10)</p>
+              <div className="rounded-md bg-secondary/40 p-3 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Required:</span> email, full_name &nbsp;·&nbsp;
+                <span className="font-medium text-foreground">Optional:</span> all other columns (vl_credits &amp; sl_credits default to 10)
               </div>
             </div>
           )}
