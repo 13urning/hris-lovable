@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Download, Upload, Check, X, Copy, Users, Save } from "lucide-react";
 import { toast } from "sonner";
+import { businessDaysBetween } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/_admin/employees")({ component: EmployeesPage });
 
@@ -172,13 +173,7 @@ function EmployeesPage() {
         }
       };
 
-      const leaveDays = (a: string, b: string) => {
-        try {
-          return Math.max(1, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1);
-        } catch {
-          return 0;
-        }
-      };
+      const leaveDays = (a: string, b: string) => businessDaysBetween(a, b);
 
       return (profiles ?? []).map((p) => {
         const userRoles = (roles ?? []).filter((r) => r.user_id === p.id).map((r) => r.role as Row["roles"][number]);

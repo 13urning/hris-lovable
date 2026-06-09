@@ -5,12 +5,14 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, todayIso } from "@/lib/dtr";
+import { businessDaysBetween } from "@/lib/utils";
 import { Plane, Check, X, Trash2, CalendarDays, Clock3, CalendarCheck2, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -49,9 +51,28 @@ const STATUS_TONE: Record<LeaveStatus, string> = {
 };
 
 function daysBetween(a: string, b: string) {
-  if (!a || !b) return 0;
-  const ms = new Date(b).getTime() - new Date(a).getTime();
-  return Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)) + 1);
+  return businessDaysBetween(a, b);
+}
+
+function isWeekend(iso: string) {
+  const d = new Date(iso).getDay();
+  return d === 0 || d === 6;
+}
+
+function nextWeekday(iso: string) {
+  const d = new Date(iso);
+  if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+  else if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function fromIso(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function toIso(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function initials(name?: string) {
@@ -86,13 +107,13 @@ function LeavesPage() {
   const today = todayIso();
   const weekEnd = addDaysIso(today, 6);
 
-  const [form, setForm] = useState({
-    leave_type: "VL",
-    start_date: todayIso(),
-    end_date: todayIso(),
-    reason: "",
+  const [form, setForm] = useState(() => {
+    const d = nextWeekday(todayIso());
+    return { leave_type: "VL", start_date: d, end_date: d, reason: "" };
   });
   const [filter, setFilter] = useState<"all" | "mine" | LeaveStatus>(isHR ? "all" : "mine");
+  const [startOpen, setStartOpen] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
 
   const { data: leaves } = useQuery({
     queryKey: ["leaves"],
@@ -144,6 +165,8 @@ function LeavesPage() {
   const fileLeave = useMutation({
     mutationFn: async () => {
       if (!user) throw new Error("not signed in");
+      if (isWeekend(form.start_date)) throw new Error("Start date cannot be a weekend");
+      if (isWeekend(form.end_date)) throw new Error("End date cannot be a weekend");
       if (new Date(form.end_date) < new Date(form.start_date))
         throw new Error("End date must be on or after start date");
       const { error } = await supabase.from("leave_requests").insert({
@@ -320,16 +343,57 @@ function LeavesPage() {
             </div>
             <div>
               <Label>Start date</Label>
-              <Input type="date" value={form.start_date}
-                onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+              <Popover open={startOpen} onOpenChange={setStartOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-start text-left font-normal">
+                    <CalendarDays className="mr-2 h-4 w-4" />
+                    {formatDate(form.start_date)}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={fromIso(form.start_date)}
+                    onSelect={(date) => {
+                      if (!date) return;
+                      const iso = toIso(date);
+                      const end = iso > form.end_date ? iso : form.end_date;
+                      setForm({ ...form, start_date: iso, end_date: end });
+                      setStartOpen(false);
+                    }}
+                    disabled={(date) => date.getDay() === 0 || date.getDay() === 6}
+                  />
+                </PopoverContent>
+              </Popover>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Past or future dates allowed
               </p>
             </div>
             <div>
               <Label>End date</Label>
-              <Input type="date" value={form.end_date} min={form.start_date}
-                onChange={(e) => setForm({ ...form, end_date: e.target.value })} />
+              <Popover open={endOpen} onOpenChange={setEndOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-start text-left font-normal">
+                    <CalendarDays className="mr-2 h-4 w-4" />
+                    {formatDate(form.end_date)}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={fromIso(form.end_date)}
+                    onSelect={(date) => {
+                      if (!date) return;
+                      setForm({ ...form, end_date: toIso(date) });
+                      setEndOpen(false);
+                    }}
+                    disabled={(date) => {
+                      const dow = date.getDay();
+                      return dow === 0 || dow === 6 || toIso(date) < form.start_date;
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {daysBetween(form.start_date, form.end_date)} day(s)
               </p>

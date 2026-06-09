@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/dtr";
+import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane } from "lucide-react";
 import { toast } from "sonner";
 
@@ -163,8 +164,7 @@ function Dashboard() {
   });
 
   // ── Leave helpers ──────────────────────────────────────────────────────
-  const leaveDays = (a: string, b: string) =>
-    Math.max(1, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000) + 1);
+  const leaveDays = (a: string, b: string) => businessDaysBetween(a, b);
   const leavesAll = myLeaves ?? [];
   const leavesApproved = leavesAll.filter((l) => l.status === "approved");
   const leavesPending = leavesAll.filter((l) => l.status === "pending");
