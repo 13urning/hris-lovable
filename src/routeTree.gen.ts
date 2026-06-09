@@ -22,6 +22,7 @@ import { Route as AuthenticatedAdminPerformanceAdminRouteImport } from './routes
 import { Route as AuthenticatedAdminOrgChartRouteImport } from './routes/_authenticated/_admin/org-chart'
 import { Route as AuthenticatedAdminKpiBuilderRouteImport } from './routes/_authenticated/_admin/kpi-builder'
 import { Route as AuthenticatedAdminEmployeesRouteImport } from './routes/_authenticated/_admin/employees'
+import { Route as AuthenticatedAdminActivityLogRouteImport } from './routes/_authenticated/_admin/activity-log'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -92,6 +93,12 @@ const AuthenticatedAdminEmployeesRoute =
     path: '/employees',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
+const AuthenticatedAdminActivityLogRoute =
+  AuthenticatedAdminActivityLogRouteImport.update({
+    id: '/activity-log',
+    path: '/activity-log',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/leaves': typeof AuthenticatedLeavesRoute
   '/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/performance': typeof AuthenticatedPerformanceRoute
+  '/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
@@ -114,6 +122,7 @@ export interface FileRoutesByTo {
   '/leaves': typeof AuthenticatedLeavesRoute
   '/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/performance': typeof AuthenticatedPerformanceRoute
+  '/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
@@ -130,6 +139,7 @@ export interface FileRoutesById {
   '/_authenticated/leaves': typeof AuthenticatedLeavesRoute
   '/_authenticated/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
+  '/_authenticated/_admin/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/_authenticated/_admin/employees': typeof AuthenticatedAdminEmployeesRoute
   '/_authenticated/_admin/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
   '/_authenticated/_admin/org-chart': typeof AuthenticatedAdminOrgChartRoute
@@ -145,6 +155,7 @@ export interface FileRouteTypes {
     | '/leaves'
     | '/ot-approvals'
     | '/performance'
+    | '/activity-log'
     | '/employees'
     | '/kpi-builder'
     | '/org-chart'
@@ -158,6 +169,7 @@ export interface FileRouteTypes {
     | '/leaves'
     | '/ot-approvals'
     | '/performance'
+    | '/activity-log'
     | '/employees'
     | '/kpi-builder'
     | '/org-chart'
@@ -173,6 +185,7 @@ export interface FileRouteTypes {
     | '/_authenticated/leaves'
     | '/_authenticated/ot-approvals'
     | '/_authenticated/performance'
+    | '/_authenticated/_admin/activity-log'
     | '/_authenticated/_admin/employees'
     | '/_authenticated/_admin/kpi-builder'
     | '/_authenticated/_admin/org-chart'
@@ -278,10 +291,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminEmployeesRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
+    '/_authenticated/_admin/activity-log': {
+      id: '/_authenticated/_admin/activity-log'
+      path: '/activity-log'
+      fullPath: '/activity-log'
+      preLoaderRoute: typeof AuthenticatedAdminActivityLogRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
   }
 }
 
 interface AuthenticatedAdminRouteChildren {
+  AuthenticatedAdminActivityLogRoute: typeof AuthenticatedAdminActivityLogRoute
   AuthenticatedAdminEmployeesRoute: typeof AuthenticatedAdminEmployeesRoute
   AuthenticatedAdminKpiBuilderRoute: typeof AuthenticatedAdminKpiBuilderRoute
   AuthenticatedAdminOrgChartRoute: typeof AuthenticatedAdminOrgChartRoute
@@ -289,6 +310,7 @@ interface AuthenticatedAdminRouteChildren {
 }
 
 const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
+  AuthenticatedAdminActivityLogRoute: AuthenticatedAdminActivityLogRoute,
   AuthenticatedAdminEmployeesRoute: AuthenticatedAdminEmployeesRoute,
   AuthenticatedAdminKpiBuilderRoute: AuthenticatedAdminKpiBuilderRoute,
   AuthenticatedAdminOrgChartRoute: AuthenticatedAdminOrgChartRoute,
