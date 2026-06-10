@@ -132,7 +132,7 @@ function Gate() {
   if (profileFlags?.must_change_password) {
     return (
       <ForcePasswordChange
-        onDone={() => qc.invalidateQueries({ queryKey: ["profile-flags", user!.id] })}
+        onDone={() => qc.invalidateQueries({ queryKey: ["profile-flags", user!.uid] })}
       />
     );
   }

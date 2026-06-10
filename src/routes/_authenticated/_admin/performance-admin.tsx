@@ -1,8 +1,14 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  fetchEvaluationPeriods, fetchEvaluationsByPeriod, fetchKpiScoresByEvalId,
+  fetchBehavioralScoresByEvalId, fetchAllProfiles, fetchActiveKpiTemplates,
+  fetchActiveBehavioralCompetencies, insertEvaluationPeriod, updateEvaluationPeriodStatus,
+  insertEvaluationsForPeriod, insertKpiScores, insertBehavioralScores,
+  updateKpiHrScore, updateBehavioralGhScore, approveEvaluation,
+} from "@/lib/performance-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,93 +107,48 @@ function PerformanceAdminPage() {
   const { data: periods = [] } = useQuery({
     queryKey: ["eval-periods"],
     enabled: isGroupHead,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("evaluation_periods").select("*").order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as Period[];
-    },
+    queryFn: () => fetchEvaluationPeriods() as Promise<Period[]>,
   });
 
   const { data: evaluations = [] } = useQuery({
     queryKey: ["evaluations", activePeriod?.id],
     enabled: !!activePeriod && isGroupHead,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("performance_evaluations")
-        .select(`*, employee:profiles!pe_employee_profile_fk(full_name,email,department,position)`)
-        .eq("period_id", activePeriod!.id)
-        .order("created_at");
-      if (error) throw error;
-      return (data ?? []) as Evaluation[];
-    },
+    queryFn: () => fetchEvaluationsByPeriod({ data: { periodId: activePeriod!.id } }) as Promise<Evaluation[]>,
   });
 
   const { data: evalScores } = useQuery({
     queryKey: ["eval-scores", reviewingEval?.id],
     enabled: !!reviewingEval,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("evaluation_kpi_scores")
-        .select("*")
-        .eq("evaluation_id", reviewingEval!.id)
-        .order("kpi_title");
-      if (error) throw error;
-      return (data ?? []) as KpiScore[];
-    },
+    queryFn: () => fetchKpiScoresByEvalId({ data: { evaluationId: reviewingEval!.id } }) as Promise<KpiScore[]>,
   });
 
   const { data: behavioralScores } = useQuery({
     queryKey: ["eval-behavioral", reviewingEval?.id],
     enabled: !!reviewingEval,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("evaluation_behavioral_scores")
-        .select("*, competency:behavioral_competencies(display_order)")
-        .eq("evaluation_id", reviewingEval!.id);
-      if (error) throw error;
-      return ((data ?? []) as (BehavioralScore & { competency?: { display_order: number } })[])
-        .sort((a, b) => (a.competency?.display_order ?? 0) - (b.competency?.display_order ?? 0));
-    },
+    queryFn: () => fetchBehavioralScoresByEvalId({ data: { evaluationId: reviewingEval!.id } }) as Promise<BehavioralScore[]>,
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ["all-employees"],
     enabled: isGroupHead,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("profiles").select("*").order("full_name");
-      if (error) throw error;
-      return (data ?? []) as Employee[];
-    },
+    queryFn: () => fetchAllProfiles() as Promise<Employee[]>,
   });
 
   const { data: kpiTemplates = [] } = useQuery({
     queryKey: ["kpi-templates"],
     enabled: isGroupHead,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("kpi_templates")
-        .select("*").eq("is_active", true);
-      if (error) throw error;
-      return data ?? [];
-    },
+    queryFn: () => fetchActiveKpiTemplates(),
   });
 
   const { data: competencies = [] } = useQuery({
     queryKey: ["behavioral-competencies"],
     enabled: isGroupHead,
-    queryFn: async () => {
-      const { data, error } = await supabase.from("behavioral_competencies")
-        .select("*").eq("is_active", true).order("display_order");
-      if (error) throw error;
-      return data ?? [];
-    },
+    queryFn: () => fetchActiveBehavioralCompetencies(),
   });
 
   const createPeriod = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("evaluation_periods")
-        .insert({ ...periodForm, created_by: user!.id, status: "draft" });
-      if (error) throw error;
+      await insertEvaluationPeriod({ data: { ...periodForm, created_by: user!.id, status: "draft" } });
     },
     onSuccess: () => {
       toast.success("Period created");
@@ -200,8 +161,7 @@ function PerformanceAdminPage() {
 
   const updatePeriodStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase.from("evaluation_periods").update({ status }).eq("id", id);
-      if (error) throw error;
+      await updateEvaluationPeriodStatus({ data: { id, status } });
     },
     onSuccess: () => {
       toast.success("Period updated");
@@ -216,42 +176,31 @@ function PerformanceAdminPage() {
       const toCreate = employees.filter((emp) => !existing.has(emp.id));
       if (toCreate.length === 0) { toast.info("All employees already have evaluations"); return; }
 
-      for (const emp of toCreate) {
-        const { data: evalRow, error: evalErr } = await supabase
-          .from("performance_evaluations")
-          .insert({ employee_id: emp.id, period_id: periodId, status: "pending_self_assessment" })
-          .select("id").single();
-        if (evalErr) throw evalErr;
+      const inserted = await insertEvaluationsForPeriod({ data: {
+        evaluations: toCreate.map((emp) => ({ employee_id: emp.id, period_id: periodId, status: "pending_self_assessment" })),
+      }});
 
-        // KPI snapshots
-        const teamKpis = kpiTemplates.filter((k: { team: string; designation: string | null }) =>
-          k.team === emp.department &&
-          (k.designation === null || k.designation === emp.position)
-        );
-        if (teamKpis.length > 0) {
-          const scores = teamKpis.map((k: { id: string; title: string; weight: number; target_value: number; metric_unit: string }) => ({
-            evaluation_id: evalRow.id,
-            kpi_template_id: k.id,
-            kpi_title: k.title,
-            kpi_weight: k.weight,
-            kpi_target: k.target_value,
-            kpi_metric_unit: k.metric_unit,
-          }));
-          const { error: scErr } = await supabase.from("evaluation_kpi_scores").insert(scores);
-          if (scErr) throw scErr;
-        }
+      type KpiTpl = { id: string; title: string; weight: number; target_value: number; metric_unit: string; team: string; designation: string | null };
+      type CompTpl = { id: string; name: string; behavioral_indicators: string };
 
-        // Behavioral competency snapshots (same for everyone)
-        if (competencies.length > 0) {
-          const bScores = competencies.map((c: { id: string; name: string; behavioral_indicators: string }) => ({
-            evaluation_id: evalRow.id,
-            competency_id: c.id,
-            competency_name: c.name,
-            competency_indicators: c.behavioral_indicators,
-          }));
-          const { error: bErr } = await supabase.from("evaluation_behavioral_scores").insert(bScores);
-          if (bErr) throw bErr;
+      const kpiPayloads: Record<string, unknown>[] = [];
+      for (const row of inserted) {
+        const emp = toCreate.find((e) => e.id === row.employee_id);
+        if (!emp) continue;
+        for (const k of (kpiTemplates as KpiTpl[]).filter((k) => k.team === emp.department && (k.designation === null || k.designation === emp.position))) {
+          kpiPayloads.push({ evaluation_id: row.id, kpi_template_id: k.id, kpi_title: k.title, kpi_weight: k.weight, kpi_target: k.target_value, kpi_metric_unit: k.metric_unit });
         }
+      }
+      if (kpiPayloads.length > 0) await insertKpiScores({ data: { scores: kpiPayloads } });
+
+      if ((competencies as CompTpl[]).length > 0) {
+        const bPayloads: Record<string, unknown>[] = [];
+        for (const row of inserted) {
+          for (const c of competencies as CompTpl[]) {
+            bPayloads.push({ evaluation_id: row.id, competency_id: c.id, competency_name: c.name, competency_indicators: c.behavioral_indicators });
+          }
+        }
+        await insertBehavioralScores({ data: { scores: bPayloads } });
       }
     },
     onSuccess: () => {
@@ -305,63 +254,44 @@ function PerformanceAdminPage() {
     mutationFn: async () => {
       if (!reviewingEval || !evalScores || !behavioralScores) return;
 
-      // 1. Persist KPI Group Head scores + finals
       for (const score of evalScores) {
         const patch = kpiPatches[score.id];
         const ghScore = patch?.hr_score ?? score.hr_score;
-        const ghActual = patch?.hr_actual_value ?? score.hr_actual_value;
-        const ghComments = patch?.hr_comments ?? score.hr_comments;
-        const finalScore = ghScore ?? score.self_score;
-
-        await supabase.from("evaluation_kpi_scores")
-          .update({
-            hr_score: ghScore,
-            hr_actual_value: ghActual,
-            hr_comments: ghComments,
-            final_score: finalScore,
-          })
-          .eq("id", score.id);
+        await updateKpiHrScore({ data: {
+          id: score.id,
+          hrScore: ghScore,
+          hrActualValue: patch?.hr_actual_value ?? score.hr_actual_value,
+          hrComments: patch?.hr_comments ?? score.hr_comments,
+          finalScore: ghScore ?? score.self_score,
+        }});
       }
 
-      // 2. Persist Behavioral Group Head ratings + finals (final = avg of employee + GH)
       for (const beh of behavioralScores) {
         const patch = behavioralPatches[beh.id];
         const gh = patch?.gh_rating ?? beh.gh_rating;
-        const comments = patch?.gh_comments ?? beh.gh_comments;
         const emp = beh.employee_rating;
-        let finalRating: number | null = null;
-        if (gh != null && emp != null) finalRating = (gh + emp) / 2;
-        else if (gh != null) finalRating = gh;
-        else if (emp != null) finalRating = emp;
-
-        await supabase.from("evaluation_behavioral_scores")
-          .update({
-            gh_rating: gh,
-            gh_comments: comments,
-            final_rating: finalRating,
-          })
-          .eq("id", beh.id);
+        const finalRating = gh != null && emp != null ? (gh + emp) / 2 : gh ?? emp;
+        await updateBehavioralGhScore({ data: {
+          id: beh.id,
+          ghRating: gh,
+          ghComments: patch?.gh_comments ?? beh.gh_comments,
+          finalRating,
+        }});
       }
 
-      // 3. Compute aggregate scores (Part I and Part II)
       const kpiScore = livePreview?.kpi ?? null;
       const behavioralScore = livePreview?.behavioral ?? null;
       const overallRating = computeOverallRating(kpiScore, behavioralScore);
-
-      // 4. Approve
-      const { error } = await supabase.from("performance_evaluations")
-        .update({
-          status: "approved",
-          approved_at: new Date().toISOString(),
-          approved_by: user!.id,
-          group_head_notes: groupHeadNotes,
-          kpi_score: kpiScore,
-          behavioral_score: behavioralScore,
-          overall_score: kpiScore,
-          overall_rating: overallRating,
-        })
-        .eq("id", reviewingEval.id);
-      if (error) throw error;
+      await approveEvaluation({ data: {
+        id: reviewingEval.id,
+        approvedAt: new Date().toISOString(),
+        approvedBy: user!.id,
+        groupHeadNotes: groupHeadNotes,
+        kpiScore,
+        behavioralScore,
+        overallScore: kpiScore,
+        overallRating,
+      }});
     },
     onSuccess: () => {
       toast.success("Evaluation reviewed and approved");
@@ -919,24 +849,11 @@ function PerformanceAdminPage() {
 function EvalScorePreview({ evalId }: { evalId: string }) {
   const { data: scores = [] } = useQuery({
     queryKey: ["eval-scores-preview", evalId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("evaluation_kpi_scores").select("*").eq("evaluation_id", evalId).order("kpi_title");
-      if (error) throw error;
-      return (data ?? []) as KpiScore[];
-    },
+    queryFn: () => fetchKpiScoresByEvalId({ data: { evaluationId: evalId } }) as Promise<KpiScore[]>,
   });
   const { data: bScores = [] } = useQuery({
     queryKey: ["eval-behavioral-preview", evalId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("evaluation_behavioral_scores")
-        .select("*, competency:behavioral_competencies(display_order)")
-        .eq("evaluation_id", evalId);
-      if (error) throw error;
-      return ((data ?? []) as (BehavioralScore & { competency?: { display_order: number } })[])
-        .sort((a, b) => (a.competency?.display_order ?? 0) - (b.competency?.display_order ?? 0));
-    },
+    queryFn: () => fetchBehavioralScoresByEvalId({ data: { evaluationId: evalId } }) as Promise<BehavioralScore[]>,
   });
   if (scores.length === 0 && bScores.length === 0) {
     return <div className="px-4 pb-3 text-xs text-muted-foreground">No scores yet.</div>;

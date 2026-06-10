@@ -1,8 +1,8 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { fetchKpiTemplates, upsertKpiTemplate, deleteKpiTemplate } from "@/lib/kpi-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,28 +54,12 @@ function KpiBuilderPage() {
   const { data: kpis = [], isLoading } = useQuery({
     queryKey: ["kpi-templates"],
     enabled: isGroupHead,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("kpi_templates")
-        .select("*")
-        .order("team")
-        .order("title");
-      if (error) throw error;
-      return (data ?? []) as KpiTemplate[];
-    },
+    queryFn: () => fetchKpiTemplates() as Promise<KpiTemplate[]>,
   });
 
   const upsert = useMutation({
     mutationFn: async (payload: typeof EMPTY & { id?: string }) => {
-      const { id, ...rest } = payload;
-      if (id) {
-        const { error } = await supabase.from("kpi_templates").update(rest).eq("id", id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("kpi_templates")
-          .insert({ ...rest, created_by: user!.id });
-        if (error) throw error;
-      }
+      await upsertKpiTemplate({ data: { ...payload, created_by: !payload.id ? user!.id : undefined } });
     },
     onSuccess: () => {
       toast.success(editing ? "KPI updated" : "KPI created");
@@ -87,8 +71,7 @@ function KpiBuilderPage() {
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("kpi_templates").delete().eq("id", id);
-      if (error) throw error;
+      await deleteKpiTemplate({ data: { id } });
     },
     onSuccess: () => {
       toast.success("KPI deleted");

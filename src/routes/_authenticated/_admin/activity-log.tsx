@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { getActivityLogDTRs } from "@/lib/dtr-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -57,25 +57,7 @@ function ActivityLogPage() {
 
   const { data: logs, isLoading } = useQuery({
     queryKey: ["activity-log"],
-    queryFn: async (): Promise<LogEntry[]> => {
-      const { data, error } = await supabase
-        .from("daily_time_reports")
-        .select(`
-          id, employee_id, work_date, time_in, time_out,
-          hours_worked, shift_label, is_undertime, undertime_minutes, created_at,
-          profiles!employee_id(full_name, employee_code, department)
-        `)
-        .order("work_date", { ascending: false })
-        .order("time_in", { ascending: false })
-        .limit(1000);
-      if (error) throw error;
-      return (data ?? []).map((row: Record<string, unknown>) => ({
-        ...row,
-        profile: Array.isArray(row.profiles)
-          ? (row.profiles[0] ?? null)
-          : (row.profiles ?? null),
-      })) as LogEntry[];
-    },
+    queryFn: () => getActivityLogDTRs() as Promise<LogEntry[]>,
   });
 
   const filtered = (logs ?? []).filter((entry) => {

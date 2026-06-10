@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { fetchProfilesForOrg, fetchAllOrgNodes, saveOrgChartData } from "@/lib/org-functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -104,26 +104,12 @@ function OrgChartPage() {
   // ── Remote data ─────────────────────────────────────────────────────────
   const { data: profiles = [] } = useQuery<Profile[]>({
     queryKey: ["profiles-org"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, position, department")
-        .order("full_name");
-      if (error) throw error;
-      return (data ?? []) as Profile[];
-    },
+    queryFn: () => fetchProfilesForOrg() as Promise<Profile[]>,
   });
 
   const { data: orgNodes = [], isLoading } = useQuery<OrgNode[]>({
     queryKey: ["org-nodes"],
-    queryFn: async () => {
-      // org_nodes is not yet registered in the generated Supabase types
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = supabase as any;
-      const { data, error } = await db.from("org_nodes").select("*");
-      if (error) throw error;
-      return (data ?? []) as OrgNode[];
-    },
+    queryFn: () => fetchAllOrgNodes() as Promise<OrgNode[]>,
   });
 
   // ── Hydrate React Flow state once remote data is ready ──────────────────
@@ -277,28 +263,22 @@ function OrgChartPage() {
   // ── Save ─────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     setSaving(true);
-    // org_nodes is not yet registered in the generated Supabase types
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = supabase as any;
     try {
-      // 1. Delete all existing rows (gte on created_at as a catch-all)
-      const { error: deleteError } = await db
-        .from("org_nodes")
-        .delete()
-        .gte("created_at", "1970-01-01");
-      if (deleteError) throw deleteError;
+      const edgePairs = edges
+        .map((edge) => {
+          const childNode = nodes.find((n) => n.id === edge.target);
+          const parentNode = nodes.find((n) => n.id === edge.source);
+          if (!childNode || !parentNode) return null;
+          return {
+            childEmpId: (childNode.data as EmployeeNodeData).employee_id,
+            parentEmpId: (parentNode.data as EmployeeNodeData).employee_id,
+          };
+        })
+        .filter((p): p is { childEmpId: string; parentEmpId: string } => p !== null);
 
-      if (nodes.length === 0) {
-        toast.success("Org chart cleared");
-        setHasUnsavedChanges(false);
-        return;
-      }
-
-      // 2. Insert all nodes without parent_id
-      const { data: inserted, error: insertError } = await db
-        .from("org_nodes")
-        .insert(
-          nodes.map((n) => {
+      await saveOrgChartData({
+        data: {
+          nodes: nodes.map((n) => {
             const d = n.data as EmployeeNodeData;
             return {
               employee_id: d.employee_id,
@@ -307,40 +287,11 @@ function OrgChartPage() {
               position_x: n.position.x,
               position_y: n.position.y,
             };
-          })
-        )
-        .select("id, employee_id");
-      if (insertError) throw insertError;
-      if (!inserted) throw new Error("Insert returned no data");
-
-      // 3. Build map: employee_id → new db org_node id
-      const empToOrgNodeId: Record<string, string> = Object.fromEntries(
-        (inserted as { id: string; employee_id: string }[]).map((r) => [r.employee_id, r.id])
-      );
-
-      // 4. Update parent_ids based on edges
-      const updatePromises = edges
-        .map((edge) => {
-          const childNode = nodes.find((n) => n.id === edge.target);
-          const parentNode = nodes.find((n) => n.id === edge.source);
-          if (!childNode || !parentNode) return null;
-          const childEmpId = (childNode.data as EmployeeNodeData).employee_id;
-          const parentEmpId = (parentNode.data as EmployeeNodeData).employee_id;
-          const childOrgNodeId = empToOrgNodeId[childEmpId];
-          const parentOrgNodeId = empToOrgNodeId[parentEmpId];
-          if (!childOrgNodeId || !parentOrgNodeId) return null;
-          return db
-            .from("org_nodes")
-            .update({ parent_id: parentOrgNodeId })
-            .eq("id", childOrgNodeId) as Promise<{ error: unknown }>;
-        })
-        .filter((p): p is Promise<{ error: unknown }> => p !== null);
-
-      const results = await Promise.all(updatePromises);
-      const firstErr = results.find((r) => r.error);
-      if (firstErr?.error) throw firstErr.error;
-
-      toast.success("Org chart saved");
+          }),
+          edgePairs,
+        },
+      });
+      toast.success(nodes.length === 0 ? "Org chart cleared" : "Org chart saved");
       setHasUnsavedChanges(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save");

@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
+import {
+  getMyOTBudgets, getMyActualOTs, getApprovedOTBudgets,
+  getPendingISApprovals, getPendingDHApprovals,
+  resolveOTApprovers, insertOTRequest, updateOTRequest,
+} from "@/lib/ot-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,62 +103,6 @@ function StepBadge({ step }: { step: OTRequest["step"] }) {
   );
 }
 
-// ── Resolve approvers by walking org_nodes ────────────────────────────────────
-
-async function resolveApprovers(
-  currentUserId: string,
-): Promise<{ isApproverId: string; dhApproverId: string }> {
-  const { data: myNode, error: e1 } = await supabase
-    .from("org_nodes")
-    .select("id, parent_id")
-    .eq("employee_id", currentUserId)
-    .single();
-  if (e1 || !myNode) throw new Error("NO_ORG_NODE");
-  if (!myNode.parent_id) throw new Error("NO_ORG_NODE");
-
-  const { data: parentNode, error: e2 } = await supabase
-    .from("org_nodes")
-    .select("employee_id")
-    .eq("id", myNode.parent_id)
-    .single();
-  if (e2 || !parentNode) throw new Error("NO_ORG_NODE");
-
-  const isApproverId = parentNode.employee_id as string;
-
-  let currentId = isApproverId;
-  let dhApproverId: string | null = null;
-  const visited = new Set<string>();
-
-  while (true) {
-    if (visited.has(currentId)) break;
-    visited.add(currentId);
-
-    const { data: node } = await supabase
-      .from("org_nodes")
-      .select("id, employee_id, parent_id, is_dept_head")
-      .eq("employee_id", currentId)
-      .single<OrgNode>();
-
-    if (!node) break;
-    if (node.is_dept_head) {
-      dhApproverId = node.employee_id;
-      break;
-    }
-    if (!node.parent_id) break;
-
-    const { data: pNode } = await supabase
-      .from("org_nodes")
-      .select("employee_id")
-      .eq("id", node.parent_id)
-      .single<{ employee_id: string }>();
-
-    if (!pNode) break;
-    currentId = pNode.employee_id;
-  }
-
-  if (!dhApproverId) throw new Error("NO_DH");
-  return { isApproverId, dhApproverId };
-}
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -196,49 +144,21 @@ function OTApprovalsPage() {
   // ── Section 1: My pre-approved OT budget requests ───────────────────────
   const { data: myBudgets, isLoading: myBudgetsLoading } = useQuery({
     queryKey: ["ot-budgets-mine", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select("*")
-        .eq("employee_id", user!.id)
-        .eq("request_type", "pre_approved")
-        .order("target_month", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as OTRequest[];
-    },
+    queryFn: () => getMyOTBudgets({ data: { employeeId: user!.id } }) as Promise<OTRequest[]>,
     enabled: !!user && !isHR,
   });
 
   // ── Section 2a: My filed OT (actual) ────────────────────────────────────
   const { data: myActuals, isLoading: myActualsLoading } = useQuery({
     queryKey: ["ot-actuals-mine", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select("*")
-        .eq("employee_id", user!.id)
-        .eq("request_type", "actual")
-        .order("work_date", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as OTRequest[];
-    },
+    queryFn: () => getMyActualOTs({ data: { employeeId: user!.id } }) as Promise<OTRequest[]>,
     enabled: !!user && !isHR,
   });
 
   // ── Section 2b: Approved budgets (for dropdown in file dialog) ───────────
   const { data: approvedBudgets } = useQuery({
     queryKey: ["ot-budgets-approved", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select("*")
-        .eq("employee_id", user!.id)
-        .eq("request_type", "pre_approved")
-        .eq("status", "approved")
-        .order("target_month", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as OTRequest[];
-    },
+    queryFn: () => getApprovedOTBudgets({ data: { employeeId: user!.id } }) as Promise<OTRequest[]>,
     enabled: !!user && !isHR,
   });
 
@@ -272,38 +192,14 @@ function OTApprovalsPage() {
   // ── Section 3: Pending IS approvals ─────────────────────────────────────
   const { data: isRequests, isLoading: isLoading_ } = useQuery({
     queryKey: ["ot-requests-is", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select(
-          "*, profile:profiles!ot_approval_requests_employee_id_fkey(full_name)",
-        )
-        .eq("is_approver_id", user!.id)
-        .eq("step", "is")
-        .eq("status", "pending")
-        .eq("request_type", "pre_approved");
-      if (error) throw error;
-      return (data ?? []) as OTRequestWithProfile[];
-    },
+    queryFn: () => getPendingISApprovals({ data: { userId: user!.id } }) as Promise<OTRequestWithProfile[]>,
     enabled: !!user,
   });
 
   // ── Section 4: Pending DH approvals ─────────────────────────────────────
   const { data: dhRequests, isLoading: dhLoading } = useQuery({
     queryKey: ["ot-requests-dh", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select(
-          "*, profile:profiles!ot_approval_requests_employee_id_fkey(full_name)",
-        )
-        .eq("dh_approver_id", user!.id)
-        .eq("step", "dh")
-        .eq("status", "pending")
-        .eq("request_type", "pre_approved");
-      if (error) throw error;
-      return (data ?? []) as OTRequestWithProfile[];
-    },
+    queryFn: () => getPendingDHApprovals({ data: { userId: user!.id } }) as Promise<OTRequestWithProfile[]>,
     enabled: !!user,
   });
 
@@ -314,17 +210,8 @@ function OTApprovalsPage() {
   const requestBudget = useMutation({
     mutationFn: async () => {
       if (!user) throw new Error("Not signed in");
-      let isApproverId: string;
-      let dhApproverId: string;
-      try {
-        ({ isApproverId, dhApproverId } = await resolveApprovers(user.id));
-      } catch (err) {
-        if (err instanceof Error && err.message === "NO_ORG_NODE") {
-          throw new Error("NO_ORG_NODE");
-        }
-        throw err;
-      }
-      const { error } = await supabase.from("ot_approval_requests").insert({
+      const { isApproverId, dhApproverId } = await resolveOTApprovers({ data: { employeeId: user.id } });
+      await insertOTRequest({ data: {
         employee_id: user.id,
         request_type: "pre_approved",
         target_month: budgetForm.month + "-01",
@@ -336,8 +223,7 @@ function OTApprovalsPage() {
         is_approver_id: isApproverId,
         dh_approver_id: dhApproverId,
         is_notes: budgetForm.notes || null,
-      });
-      if (error) throw error;
+      }});
     },
     onSuccess: () => {
       toast.success("OT budget request submitted");
@@ -363,11 +249,9 @@ function OTApprovalsPage() {
       if (!user) throw new Error("Not signed in");
       if (!selectedBudget) throw new Error("Select a budget first");
       if (fileForm.hours > remainingForSelected) {
-        throw new Error(
-          `Hours exceed remaining budget (${remainingForSelected}h left)`,
-        );
+        throw new Error(`Hours exceed remaining budget (${remainingForSelected}h left)`);
       }
-      const { error } = await supabase.from("ot_approval_requests").insert({
+      await insertOTRequest({ data: {
         employee_id: user.id,
         request_type: "actual",
         pre_approved_id: selectedBudget.id,
@@ -379,8 +263,7 @@ function OTApprovalsPage() {
         status: "approved",
         is_approver_id: null,
         dh_approver_id: null,
-      });
-      if (error) throw error;
+      }});
     },
     onSuccess: () => {
       toast.success("OT hours filed");
@@ -398,22 +281,8 @@ function OTApprovalsPage() {
 
   // ── Mutation: IS approve ─────────────────────────────────────────────────
   const isApprove = useMutation({
-    mutationFn: async ({
-      requestId,
-      notes,
-    }: {
-      requestId: string;
-      notes: string;
-    }) => {
-      const { error } = await supabase
-        .from("ot_approval_requests")
-        .update({
-          step: "dh",
-          is_decided_at: new Date().toISOString(),
-          is_notes: notes || null,
-        })
-        .eq("id", requestId);
-      if (error) throw error;
+    mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
+      await updateOTRequest({ data: { id: requestId, fields: { step: "dh", is_decided_at: new Date().toISOString(), is_notes: notes || null } } });
     },
     onSuccess: () => {
       toast.success("Approved — forwarded to department head");
@@ -426,22 +295,8 @@ function OTApprovalsPage() {
 
   // ── Mutation: IS reject ──────────────────────────────────────────────────
   const isReject = useMutation({
-    mutationFn: async ({
-      requestId,
-      notes,
-    }: {
-      requestId: string;
-      notes: string;
-    }) => {
-      const { error } = await supabase
-        .from("ot_approval_requests")
-        .update({
-          status: "rejected",
-          is_decided_at: new Date().toISOString(),
-          is_notes: notes || null,
-        })
-        .eq("id", requestId);
-      if (error) throw error;
+    mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
+      await updateOTRequest({ data: { id: requestId, fields: { status: "rejected", is_decided_at: new Date().toISOString(), is_notes: notes || null } } });
     },
     onSuccess: () => {
       toast.success("Request rejected");
@@ -454,22 +309,8 @@ function OTApprovalsPage() {
 
   // ── Mutation: DH approve (final) ─────────────────────────────────────────
   const dhApprove = useMutation({
-    mutationFn: async ({
-      requestId,
-      notes,
-    }: {
-      requestId: string;
-      notes: string;
-    }) => {
-      const { error } = await supabase
-        .from("ot_approval_requests")
-        .update({
-          status: "approved",
-          dh_decided_at: new Date().toISOString(),
-          dh_notes: notes || null,
-        })
-        .eq("id", requestId);
-      if (error) throw error;
+    mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
+      await updateOTRequest({ data: { id: requestId, fields: { status: "approved", dh_decided_at: new Date().toISOString(), dh_notes: notes || null } } });
     },
     onSuccess: () => {
       toast.success("OT budget approved");
@@ -482,22 +323,8 @@ function OTApprovalsPage() {
 
   // ── Mutation: DH reject ──────────────────────────────────────────────────
   const dhReject = useMutation({
-    mutationFn: async ({
-      requestId,
-      notes,
-    }: {
-      requestId: string;
-      notes: string;
-    }) => {
-      const { error } = await supabase
-        .from("ot_approval_requests")
-        .update({
-          status: "rejected",
-          dh_decided_at: new Date().toISOString(),
-          dh_notes: notes || null,
-        })
-        .eq("id", requestId);
-      if (error) throw error;
+    mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
+      await updateOTRequest({ data: { id: requestId, fields: { status: "rejected", dh_decided_at: new Date().toISOString(), dh_notes: notes || null } } });
     },
     onSuccess: () => {
       toast.success("OT budget request rejected");

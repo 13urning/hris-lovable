@@ -66,10 +66,12 @@ CREATE TABLE public.profiles (
   position      TEXT,
   vl_credits    INTEGER NOT NULL DEFAULT 10,
   sl_credits    INTEGER NOT NULL DEFAULT 10,
-  vl_remaining  INTEGER,
-  sl_remaining  INTEGER,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  company               TEXT,
+  vl_remaining          INTEGER,
+  sl_remaining          INTEGER,
+  must_change_password  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 

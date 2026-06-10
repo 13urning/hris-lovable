@@ -1,8 +1,8 @@
-import { createServerFn } from "@tanstack/react-start";
+﻿import { createServerFn } from "@tanstack/react-start";
 
 // Fetch profile + roles for an existing user by Firebase UID.
 export const fetchUserData = createServerFn({ method: "POST" })
-  .validator((firebaseUid: string) => firebaseUid)
+  .inputValidator((firebaseUid: string) => firebaseUid)
   .handler(async ({ data: firebaseUid }) => {
     const { pool } = await import("@/lib/db.server");
 
@@ -38,7 +38,7 @@ export const fetchUserData = createServerFn({ method: "POST" })
 
 // Create user, profile, and default employee role for a new Firebase sign-up.
 export const provisionUser = createServerFn({ method: "POST" })
-  .validator(
+  .inputValidator(
     (data: { firebaseUid: string; email: string; fullName?: string }) => data,
   )
   .handler(async ({ data }) => {
@@ -78,7 +78,7 @@ export const provisionUser = createServerFn({ method: "POST" })
 
 // Fetch only the must_change_password flag for the auth gate.
 export const getProfileFlags = createServerFn({ method: "POST" })
-  .validator((firebaseUid: string) => firebaseUid)
+  .inputValidator((firebaseUid: string) => firebaseUid)
   .handler(async ({ data: firebaseUid }) => {
     const { pool } = await import("@/lib/db.server");
     const result = await pool.query<{ must_change_password: boolean }>(
@@ -93,7 +93,7 @@ export const getProfileFlags = createServerFn({ method: "POST" })
 
 // Clear the must_change_password flag after a successful password reset.
 export const clearPasswordChangeFlag = createServerFn({ method: "POST" })
-  .validator((firebaseUid: string) => firebaseUid)
+  .inputValidator((firebaseUid: string) => firebaseUid)
   .handler(async ({ data: firebaseUid }) => {
     const { pool } = await import("@/lib/db.server");
     await pool.query(

@@ -2,8 +2,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
 import { getRecentDTRs } from "@/lib/queries";
+import { getTodayDTR, clockInDTR, clockOutDTR } from "@/lib/dtr-functions";
+import { getOTBudgetsForDashboard, getFiledOTForDashboard } from "@/lib/ot-functions";
+import { fetchMyProfile, fetchMyLeaves } from "@/lib/leave-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,31 +27,13 @@ function Dashboard() {
   const { data: otBudgets } = useQuery({
     queryKey: ["ot-budget", user?.id, firstOfMonth],
     enabled: !!user && !isHR,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select("id, requested_hours, target_month, status")
-        .eq("employee_id", user!.id)
-        .eq("request_type", "pre_approved")
-        .eq("status", "approved")
-        .eq("target_month", firstOfMonth);
-      if (error) throw error;
-      return data ?? [];
-    },
+    queryFn: () => getOTBudgetsForDashboard({ data: { employeeId: user!.id, targetMonth: firstOfMonth } }),
   });
 
   const { data: otFiled } = useQuery({
     queryKey: ["ot-filed", user?.id, firstOfMonth],
     enabled: !!user && !isHR,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("ot_approval_requests")
-        .select("id, requested_hours, pre_approved_id")
-        .eq("employee_id", user!.id)
-        .eq("request_type", "actual");
-      if (error) throw error;
-      return data ?? [];
-    },
+    queryFn: () => getFiledOTForDashboard({ data: { employeeId: user!.id } }),
   });
 
   const totalApprovedOT = (otBudgets ?? []).reduce((s, b) => s + Number(b.requested_hours), 0);
@@ -63,44 +47,19 @@ function Dashboard() {
   const { data: myProfile } = useQuery({
     queryKey: ["my-profile", user?.id],
     enabled: !!user && !isHR,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("vl_credits, sl_credits, vl_remaining, sl_remaining")
-        .eq("id", user!.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () => fetchMyProfile({ data: { userId: user!.id } }),
   });
 
   const { data: myLeaves } = useQuery({
     queryKey: ["my-leaves", user?.id],
     enabled: !!user && !isHR,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("leave_requests")
-        .select("id, leave_type, start_date, end_date, status")
-        .eq("employee_id", user!.id)
-        .order("start_date", { ascending: false });
-      if (error) throw error;
-      return data ?? [];
-    },
+    queryFn: () => fetchMyLeaves({ data: { userId: user!.id } }),
   });
 
   // ── Today's attendance ─────────────────────────────────────────────────
   const { data: todayEntry, refetch: refetchToday } = useQuery({
     queryKey: ["dtr-today", user?.id, today],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("daily_time_reports")
-        .select("id, time_in, time_out, hours_worked, shift_label, is_undertime, undertime_minutes")
-        .eq("employee_id", user!.id)
-        .eq("work_date", today)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
+    queryFn: () => getTodayDTR({ data: { employeeId: user!.id, date: today } }),
     enabled: !!user && !isHR,
   });
 
@@ -116,16 +75,7 @@ function Dashboard() {
   const clockIn = useMutation({
     mutationFn: async (shiftLabel: "7-4" | "8-5" | "9-6") => {
       const timeIn = new Date().toTimeString().slice(0, 5);
-      const { error } = await supabase.from("daily_time_reports").insert({
-        employee_id: user!.id,
-        work_date: today,
-        time_in: timeIn,
-        shift_label: shiftLabel,
-        cutoff_id: null,
-        is_undertime: false,
-        undertime_minutes: 0,
-      });
-      if (error) throw error;
+      await clockInDTR({ data: { employeeId: user!.id, workDate: today, timeIn, shiftLabel } });
     },
     onSuccess: () => {
       toast.success("Clocked in!");
@@ -145,11 +95,7 @@ function Dashboard() {
       const STANDARD = 9;
       const isUndertime = hoursWorked < STANDARD;
       const undertimeMins = isUndertime ? Math.round(STANDARD * 60 - totalMins) : 0;
-      const { error } = await supabase
-        .from("daily_time_reports")
-        .update({ time_out: timeOut, hours_worked: hoursWorked, is_undertime: isUndertime, undertime_minutes: undertimeMins })
-        .eq("id", todayEntry!.id);
-      if (error) throw error;
+      await clockOutDTR({ data: { dtrId: todayEntry!.id, timeOut, hoursWorked, isUndertime, undertimeMins } });
       return { hoursWorked, isUndertime, undertimeMins };
     },
     onSuccess: (result) => {

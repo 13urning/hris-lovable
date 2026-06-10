@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { fetchAllEmployees, updateEmployeeProfile, setEmployeeRole, bulkCreateEmployees } from "@/lib/employee-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Download, Upload, Check, X, Copy, Users, Save } from "lucide-react";
 import { toast } from "sonner";
-import { businessDaysBetween } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/_admin/employees")({ component: EmployeesPage });
 
@@ -158,63 +157,20 @@ function EmployeesPage() {
 
   const { data } = useQuery({
     queryKey: ["employees"],
-    queryFn: async (): Promise<Row[]> => {
-      const { data: profiles, error } = await supabase.from("profiles").select("*").order("full_name");
-      if (error) throw error;
-      const { data: roles } = await supabase.from("user_roles").select("user_id, role");
-      const { data: leaves } = await supabase.from("leave_requests").select("employee_id, leave_type, start_date, end_date, status");
-
-      const currentYear = new Date().getFullYear();
-      const inCurrentYear = (iso: string) => {
-        try {
-          return new Date(iso).getFullYear() === currentYear;
-        } catch {
-          return false;
-        }
-      };
-
-      const leaveDays = (a: string, b: string) => businessDaysBetween(a, b);
-
-      return (profiles ?? []).map((p) => {
-        const userRoles = (roles ?? []).filter((r) => r.user_id === p.id).map((r) => r.role as Row["roles"][number]);
-        const userLeaves = (leaves ?? []).filter((l) => l.employee_id === p.id);
-
-        const vl_used = userLeaves
-          .filter((l) => l.leave_type === "VL" && (l.status === "approved" || l.status === "pending") && inCurrentYear(l.start_date))
-          .reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
-
-        const sl_used = userLeaves
-          .filter((l) => l.leave_type === "SL" && (l.status === "approved" || l.status === "pending") && inCurrentYear(l.start_date))
-          .reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
-
-        return {
-          ...p,
-          roles: userRoles,
-          vl_used,
-          sl_used,
-        };
-      });
-    },
+    queryFn: () => fetchAllEmployees() as Promise<Row[]>,
   });
 
   const saveRow = useMutation({
     mutationFn: async ({ row, edits }: { row: Row; edits: Record<string, string | number> }) => {
       const patches: Record<string, string | number> = {};
       for (const [field, value] of Object.entries(edits)) {
-        if (field === "vl_total") {
-          patches.vl_credits = Number(value);
-        } else if (field === "sl_total") {
-          patches.sl_credits = Number(value);
-        } else if (field === "vl_remaining") {
-          patches.vl_remaining = Number(value);
-        } else if (field === "sl_remaining") {
-          patches.sl_remaining = Number(value);
-        } else {
-          patches[field] = value;
-        }
+        if (field === "vl_total") patches.vl_credits = Number(value);
+        else if (field === "sl_total") patches.sl_credits = Number(value);
+        else if (field === "vl_remaining") patches.vl_remaining = Number(value);
+        else if (field === "sl_remaining") patches.sl_remaining = Number(value);
+        else patches[field] = value;
       }
-      const { error } = await supabase.from("profiles").update(patches as never).eq("id", row.id);
-      if (error) throw error;
+      await updateEmployeeProfile({ data: { id: row.id, patches } });
     },
     onSuccess: (_data, { row }) => {
       clearEdit(row.id);
@@ -225,15 +181,13 @@ function EmployeesPage() {
 
   const setRole = useMutation({
     mutationFn: async ({ userId, role }: { userId: string; role: "employee" | "hr" | "admin" }) => {
-      await supabase.from("user_roles").delete().eq("user_id", userId);
-      const inserts =
+      const roles =
         role === "admin"
-          ? [{ user_id: userId, role: "admin" as const }, { user_id: userId, role: "hr" as const }, { user_id: userId, role: "employee" as const }]
+          ? [{ user_id: userId, role: "admin" }, { user_id: userId, role: "hr" }, { user_id: userId, role: "employee" }]
           : role === "hr"
-          ? [{ user_id: userId, role: "hr" as const }, { user_id: userId, role: "employee" as const }]
-          : [{ user_id: userId, role: "employee" as const }];
-      const { error } = await supabase.from("user_roles").insert(inserts);
-      if (error) throw error;
+          ? [{ user_id: userId, role: "hr" }, { user_id: userId, role: "employee" }]
+          : [{ user_id: userId, role: "employee" }];
+      await setEmployeeRole({ data: { userId, roles } });
     },
     onSuccess: () => { toast.success("Role updated"); qc.invalidateQueries({ queryKey: ["employees"] }); },
     onError: (e: Error) => toast.error(e.message),
@@ -279,13 +233,8 @@ function EmployeesPage() {
   async function handleImport() {
     setImporting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const { data, error } = await supabase.functions.invoke("bulk-create-employees", {
-        body: { employees: importRows },
-        headers: { Authorization: `Bearer ${session?.access_token}` },
-      });
-      if (error) throw error;
-      setImportResults((data as { results: ImportResult[] }).results);
+      const results = await bulkCreateEmployees({ data: { employees: importRows } });
+      setImportResults(results);
       setImportStep("results");
       qc.invalidateQueries({ queryKey: ["employees"] });
     } catch (err) {

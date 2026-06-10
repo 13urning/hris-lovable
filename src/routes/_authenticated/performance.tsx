@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  fetchMyEvaluations, fetchKpiScoresByEvalId, fetchBehavioralScoresByEvalId,
+  updateKpiSelfScore, updateBehavioralSelfScore, markEvaluationSelfAssessed,
+} from "@/lib/performance-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { BarChart3, CheckCircle2, Clock, Send, Target, Heart } from "lucide-react";
-import { RATING_COLORS, RATING_DESCRIPTIONS, type OverallRating } from "@/lib/performance-rating";
+import { RATING_COLORS, RATING_DESCRIPTIONS, computeOverallRating, type OverallRating } from "@/lib/performance-rating";
 
 export const Route = createFileRoute("/_authenticated/performance")({ component: PerformancePage });
 
@@ -79,43 +82,19 @@ function PerformancePage() {
   const { data: evaluations = [], isLoading } = useQuery({
     queryKey: ["my-evaluations", user?.id],
     enabled: !!user,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("performance_evaluations")
-        .select(`*, period:evaluation_periods(title,period_type,start_date,end_date,status)`)
-        .eq("employee_id", user!.id)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as Evaluation[];
-    },
+    queryFn: () => fetchMyEvaluations({ data: { userId: user!.id } }) as Promise<Evaluation[]>,
   });
 
   const { data: kpiScores = [] } = useQuery({
     queryKey: ["my-kpi-scores", assessingEval?.id],
     enabled: !!assessingEval,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("evaluation_kpi_scores")
-        .select("*")
-        .eq("evaluation_id", assessingEval!.id)
-        .order("kpi_title");
-      if (error) throw error;
-      return (data ?? []) as KpiScore[];
-    },
+    queryFn: () => fetchKpiScoresByEvalId({ data: { evaluationId: assessingEval!.id } }) as Promise<KpiScore[]>,
   });
 
   const { data: behavioralScores = [] } = useQuery({
     queryKey: ["my-behavioral-scores", assessingEval?.id],
     enabled: !!assessingEval,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("evaluation_behavioral_scores")
-        .select("*, competency:behavioral_competencies(display_order)")
-        .eq("evaluation_id", assessingEval!.id);
-      if (error) throw error;
-      return ((data ?? []) as (BehavioralScore & { competency?: { display_order: number } })[])
-        .sort((a, b) => (a.competency?.display_order ?? 0) - (b.competency?.display_order ?? 0));
-    },
+    queryFn: () => fetchBehavioralScoresByEvalId({ data: { evaluationId: assessingEval!.id } }) as Promise<BehavioralScore[]>,
   });
 
   const openAssessment = (ev: Evaluation) => {
@@ -127,35 +106,31 @@ function PerformancePage() {
   const submitSelfAssessment = useMutation({
     mutationFn: async () => {
       if (!assessingEval) return;
-      // KPI self scores
       for (const score of kpiScores) {
         const patch = kpiPatches[score.id];
         if (patch) {
-          const { error } = await supabase.from("evaluation_kpi_scores").update({
-            self_score: patch.self_score,
-            self_actual_value: parseFloat(patch.self_actual_value) || null,
-            self_comments: patch.self_comments || null,
-          }).eq("id", score.id);
-          if (error) throw error;
+          await updateKpiSelfScore({ data: {
+            id: score.id,
+            selfScore: patch.self_score,
+            selfActualValue: parseFloat(patch.self_actual_value) || null,
+            selfComments: patch.self_comments || null,
+          }});
         }
       }
-      // Behavioral self ratings + accomplishments
       for (const beh of behavioralScores) {
         const patch = behavioralPatches[beh.id];
         if (patch) {
-          const { error } = await supabase.from("evaluation_behavioral_scores").update({
-            employee_rating: patch.employee_rating,
-            employee_accomplishments: patch.employee_accomplishments || null,
-          }).eq("id", beh.id);
-          if (error) throw error;
+          await updateBehavioralSelfScore({ data: {
+            id: beh.id,
+            employeeRating: patch.employee_rating,
+            employeeAccomplishments: patch.employee_accomplishments || null,
+          }});
         }
       }
-      // Move to self_assessed
-      const { error } = await supabase.from("performance_evaluations").update({
-        status: "self_assessed",
-        self_assessment_submitted_at: new Date().toISOString(),
-      }).eq("id", assessingEval.id);
-      if (error) throw error;
+      await markEvaluationSelfAssessed({ data: {
+        evaluationId: assessingEval.id,
+        submittedAt: new Date().toISOString(),
+      }});
     },
     onSuccess: () => {
       toast.success("Self-assessment submitted!");
@@ -166,6 +141,24 @@ function PerformancePage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  // Live self-assessment preview — updates as the employee rates themselves
+  const selfPreview = (() => {
+    if (!assessingEval || assessingEval.status === "approved") return null;
+    // Weighted KPI average (patch value takes precedence over stored value)
+    let totalWeight = 0, weightedSum = 0;
+    for (const s of kpiScores) {
+      const score = kpiPatches[s.id]?.self_score ?? s.self_score;
+      if (score != null) { weightedSum += score * s.kpi_weight; totalWeight += s.kpi_weight; }
+    }
+    const kpiAvg = totalWeight > 0 ? weightedSum / totalWeight : null;
+    // Behavioral average
+    const behRatings = behavioralScores
+      .map((b) => behavioralPatches[b.id]?.employee_rating ?? b.employee_rating)
+      .filter((v): v is number => v != null);
+    const behAvg = behRatings.length > 0 ? behRatings.reduce((s, v) => s + v, 0) / behRatings.length : null;
+    return { kpi: kpiAvg, behavioral: behAvg, overall: computeOverallRating(kpiAvg, behAvg) };
+  })();
 
   const pending = evaluations.filter((e) => e.status === "pending_self_assessment");
   const inProgress = evaluations.filter((e) => e.status === "self_assessed");
@@ -355,6 +348,37 @@ function PerformancePage() {
                 </div>
               );
             })()}
+
+            {/* Self-assessment rating preview (pending or submitted, not yet approved) */}
+            {selfPreview?.overall && (
+              <div className={`rounded-lg border-2 p-4 ${RATING_COLORS[selfPreview.overall].bg} ${RATING_COLORS[selfPreview.overall].border}`}>
+                <div className="flex items-center justify-between gap-4 mb-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      {assessingEval?.status === "pending_self_assessment" ? "Preview — Overall Rating" : "Your Self-Assessment Rating"}
+                    </p>
+                    <p className={`font-display text-2xl mt-0.5 ${RATING_COLORS[selfPreview.overall].text}`}>
+                      {selfPreview.overall}
+                    </p>
+                  </div>
+                  <div className="text-right text-sm space-y-0.5">
+                    <p><span className="text-muted-foreground">KPI Score </span><strong>{selfPreview.kpi?.toFixed(2) ?? "—"}</strong></p>
+                    <p><span className="text-muted-foreground">Behavioral </span><strong>{selfPreview.behavioral?.toFixed(2) ?? "—"}</strong></p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">{RATING_DESCRIPTIONS[selfPreview.overall]}</p>
+                {assessingEval?.status === "pending_self_assessment" && (
+                  <p className="text-[11px] text-muted-foreground/70 mt-2">
+                    Based on your current ratings. The final rating is determined after Group Head review.
+                  </p>
+                )}
+                {assessingEval?.status === "self_assessed" && (
+                  <p className="text-[11px] text-muted-foreground/70 mt-2">
+                    Based on your submitted self-assessment. Awaiting Group Head review.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* PART I: KPIs */}
             {kpiScores.length > 0 && (

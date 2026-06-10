@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
+import { fetchAllLeaves, fetchProfilesByIds, fileLeaveRequest, updateLeaveRequestStatus, deleteLeaveRequest } from "@/lib/leave-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -117,14 +117,7 @@ function LeavesPage() {
 
   const { data: leaves } = useQuery({
     queryKey: ["leaves"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("leave_requests")
-        .select("*")
-        .order("start_date", { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as LeaveRow[];
-    },
+    queryFn: () => fetchAllLeaves() as Promise<LeaveRow[]>,
   });
 
   const employeeIds = useMemo(
@@ -136,14 +129,8 @@ function LeavesPage() {
     queryKey: ["leave-profiles", employeeIds.join(",")],
     enabled: employeeIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, full_name, department")
-        .in("id", employeeIds);
-      if (error) throw error;
-      return Object.fromEntries(
-        (data ?? []).map((p) => [p.id, p as { id: string; full_name: string; department: string }]),
-      );
+      const profiles = await fetchProfilesByIds({ data: { ids: employeeIds } });
+      return Object.fromEntries(profiles.map((p) => [p.id, p]));
     },
   });
 
@@ -169,14 +156,7 @@ function LeavesPage() {
       if (isWeekend(form.end_date)) throw new Error("End date cannot be a weekend");
       if (new Date(form.end_date) < new Date(form.start_date))
         throw new Error("End date must be on or after start date");
-      const { error } = await supabase.from("leave_requests").insert({
-        employee_id: user.id,
-        leave_type: form.leave_type,
-        start_date: form.start_date,
-        end_date: form.end_date,
-        reason: form.reason || null,
-      });
-      if (error) throw error;
+      await fileLeaveRequest({ data: { employeeId: user.id, leaveType: form.leave_type, startDate: form.start_date, endDate: form.end_date, reason: form.reason || null } });
     },
     onSuccess: () => {
       toast.success("Leave filed");
@@ -188,17 +168,7 @@ function LeavesPage() {
 
   const updateStatus = useMutation({
     mutationFn: async ({ id, status, notes }: { id: string; status: LeaveStatus; notes?: string }) => {
-      const payload: Record<string, unknown> = {
-        status,
-        reviewed_by: user?.id ?? null,
-        reviewed_at: new Date().toISOString(),
-      };
-      if (notes !== undefined) payload.review_notes = notes;
-      const { error } = await supabase
-        .from("leave_requests")
-        .update(payload as never)
-        .eq("id", id);
-      if (error) throw error;
+      await updateLeaveRequestStatus({ data: { id, status, reviewedBy: user?.id ?? null, reviewedAt: new Date().toISOString(), notes } });
     },
     onSuccess: () => {
       toast.success("Updated");
@@ -209,8 +179,7 @@ function LeavesPage() {
 
   const cancelLeave = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("leave_requests").delete().eq("id", id);
-      if (error) throw error;
+      await deleteLeaveRequest({ data: { id } });
     },
     onSuccess: () => {
       toast.success("Removed");
