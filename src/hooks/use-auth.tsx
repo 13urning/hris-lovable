@@ -1,12 +1,31 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import {
+  createContext, useContext, useEffect, useRef, useState, type ReactNode,
+} from "react";
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as fbSignOut,
+  type User as FirebaseUser,
+} from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { fetchUserData, provisionUser } from "@/lib/user-functions";
 
 type AppRole = "employee" | "hr" | "admin" | "group_head";
 
+// AppUser wraps Firebase's User and adds our internal UUID + convenience alias.
+// Exposing `id` (= our DB UUID) keeps every existing component that reads
+// `user.id` working without changes.
+export type AppUser = {
+  id: string;            // Internal UUID from public.users table
+  uid: string;           // Firebase UID (same as firebaseUser.uid)
+  email: string | null;
+  firebaseUser: FirebaseUser;
+};
+
 type AuthState = {
-  user: User | null;
-  session: Session | null;
+  user: AppUser | null;
+  session: null;         // Kept for interface compatibility — Firebase has no session object
   roles: AppRole[];
   loading: boolean;
   rolesLoading: boolean;
@@ -23,92 +42,110 @@ type AuthState = {
 const Ctx = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [rolesLoading, setRolesLoading] = useState(true);
   const [rolesInitialized, setRolesInitialized] = useState(false);
-  // Ref so the onAuthStateChange closure can read the live value without re-subscribing
   const rolesInitializedRef = useRef(false);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-
-      if (event === 'SIGNED_OUT') {
+    return onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null);
         setRoles([]);
-        setRolesLoading(false);
-        return;
-      }
-
-      if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && s?.user) {
-        // Only show the loading indicator during the very first role fetch.
-        // On subsequent tab-refocus SIGNED_IN events the roles are already known,
-        // so we silently refresh them in the background without flipping rolesLoading.
-        if (!rolesInitializedRef.current) setRolesLoading(true);
-        setTimeout(() => {
-          supabase.from("user_roles").select("role").eq("user_id", s.user.id)
-            .then(({ data }) => {
-              setRoles((data ?? []).map((r) => r.role as AppRole));
-              setRolesLoading(false);
-              rolesInitializedRef.current = true;
-              setRolesInitialized(true);
-            });
-        }, 0);
-      }
-    });
-
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      if (s?.user) {
-        setRolesLoading(true);
-        supabase.from("user_roles").select("role").eq("user_id", s.user.id)
-          .then(({ data }) => {
-            setRoles((data ?? []).map((r) => r.role as AppRole));
-            setRolesLoading(false);
-            rolesInitializedRef.current = true;
-            setRolesInitialized(true);
-          });
-      } else {
+        setLoading(false);
         setRolesLoading(false);
         rolesInitializedRef.current = true;
         setRolesInitialized(true);
+        return;
       }
-      setLoading(false);
-    });
 
-    return () => subscription.unsubscribe();
+      if (!rolesInitializedRef.current) setRolesLoading(true);
+
+      try {
+        let data = await fetchUserData({ data: firebaseUser.uid });
+
+        if (!data) {
+          // First login after signup — provision DB records
+          const userId = await provisionUser({
+            data: { firebaseUid: firebaseUser.uid, email: firebaseUser.email ?? "" },
+          });
+          data = {
+            profile: {
+              id: userId,
+              full_name: firebaseUser.email?.split("@")[0] ?? "",
+              email: firebaseUser.email ?? "",
+              employee_code: null,
+              department: "General",
+              position: null,
+              must_change_password: false,
+            },
+            roles: ["employee"],
+          };
+        }
+
+        setUser({ id: data.profile.id, uid: firebaseUser.uid, email: firebaseUser.email, firebaseUser });
+        setRoles(data.roles as AppRole[]);
+      } catch (e) {
+        console.error("[useAuth] Failed to load user data:", e);
+      } finally {
+        setRolesLoading(false);
+        rolesInitializedRef.current = true;
+        setRolesInitialized(true);
+        setLoading(false);
+      }
+    });
   }, []);
 
   const signIn: AuthState["signIn"] = async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      return { error: null };
+    } catch (e: any) {
+      // Normalise Firebase error messages to be user-friendly
+      const msg: Record<string, string> = {
+        "auth/invalid-credential": "Incorrect email or password.",
+        "auth/user-not-found": "No account with that email.",
+        "auth/wrong-password": "Incorrect password.",
+        "auth/too-many-requests": "Too many attempts. Try again later.",
+      };
+      return { error: msg[e.code] ?? e.message ?? "Sign in failed." };
+    }
   };
 
   const signUp: AuthState["signUp"] = async (email, password, fullName) => {
-    const { error } = await supabase.auth.signUp({
-      email, password,
-      options: {
-        emailRedirectTo: window.location.origin,
-        data: { full_name: fullName },
-      },
-    });
-    return { error: error?.message ?? null };
+    try {
+      const { user: fbUser } = await createUserWithEmailAndPassword(auth, email, password);
+      await provisionUser({ data: { firebaseUid: fbUser.uid, email, fullName } });
+      return { error: null };
+    } catch (e: any) {
+      const msg: Record<string, string> = {
+        "auth/email-already-in-use": "An account with that email already exists.",
+        "auth/weak-password": "Password must be at least 6 characters.",
+      };
+      return { error: msg[e.code] ?? e.message ?? "Sign up failed." };
+    }
   };
 
-  const signOut = async () => { await supabase.auth.signOut(); };
+  const signOut = async () => { await fbSignOut(auth); };
 
   const value: AuthState = {
-    user, session, roles, loading, rolesLoading, rolesInitialized,
+    user,
+    session: null,
+    roles,
+    loading,
+    rolesLoading,
+    rolesInitialized,
     isAuthenticated: !!user,
     isHR: roles.includes("hr") || roles.includes("admin"),
     isAdmin: roles.includes("admin"),
     isGroupHead: roles.includes("group_head"),
-    signIn, signUp, signOut,
+    signIn,
+    signUp,
+    signOut,
   };
+
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

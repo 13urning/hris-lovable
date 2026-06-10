@@ -1,8 +1,9 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { updatePassword } from "firebase/auth";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase } from "@/integrations/supabase/client";
+import { getProfileFlags, clearPasswordChangeFlag } from "@/lib/user-functions";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,15 +30,8 @@ function ForcePasswordChange({ onDone }: { onDone: () => void }) {
     if (!canSubmit) return;
     setBusy(true);
     try {
-      // Update the Supabase auth password
-      const { error: authErr } = await supabase.auth.updateUser({ password: newPassword });
-      if (authErr) throw authErr;
-      // Clear the flag so this screen never shows again
-      const { error: profileErr } = await supabase
-        .from("profiles")
-        .update({ must_change_password: false })
-        .eq("id", user!.id);
-      if (profileErr) throw profileErr;
+      await updatePassword(user!.firebaseUser, newPassword);
+      await clearPasswordChangeFlag({ data: user!.uid });
       toast.success("Password updated — welcome!");
       onDone();
     } catch (err) {
@@ -111,17 +105,10 @@ function Gate() {
 
   // Check whether this user must change their password (set for all imported accounts)
   const { data: profileFlags, isLoading: flagsLoading } = useQuery({
-    queryKey: ["profile-flags", user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("profiles")
-        .select("must_change_password")
-        .eq("id", user!.id)
-        .maybeSingle();
-      return data;
-    },
+    queryKey: ["profile-flags", user?.uid],
+    queryFn: () => getProfileFlags({ data: user!.uid }),
     enabled: !!user && rolesInitialized,
-    staleTime: Infinity, // only refresh explicitly — we clear the flag ourselves
+    staleTime: Infinity,
   });
 
   if (loading || !rolesInitialized) {
