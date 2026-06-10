@@ -19,7 +19,9 @@ export const Route = createFileRoute("/_authenticated/_admin/employees")({ compo
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Row = {
-  id: string; full_name: string; email: string | null; department: string;
+  id: string; full_name: string;
+  first_name: string | null; middle_name: string | null; last_name: string | null;
+  email: string | null; department: string;
   employee_code: string | null; position: string | null; company: string | null;
   vl_credits: number | null; sl_credits: number | null;
   vl_remaining: number | null; sl_remaining: number | null;
@@ -29,10 +31,16 @@ type Row = {
 };
 
 type ImportRow = {
-  email: string; full_name: string; employee_code: string;
+  email: string;
+  first_name: string; middle_name: string; last_name: string;
+  employee_code: string;
   company: string; department: string; position: string;
   vl_credits: string; sl_credits: string;
 };
+
+function joinFullName(first: string, middle: string, last: string): string {
+  return [first, middle, last].map((s) => s.trim()).filter(Boolean).join(" ");
+}
 
 type ImportResult = {
   email: string; full_name: string;
@@ -42,13 +50,16 @@ type ImportResult = {
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
 const TEMPLATE_HEADERS = [
-  "email", "full_name", "employee_code", "company",
+  "email", "first_name", "middle_name", "last_name",
+  "employee_code", "company",
   "department", "position", "vl_credits", "sl_credits",
 ];
 
 const TEMPLATE_EXAMPLE: ImportRow = {
   email: "juan.delacruz@example.com",
-  full_name: "Juan dela Cruz",
+  first_name: "Juan",
+  middle_name: "Reyes",
+  last_name: "dela Cruz",
   employee_code: "EMP-001",
   company: "Tidal Solutions",
   department: "Engineering",
@@ -102,7 +113,9 @@ function parseCSV(text: string): ImportRow[] {
       const get = (name: string, fallback = "") => (cols[idx(name)] ?? fallback).trim();
       return {
         email: get("email"),
-        full_name: get("full_name"),
+        first_name: get("first_name"),
+        middle_name: get("middle_name"),
+        last_name: get("last_name"),
         employee_code: get("employee_code"),
         company: get("company"),
         department: get("department"),
@@ -169,6 +182,13 @@ function EmployeesPage() {
         else if (field === "vl_remaining") patches.vl_remaining = Number(value);
         else if (field === "sl_remaining") patches.sl_remaining = Number(value);
         else patches[field] = value;
+      }
+      // If any name part changed, re-derive full_name from the effective values
+      if ("first_name" in patches || "middle_name" in patches || "last_name" in patches) {
+        const first = String(patches.first_name ?? row.first_name ?? "");
+        const middle = String(patches.middle_name ?? row.middle_name ?? "");
+        const last = String(patches.last_name ?? row.last_name ?? "");
+        patches.full_name = joinFullName(first, middle, last);
       }
       await updateEmployeeProfile({ data: { id: row.id, patches } });
     },
@@ -302,7 +322,9 @@ function EmployeesPage() {
           <table className="w-full text-sm">
             <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 text-left">Name</th>
+                <th className="px-3 py-2 text-left">First name</th>
+                <th className="px-3 py-2 text-left">Middle name</th>
+                <th className="px-3 py-2 text-left">Last name</th>
                 <th className="px-3 py-2 text-left">Email</th>
                 <th className="px-3 py-2 text-left">Code</th>
                 <th className="px-3 py-2 text-left">Company</th>
@@ -328,12 +350,29 @@ function EmployeesPage() {
                   : (r.sl_credits ?? 10);
                 return (
                   <tr key={r.id} className={`border-t ${isDirty(r.id) ? "bg-primary/5" : ""}`}>
-                    {/* Name */}
+                    {/* First name */}
                     <td className="px-3 py-2">
                       <Input
                         className="h-8"
-                        value={String(pendingEdits[r.id]?.full_name ?? r.full_name)}
-                        onChange={(e) => setEdit(r.id, "full_name", e.target.value)}
+                        value={String(pendingEdits[r.id]?.first_name ?? (r.first_name ?? ""))}
+                        onChange={(e) => setEdit(r.id, "first_name", e.target.value)}
+                      />
+                    </td>
+                    {/* Middle name */}
+                    <td className="px-3 py-2">
+                      <Input
+                        className="h-8"
+                        placeholder="—"
+                        value={String(pendingEdits[r.id]?.middle_name ?? (r.middle_name ?? ""))}
+                        onChange={(e) => setEdit(r.id, "middle_name", e.target.value)}
+                      />
+                    </td>
+                    {/* Last name */}
+                    <td className="px-3 py-2">
+                      <Input
+                        className="h-8"
+                        value={String(pendingEdits[r.id]?.last_name ?? (r.last_name ?? ""))}
+                        onChange={(e) => setEdit(r.id, "last_name", e.target.value)}
                       />
                     </td>
                     {/* Email — read-only */}
@@ -471,7 +510,7 @@ function EmployeesPage() {
                 <Upload className="h-8 w-8 text-muted-foreground" />
                 <div>
                   <p className="text-sm font-medium">Upload your filled CSV</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Columns: email, full_name, employee_code, company, department, position, vl_credits, sl_credits</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Columns: email, first_name, middle_name, last_name, employee_code, company, department, position, vl_credits, sl_credits</p>
                 </div>
                 <input
                   ref={fileRef}
@@ -486,7 +525,7 @@ function EmployeesPage() {
               </div>
 
               <div className="rounded-md bg-secondary/40 p-3 text-xs text-muted-foreground">
-                <span className="font-medium text-foreground">Required:</span> email, full_name &nbsp;·&nbsp;
+                <span className="font-medium text-foreground">Required:</span> email, first_name, last_name &nbsp;·&nbsp;
                 <span className="font-medium text-foreground">Optional:</span> all other columns (vl_credits &amp; sl_credits default to 10)
               </div>
             </div>
@@ -503,7 +542,9 @@ function EmployeesPage() {
                   <thead className="sticky top-0 bg-secondary/80 text-[10px] uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 text-left">Email</th>
-                      <th className="px-3 py-2 text-left">Full Name</th>
+                      <th className="px-3 py-2 text-left">First</th>
+                      <th className="px-3 py-2 text-left">Middle</th>
+                      <th className="px-3 py-2 text-left">Last</th>
                       <th className="px-3 py-2 text-left">Code</th>
                       <th className="px-3 py-2 text-left">Company</th>
                       <th className="px-3 py-2 text-left">Department</th>
@@ -516,7 +557,9 @@ function EmployeesPage() {
                     {importRows.map((row, i) => (
                       <tr key={i} className="border-t">
                         <td className="px-3 py-1.5 font-medium">{row.email || <span className="text-destructive">missing</span>}</td>
-                        <td className="px-3 py-1.5">{row.full_name || <span className="text-destructive">missing</span>}</td>
+                        <td className="px-3 py-1.5">{row.first_name || <span className="text-destructive">missing</span>}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{row.middle_name || "—"}</td>
+                        <td className="px-3 py-1.5">{row.last_name || <span className="text-destructive">missing</span>}</td>
                         <td className="px-3 py-1.5 text-muted-foreground">{row.employee_code || "—"}</td>
                         <td className="px-3 py-1.5 text-muted-foreground">{row.company || "—"}</td>
                         <td className="px-3 py-1.5 text-muted-foreground">{row.department || "—"}</td>

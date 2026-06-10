@@ -1,7 +1,9 @@
 ﻿import { createServerFn } from "@tanstack/react-start";
 
 type EmployeeRow = {
-  id: string; full_name: string; email: string | null; department: string;
+  id: string; full_name: string;
+  first_name: string | null; middle_name: string | null; last_name: string | null;
+  email: string | null; department: string;
   employee_code: string | null; position: string | null; company: string | null;
   vl_credits: number | null; sl_credits: number | null;
   vl_remaining: number | null; sl_remaining: number | null;
@@ -11,10 +13,16 @@ type EmployeeRow = {
 };
 
 type ImportEmployee = {
-  email: string; full_name: string; employee_code: string;
+  email: string;
+  first_name: string; middle_name: string; last_name: string;
+  employee_code: string;
   company: string; department: string; position: string;
   vl_credits: string; sl_credits: string;
 };
+
+function joinFullName(first: string, middle: string, last: string): string {
+  return [first, middle, last].map((s) => s.trim()).filter(Boolean).join(" ");
+}
 
 type ImportResult = {
   email: string; full_name: string;
@@ -119,8 +127,9 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
     const results: ImportResult[] = [];
 
     for (const emp of data.employees) {
-      if (!emp.email || !emp.full_name) {
-        results.push({ email: emp.email, full_name: emp.full_name, success: false, error: "email and full_name are required" });
+      const fullName = joinFullName(emp.first_name ?? "", emp.middle_name ?? "", emp.last_name ?? "");
+      if (!emp.email || !emp.first_name || !emp.last_name) {
+        results.push({ email: emp.email, full_name: fullName, success: false, error: "email, first_name and last_name are required" });
         continue;
       }
 
@@ -152,11 +161,16 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
           );
 
           await client.query(
-            `INSERT INTO profiles (id, full_name, email, employee_code, company, department, position,
+            `INSERT INTO profiles (id, full_name, first_name, middle_name, last_name,
+                                   email, employee_code, company, department, position,
                                    vl_credits, sl_credits, vl_remaining, sl_remaining, must_change_password)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$8,$9,TRUE)`,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$11,$12,TRUE)`,
             [
-              user.id, emp.full_name, emp.email,
+              user.id, fullName,
+              emp.first_name.trim(),
+              emp.middle_name?.trim() || null,
+              emp.last_name.trim(),
+              emp.email,
               emp.employee_code || null, emp.company || null,
               emp.department || "General", emp.position || null,
               parseInt(emp.vl_credits) || 10, parseInt(emp.sl_credits) || 10,
@@ -176,10 +190,10 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
           client.release();
         }
 
-        results.push({ email: emp.email, full_name: emp.full_name, success: true, temp_password: tempPassword });
+        results.push({ email: emp.email, full_name: fullName, success: true, temp_password: tempPassword });
       } catch (err) {
         results.push({
-          email: emp.email, full_name: emp.full_name, success: false,
+          email: emp.email, full_name: fullName, success: false,
           error: err instanceof Error ? err.message : String(err),
         });
       }

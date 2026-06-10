@@ -63,10 +63,10 @@ function Dashboard() {
     enabled: !!user && !isHR,
   });
 
-  // ── Recent DTRs (last 14 days) ─────────────────────────────────────────
+  // ── Recent DTRs (current month) ────────────────────────────────────────
   const { data: recentDtrs } = useQuery({
     queryKey: ["recent-dtrs", user?.id],
-    queryFn: () => getRecentDTRs(user!.id, 14),
+    queryFn: () => getRecentDTRs(user!.id),
     enabled: !!user && !isHR,
   });
 

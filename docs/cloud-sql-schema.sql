@@ -60,6 +60,9 @@ CREATE TABLE public.users (
 CREATE TABLE public.profiles (
   id            UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
   full_name     TEXT NOT NULL DEFAULT '',
+  first_name    TEXT,
+  middle_name   TEXT,
+  last_name     TEXT,
   email         TEXT,
   employee_code TEXT,
   department    TEXT NOT NULL DEFAULT 'General',

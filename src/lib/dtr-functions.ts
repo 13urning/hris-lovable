@@ -17,16 +17,15 @@ export const getTodayDTR = createServerFn({ method: "POST" })
   });
 
 export const getRecentDTRsQuery = createServerFn({ method: "POST" })
-  .inputValidator((data: { employeeId: string; days: number }) => data)
+  .inputValidator((data: { employeeId: string }) => data)
   .handler(async ({ data }) => {
     const { pool } = await import("@/lib/db.server");
-    const since = new Date();
-    since.setDate(since.getDate() - data.days);
     const { rows } = await pool.query(
       `SELECT * FROM daily_time_reports
-       WHERE employee_id = $1 AND work_date >= $2
+       WHERE employee_id = $1
+         AND work_date >= date_trunc('month', CURRENT_DATE)::date
        ORDER BY work_date DESC`,
-      [data.employeeId, since.toISOString().slice(0, 10)],
+      [data.employeeId],
     );
     return rows;
   });
