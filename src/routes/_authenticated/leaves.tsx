@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchAllLeaves, fetchProfilesByIds, fileLeaveRequest, updateLeaveRequestStatus, deleteLeaveRequest } from "@/lib/leave-functions";
+import { fetchAllLeaves, fetchProfilesByIds, fileLeaveRequest, approveLeaveStep, rejectLeaveStep, fetchMyPendingLeaveApprovals, deleteLeaveRequest } from "@/lib/leave-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -166,13 +166,34 @@ function LeavesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const updateStatus = useMutation({
-    mutationFn: async ({ id, status, notes }: { id: string; status: LeaveStatus; notes?: string }) => {
-      await updateLeaveRequestStatus({ data: { id, status, reviewedBy: user?.id ?? null, reviewedAt: new Date().toISOString(), notes } });
+  const { data: pendingForMe } = useQuery({
+    queryKey: ["leaves-pending-for-me", user?.id],
+    enabled: !!user?.id,
+    queryFn: () => fetchMyPendingLeaveApprovals({ data: { userId: user!.id } }),
+  });
+
+  const approveStep = useMutation({
+    mutationFn: async ({ id, notes }: { id: string; notes?: string }) => {
+      if (!user) throw new Error("not signed in");
+      await approveLeaveStep({ data: { id, approverId: user.id, notes } });
     },
     onSuccess: () => {
-      toast.success("Updated");
+      toast.success("Approved");
       qc.invalidateQueries({ queryKey: ["leaves"] });
+      qc.invalidateQueries({ queryKey: ["leaves-pending-for-me"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rejectStep = useMutation({
+    mutationFn: async ({ id, notes }: { id: string; notes?: string }) => {
+      if (!user) throw new Error("not signed in");
+      await rejectLeaveStep({ data: { id, approverId: user.id, notes } });
+    },
+    onSuccess: () => {
+      toast.success("Rejected");
+      qc.invalidateQueries({ queryKey: ["leaves"] });
+      qc.invalidateQueries({ queryKey: ["leaves-pending-for-me"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -290,6 +311,79 @@ function LeavesPage() {
           </CardContent>
         </Card>
       </div>
+
+      {pendingForMe && pendingForMe.length > 0 && (
+        <Card className="border-warning/30 bg-warning/5">
+          <CardHeader>
+            <CardTitle className="font-display text-2xl flex items-center gap-2">
+              <Check className="h-5 w-5 text-warning-foreground" /> Pending my approval
+              <Badge variant="secondary" className="ml-1">{pendingForMe.length}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left">Employee</th>
+                  <th className="px-4 py-2 text-left">Type</th>
+                  <th className="px-4 py-2 text-left">Dates</th>
+                  <th className="px-4 py-2 text-right">Days</th>
+                  <th className="px-4 py-2 text-left">Reason</th>
+                  <th className="px-4 py-2 text-left">Step</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingForMe.map((l) => {
+                  const typeLabel = LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
+                  const tone = LEAVE_TONE[l.leave_type] ?? LEAVE_TONE.Other;
+                  const step = l.current_approver_index + 1;
+                  const total = l.approver_chain.length;
+                  return (
+                    <tr key={l.id} className="border-t align-top">
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">
+                            {initials(l.employee_full_name ?? undefined)}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{l.employee_full_name ?? "—"}</div>
+                            <div className="text-xs text-muted-foreground truncate">{l.employee_department ?? ""}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+                          {l.leave_type}
+                        </span>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">{typeLabel}</div>
+                      </td>
+                      <td className="px-4 py-2">{formatDate(l.start_date)} → {formatDate(l.end_date)}</td>
+                      <td className="px-4 py-2 text-right">{daysBetween(l.start_date, l.end_date)}</td>
+                      <td className="px-4 py-2 text-muted-foreground max-w-[260px]">{l.reason ?? ""}</td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">{step} of {total}</td>
+                      <td className="px-4 py-2 text-right">
+                        <div className="flex justify-end gap-1">
+                          <Button size="icon" variant="ghost" title="Approve"
+                            onClick={() => approveStep.mutate({ id: l.id })}
+                            disabled={approveStep.isPending || rejectStep.isPending}>
+                            <Check className="h-4 w-4 text-success" />
+                          </Button>
+                          <Button size="icon" variant="ghost" title="Reject"
+                            onClick={() => rejectStep.mutate({ id: l.id })}
+                            disabled={approveStep.isPending || rejectStep.isPending}>
+                            <X className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -458,18 +552,6 @@ function LeavesPage() {
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
-                          {isHR && l.status === "pending" && (
-                            <>
-                              <Button size="icon" variant="ghost" title="Approve"
-                                onClick={() => updateStatus.mutate({ id: l.id, status: "approved" })}>
-                                <Check className="h-4 w-4 text-success" />
-                              </Button>
-                              <Button size="icon" variant="ghost" title="Reject"
-                                onClick={() => updateStatus.mutate({ id: l.id, status: "rejected" })}>
-                                <X className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </>
-                          )}
                           {(isMine && l.status === "pending") || isHR ? (
                             <Button size="icon" variant="ghost" title="Remove"
                               onClick={() => cancelLeave.mutate(l.id)}>

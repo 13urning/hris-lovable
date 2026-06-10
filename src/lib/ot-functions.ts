@@ -1,14 +1,13 @@
-﻿import { createServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/react-start";
 
 type OTRow = {
   id: string; dtr_id: string | null; employee_id: string;
   requested_hours: number; work_date: string | null;
   request_type: "pre_approved" | "actual"; pre_approved_id: string | null;
-  target_month: string | null; step: "is" | "dh";
+  target_month: string | null;
   status: "pending" | "approved" | "rejected";
-  is_approver_id: string | null; dh_approver_id: string | null;
-  is_decided_at: string | null; dh_decided_at: string | null;
-  is_notes: string | null; dh_notes: string | null; created_at: string;
+  approver_chain: string[]; current_approver_index: number;
+  reviewed_at: string | null; review_notes: string | null; created_at: string;
 };
 
 export const getMyOTBudgets = createServerFn({ method: "POST" })
@@ -75,100 +74,148 @@ export const getFiledOTForDashboard = createServerFn({ method: "POST" })
     return rows as { id: string; requested_hours: number; pre_approved_id: string | null }[];
   });
 
-export const getPendingISApprovals = createServerFn({ method: "POST" })
+// File a monthly OT budget request — resolves the approval chain at file time.
+// Group Head filing → auto-approved (chain empty).
+export const fileOTBudgetRequest = createServerFn({ method: "POST" })
+  .inputValidator((data: {
+    employeeId: string; targetMonth: string;
+    requestedHours: number; notes: string | null;
+  }) => data)
+  .handler(async ({ data }) => {
+    const { pool } = await import("@/lib/db.server");
+    const { resolveChain } = await import("@/lib/chain.server");
+    const chain = await resolveChain(pool, data.employeeId);
+
+    const isAutoApproved = chain.length === 0;
+    const status = isAutoApproved ? "approved" : "pending";
+    const reviewedAt = isAutoApproved ? new Date().toISOString() : null;
+
+    await pool.query(
+      `INSERT INTO ot_approval_requests
+         (employee_id, request_type, target_month, requested_hours,
+          work_date, status, approver_chain, current_approver_index,
+          review_notes, reviewed_at)
+       VALUES ($1, 'pre_approved', $2, $3, $2, $4, $5, 0, $6, $7)`,
+      [data.employeeId, data.targetMonth + "-01", data.requestedHours,
+       status, chain, data.notes, reviewedAt],
+    );
+  });
+
+// File actual OT hours against an approved budget — no approval needed.
+export const fileActualOTHours = createServerFn({ method: "POST" })
+  .inputValidator((data: {
+    employeeId: string; preApprovedId: string;
+    workDate: string; hours: number;
+  }) => data)
+  .handler(async ({ data }) => {
+    const { pool } = await import("@/lib/db.server");
+    await pool.query(
+      `INSERT INTO ot_approval_requests
+         (employee_id, request_type, pre_approved_id, work_date,
+          requested_hours, status, approver_chain, current_approver_index)
+       VALUES ($1, 'actual', $2, $3, $4, 'approved', '{}', 0)`,
+      [data.employeeId, data.preApprovedId, data.workDate, data.hours],
+    );
+  });
+
+// Queue for the current user: OT budget requests where they are the next approver.
+export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
   .inputValidator((data: { userId: string }) => data)
   .handler(async ({ data }) => {
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
-      `SELECT r.*, p.full_name AS profile_full_name
-       FROM ot_approval_requests r
-       LEFT JOIN profiles p ON p.id = r.employee_id
-       WHERE r.is_approver_id = $1 AND r.step = 'is'
-         AND r.status = 'pending' AND r.request_type = 'pre_approved'`,
+      `SELECT r.id, r.employee_id, r.requested_hours, r.target_month,
+              r.approver_chain, r.current_approver_index, r.review_notes, r.created_at,
+              p.full_name AS employee_full_name
+         FROM ot_approval_requests r
+         LEFT JOIN profiles p ON p.id = r.employee_id
+        WHERE r.status = 'pending' AND r.request_type = 'pre_approved'
+          AND r.approver_chain[r.current_approver_index + 1] = $1
+        ORDER BY r.created_at DESC`,
       [data.userId],
     );
-    return rows.map((r) => ({ ...r, profile: r.profile_full_name ? { full_name: r.profile_full_name } : null })) as (OTRow & { profile: { full_name: string } | null })[];
+    return rows as {
+      id: string; employee_id: string; requested_hours: number;
+      target_month: string | null; approver_chain: string[];
+      current_approver_index: number; review_notes: string | null;
+      created_at: string; employee_full_name: string | null;
+    }[];
   });
 
-export const getPendingDHApprovals = createServerFn({ method: "POST" })
-  .inputValidator((data: { userId: string }) => data)
+// Approver advances the chain. If past the end, mark fully approved.
+export const approveOTStep = createServerFn({ method: "POST" })
+  .inputValidator((data: { id: string; approverId: string; notes?: string }) => data)
   .handler(async ({ data }) => {
     const { pool } = await import("@/lib/db.server");
-    const { rows } = await pool.query(
-      `SELECT r.*, p.full_name AS profile_full_name
-       FROM ot_approval_requests r
-       LEFT JOIN profiles p ON p.id = r.employee_id
-       WHERE r.dh_approver_id = $1 AND r.step = 'dh'
-         AND r.status = 'pending' AND r.request_type = 'pre_approved'`,
-      [data.userId],
-    );
-    return rows.map((r) => ({ ...r, profile: r.profile_full_name ? { full_name: r.profile_full_name } : null })) as (OTRow & { profile: { full_name: string } | null })[];
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const { rows: [req] } = await client.query<{
+        approver_chain: string[]; current_approver_index: number; status: string;
+      }>(
+        `SELECT approver_chain, current_approver_index, status
+         FROM ot_approval_requests WHERE id = $1 FOR UPDATE`,
+        [data.id],
+      );
+      if (!req) throw new Error("NOT_FOUND");
+      if (req.status !== "pending") throw new Error("NOT_PENDING");
+      if (req.approver_chain[req.current_approver_index] !== data.approverId) {
+        throw new Error("NOT_CURRENT_APPROVER");
+      }
+
+      const nextIndex = req.current_approver_index + 1;
+      const isFinal = nextIndex >= req.approver_chain.length;
+
+      if (isFinal) {
+        await client.query(
+          `UPDATE ot_approval_requests
+              SET status = 'approved',
+                  current_approver_index = $1,
+                  reviewed_at = $2,
+                  review_notes = COALESCE($3, review_notes)
+            WHERE id = $4`,
+          [nextIndex, new Date().toISOString(), data.notes ?? null, data.id],
+        );
+      } else {
+        await client.query(
+          `UPDATE ot_approval_requests SET current_approver_index = $1 WHERE id = $2`,
+          [nextIndex, data.id],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
-export const resolveOTApprovers = createServerFn({ method: "POST" })
-  .inputValidator((data: { employeeId: string }) => data)
+export const rejectOTStep = createServerFn({ method: "POST" })
+  .inputValidator((data: { id: string; approverId: string; notes?: string }) => data)
   .handler(async ({ data }) => {
     const { pool } = await import("@/lib/db.server");
-
-    // Get my node + immediate parent (IS approver)
-    const { rows: [myRow] } = await pool.query<{ parent_id: string | null }>(
-      `SELECT parent_id FROM org_nodes WHERE employee_id = $1 LIMIT 1`,
-      [data.employeeId],
+    const { rows: [req] } = await pool.query<{
+      approver_chain: string[]; current_approver_index: number; status: string;
+    }>(
+      `SELECT approver_chain, current_approver_index, status
+       FROM ot_approval_requests WHERE id = $1`,
+      [data.id],
     );
-    if (!myRow) throw new Error("NO_ORG_NODE");
-    if (!myRow.parent_id) throw new Error("NO_ORG_NODE");
+    if (!req) throw new Error("NOT_FOUND");
+    if (req.status !== "pending") throw new Error("NOT_PENDING");
+    if (req.approver_chain[req.current_approver_index] !== data.approverId) {
+      throw new Error("NOT_CURRENT_APPROVER");
+    }
 
-    const { rows: [parentRow] } = await pool.query<{ employee_id: string }>(
-      `SELECT employee_id FROM org_nodes WHERE id = $1 LIMIT 1`,
-      [myRow.parent_id],
-    );
-    if (!parentRow) throw new Error("NO_ORG_NODE");
-
-    const isApproverId = parentRow.employee_id;
-
-    // Walk up the tree to find the dept head (DH approver) using a recursive CTE
-    const { rows } = await pool.query<{ employee_id: string; is_dept_head: boolean }>(
-      `WITH RECURSIVE chain AS (
-         SELECT id, employee_id, parent_id, is_dept_head, 0 AS depth
-         FROM org_nodes WHERE employee_id = $1
-         UNION ALL
-         SELECT n.id, n.employee_id, n.parent_id, n.is_dept_head, chain.depth + 1
-         FROM org_nodes n
-         JOIN chain ON n.id = chain.parent_id
-         WHERE chain.depth < 15
-       )
-       SELECT employee_id, is_dept_head FROM chain WHERE is_dept_head = TRUE LIMIT 1`,
-      [isApproverId],
-    );
-
-    const dhRow = rows[0];
-    if (!dhRow) throw new Error("NO_DH");
-
-    return { isApproverId, dhApproverId: dhRow.employee_id };
-  });
-
-export const insertOTRequest = createServerFn({ method: "POST" })
-  .inputValidator((data: Record<string, unknown>) => data)
-  .handler(async ({ data }) => {
-    const { pool } = await import("@/lib/db.server");
-    const cols = Object.keys(data);
-    const vals = Object.values(data);
-    const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
     await pool.query(
-      `INSERT INTO ot_approval_requests (${cols.join(", ")}) VALUES (${placeholders})`,
-      vals,
-    );
-  });
-
-export const updateOTRequest = createServerFn({ method: "POST" })
-  .inputValidator((data: { id: string; fields: Record<string, unknown> }) => data)
-  .handler(async ({ data }) => {
-    const { pool } = await import("@/lib/db.server");
-    const entries = Object.entries(data.fields);
-    const sets = entries.map(([col], i) => `${col} = $${i + 1}`).join(", ");
-    const vals = [...entries.map(([, v]) => v), data.id];
-    await pool.query(
-      `UPDATE ot_approval_requests SET ${sets} WHERE id = $${vals.length}`,
-      vals,
+      `UPDATE ot_approval_requests
+          SET status = 'rejected',
+              reviewed_at = $1,
+              review_notes = COALESCE($2, review_notes)
+        WHERE id = $3`,
+      [new Date().toISOString(), data.notes ?? null, data.id],
     );
   });

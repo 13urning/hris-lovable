@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import {
   getMyOTBudgets, getMyActualOTs, getApprovedOTBudgets,
-  getPendingISApprovals, getPendingDHApprovals,
-  resolveOTApprovers, insertOTRequest, updateOTRequest,
+  fetchMyPendingOTApprovals, fileOTBudgetRequest, fileActualOTHours,
+  approveOTStep, rejectOTStep,
 } from "@/lib/ot-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,26 +38,24 @@ interface OTRequest {
   request_type: "pre_approved" | "actual";
   pre_approved_id: string | null;
   target_month: string | null;
-  step: "is" | "dh";
   status: "pending" | "approved" | "rejected";
-  is_approver_id: string | null;
-  dh_approver_id: string | null;
-  is_decided_at: string | null;
-  dh_decided_at: string | null;
-  is_notes: string | null;
-  dh_notes: string | null;
+  approver_chain: string[];
+  current_approver_index: number;
+  reviewed_at: string | null;
+  review_notes: string | null;
   created_at: string;
 }
 
-interface OTRequestWithProfile extends OTRequest {
-  profile: { full_name: string } | null;
-}
-
-interface OrgNode {
+interface PendingOTRow {
   id: string;
   employee_id: string;
-  parent_id: string | null;
-  is_dept_head: boolean;
+  requested_hours: number;
+  target_month: string | null;
+  approver_chain: string[];
+  current_approver_index: number;
+  review_notes: string | null;
+  created_at: string;
+  employee_full_name: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -93,13 +91,13 @@ function StatusBadge({ status }: { status: OTRequest["status"] | "logged" }) {
   return <span className={cls}>{status}</span>;
 }
 
-function StepBadge({ step }: { step: OTRequest["step"] }) {
-  const cls =
-    step === "dh"
-      ? "rounded bg-accent/15 px-2 py-0.5 text-xs text-accent"
-      : "rounded bg-secondary px-2 py-0.5 text-xs text-secondary-foreground";
+function StepBadge({ row }: { row: { current_approver_index: number; approver_chain: string[] } }) {
+  const total = row.approver_chain.length;
+  const step = Math.min(row.current_approver_index + 1, total);
   return (
-    <span className={cls}>{step === "is" ? "IS review" : "DH review"}</span>
+    <span className="rounded bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
+      step {step} of {total}
+    </span>
   );
 }
 
@@ -189,40 +187,24 @@ function OTApprovalsPage() {
     [myBudgets, nextMonthIso],
   );
 
-  // ── Section 3: Pending IS approvals ─────────────────────────────────────
-  const { data: isRequests, isLoading: isLoading_ } = useQuery({
-    queryKey: ["ot-requests-is", user?.id],
-    queryFn: () => getPendingISApprovals({ data: { userId: user!.id } }) as Promise<OTRequestWithProfile[]>,
+  // ── Pending my approval (chain) ─────────────────────────────────────────
+  const { data: pendingForMe, isLoading: pendingLoading } = useQuery({
+    queryKey: ["ot-pending-for-me", user?.id],
+    queryFn: () => fetchMyPendingOTApprovals({ data: { userId: user!.id } }) as Promise<PendingOTRow[]>,
     enabled: !!user,
   });
 
-  // ── Section 4: Pending DH approvals ─────────────────────────────────────
-  const { data: dhRequests, isLoading: dhLoading } = useQuery({
-    queryKey: ["ot-requests-dh", user?.id],
-    queryFn: () => getPendingDHApprovals({ data: { userId: user!.id } }) as Promise<OTRequestWithProfile[]>,
-    enabled: !!user,
-  });
-
-  const hasIsQueue = (isRequests?.length ?? 0) > 0;
-  const hasDhQueue = (dhRequests?.length ?? 0) > 0;
+  const hasPendingQueue = (pendingForMe?.length ?? 0) > 0;
 
   // ── Mutation: request OT budget ──────────────────────────────────────────
   const requestBudget = useMutation({
     mutationFn: async () => {
       if (!user) throw new Error("Not signed in");
-      const { isApproverId, dhApproverId } = await resolveOTApprovers({ data: { employeeId: user.id } });
-      await insertOTRequest({ data: {
-        employee_id: user.id,
-        request_type: "pre_approved",
-        target_month: budgetForm.month + "-01",
-        requested_hours: budgetForm.requested_hours,
-        dtr_id: null,
-        work_date: null,
-        step: "is",
-        status: "pending",
-        is_approver_id: isApproverId,
-        dh_approver_id: dhApproverId,
-        is_notes: budgetForm.notes || null,
+      await fileOTBudgetRequest({ data: {
+        employeeId: user.id,
+        targetMonth: budgetForm.month,
+        requestedHours: budgetForm.requested_hours,
+        notes: budgetForm.notes || null,
       }});
     },
     onSuccess: () => {
@@ -235,7 +217,7 @@ function OTApprovalsPage() {
     onError: (e: Error) => {
       if (e.message === "NO_ORG_NODE") {
         toast.error(
-          "Your manager hasn't been set up in the org chart yet. Contact HR.",
+          "You haven't been placed in the org chart yet. Contact HR.",
         );
       } else {
         toast.error(e.message);
@@ -251,18 +233,11 @@ function OTApprovalsPage() {
       if (fileForm.hours > remainingForSelected) {
         throw new Error(`Hours exceed remaining budget (${remainingForSelected}h left)`);
       }
-      await insertOTRequest({ data: {
-        employee_id: user.id,
-        request_type: "actual",
-        pre_approved_id: selectedBudget.id,
-        work_date: fileForm.work_date,
-        requested_hours: fileForm.hours,
-        target_month: null,
-        dtr_id: null,
-        step: "is",
-        status: "approved",
-        is_approver_id: null,
-        dh_approver_id: null,
+      await fileActualOTHours({ data: {
+        employeeId: user.id,
+        preApprovedId: selectedBudget.id,
+        workDate: fileForm.work_date,
+        hours: fileForm.hours,
       }});
     },
     onSuccess: () => {
@@ -279,58 +254,32 @@ function OTApprovalsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  // ── Mutation: IS approve ─────────────────────────────────────────────────
-  const isApprove = useMutation({
+  // ── Mutation: approve current chain step ─────────────────────────────────
+  const approveStep = useMutation({
     mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
-      await updateOTRequest({ data: { id: requestId, fields: { step: "dh", is_decided_at: new Date().toISOString(), is_notes: notes || null } } });
+      if (!user) throw new Error("Not signed in");
+      await approveOTStep({ data: { id: requestId, approverId: user.id, notes } });
     },
     onSuccess: () => {
-      toast.success("Approved — forwarded to department head");
+      toast.success("Approved");
       setDecidingId(null);
       setDecisionNotes("");
-      qc.invalidateQueries({ queryKey: ["ot-requests-is"] });
+      qc.invalidateQueries({ queryKey: ["ot-pending-for-me"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  // ── Mutation: IS reject ──────────────────────────────────────────────────
-  const isReject = useMutation({
+  // ── Mutation: reject current chain step ──────────────────────────────────
+  const rejectStep = useMutation({
     mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
-      await updateOTRequest({ data: { id: requestId, fields: { status: "rejected", is_decided_at: new Date().toISOString(), is_notes: notes || null } } });
+      if (!user) throw new Error("Not signed in");
+      await rejectOTStep({ data: { id: requestId, approverId: user.id, notes } });
     },
     onSuccess: () => {
       toast.success("Request rejected");
       setDecidingId(null);
       setDecisionNotes("");
-      qc.invalidateQueries({ queryKey: ["ot-requests-is"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  // ── Mutation: DH approve (final) ─────────────────────────────────────────
-  const dhApprove = useMutation({
-    mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
-      await updateOTRequest({ data: { id: requestId, fields: { status: "approved", dh_decided_at: new Date().toISOString(), dh_notes: notes || null } } });
-    },
-    onSuccess: () => {
-      toast.success("OT budget approved");
-      setDecidingId(null);
-      setDecisionNotes("");
-      qc.invalidateQueries({ queryKey: ["ot-requests-dh"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  // ── Mutation: DH reject ──────────────────────────────────────────────────
-  const dhReject = useMutation({
-    mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
-      await updateOTRequest({ data: { id: requestId, fields: { status: "rejected", dh_decided_at: new Date().toISOString(), dh_notes: notes || null } } });
-    },
-    onSuccess: () => {
-      toast.success("OT budget request rejected");
-      setDecidingId(null);
-      setDecisionNotes("");
-      qc.invalidateQueries({ queryKey: ["ot-requests-dh"] });
+      qc.invalidateQueries({ queryKey: ["ot-pending-for-me"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -353,7 +302,7 @@ function OTApprovalsPage() {
         </div>
       </div>
 
-      {/* ── New Section: Pre-Approved OT for Next Month ─────────────────── */}
+      {/* ── Pre-Approved OT for Next Month ──────────────────────────────── */}
       {!isHR && (
         <Card className="border-primary/30">
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
@@ -394,7 +343,7 @@ function OTApprovalsPage() {
                 {nextMonthBudget.status === "pending" && (
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Awaiting</p>
-                    <div className="mt-0.5"><StepBadge step={nextMonthBudget.step} /></div>
+                    <div className="mt-0.5"><StepBadge row={nextMonthBudget} /></div>
                   </div>
                 )}
                 {nextMonthBudget.status === "approved" && (() => {
@@ -436,7 +385,7 @@ function OTApprovalsPage() {
         </Card>
       )}
 
-      {/* ── Section 1: Pre-Approved OT Budget History ───────────────────── */}
+      {/* ── OT Budget History ───────────────────────────────────────────── */}
       {!isHR && (
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
@@ -483,7 +432,7 @@ function OTApprovalsPage() {
                           ) : "—"}
                         </td>
                         <td className="px-4 py-2">
-                          {r.status === "pending" ? <StepBadge step={r.step} /> : "—"}
+                          {r.status === "pending" ? <StepBadge row={r} /> : "—"}
                         </td>
                         <td className="px-4 py-2">
                           <StatusBadge status={r.status} />
@@ -502,7 +451,7 @@ function OTApprovalsPage() {
         </Card>
       )}
 
-      {/* ── Section 2: Filed OT ──────────────────────────────────────────── */}
+      {/* ── Filed OT ────────────────────────────────────────────────────── */}
       {!isHR && (
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
@@ -583,17 +532,19 @@ function OTApprovalsPage() {
         </Card>
       )}
 
-      {/* ── Section 3: Pending IS Approvals ─────────────────────────────── */}
-      {hasIsQueue && (
-        <Card>
+      {/* ── Pending my approval (chain queue) ───────────────────────────── */}
+      {hasPendingQueue && (
+        <Card className="border-warning/30 bg-warning/5">
           <CardHeader>
             <CardTitle className="font-display text-2xl flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-accent" /> Pending IS
-              Approvals
+              <CheckCircle2 className="h-5 w-5 text-warning-foreground" /> Pending my approval
+              <span className="ml-1 rounded bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
+                {pendingForMe?.length ?? 0}
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            {isLoading_ ? (
+            {pendingLoading ? (
               <div className="px-6 py-10 text-center text-sm text-muted-foreground">
                 Loading…
               </div>
@@ -604,12 +555,14 @@ function OTApprovalsPage() {
                     <th className="px-4 py-2 text-left">Employee</th>
                     <th className="px-4 py-2 text-left">Month</th>
                     <th className="px-4 py-2 text-right">Hours Requested</th>
+                    <th className="px-4 py-2 text-left">Notes</th>
+                    <th className="px-4 py-2 text-left">Step</th>
                     <th className="px-4 py-2 text-left">Filed</th>
                     <th className="px-4 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {isRequests?.map((r) => {
+                  {pendingForMe?.map((r) => {
                     const approveKey = `${r.id}-approve`;
                     const rejectKey = `${r.id}-reject`;
                     const expandingApprove = decidingId === approveKey;
@@ -619,13 +572,19 @@ function OTApprovalsPage() {
                       <>
                         <tr key={r.id} className="border-t">
                           <td className="px-4 py-2 font-medium">
-                            {r.profile?.full_name ?? "—"}
+                            {r.employee_full_name ?? "—"}
                           </td>
                           <td className="px-4 py-2">
                             {formatMonth(r.target_month)}
                           </td>
                           <td className="px-4 py-2 text-right">
                             {r.requested_hours}h
+                          </td>
+                          <td className="px-4 py-2 text-muted-foreground max-w-[260px]">
+                            {r.review_notes ?? "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            <StepBadge row={r} />
                           </td>
                           <td className="px-4 py-2 text-muted-foreground">
                             {formatDate(r.created_at)}
@@ -634,22 +593,16 @@ function OTApprovalsPage() {
                             <div className="flex justify-end gap-1">
                               <Button
                                 size="sm"
-                                variant={
-                                  expandingApprove ? "default" : "outline"
-                                }
+                                variant={expandingApprove ? "default" : "outline"}
                                 className="text-success border-success/40 hover:bg-success/10"
-                                onClick={() =>
-                                  toggleDecision(r.id, "approve")
-                                }
+                                onClick={() => toggleDecision(r.id, "approve")}
                               >
                                 <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />{" "}
                                 Approve
                               </Button>
                               <Button
                                 size="sm"
-                                variant={
-                                  expandingReject ? "default" : "outline"
-                                }
+                                variant={expandingReject ? "default" : "outline"}
                                 className="text-destructive border-destructive/40 hover:bg-destructive/10"
                                 onClick={() => toggleDecision(r.id, "reject")}
                               >
@@ -660,11 +613,8 @@ function OTApprovalsPage() {
                           </td>
                         </tr>
                         {expanding && (
-                          <tr
-                            key={`${r.id}-expand`}
-                            className="border-t bg-secondary/30"
-                          >
-                            <td colSpan={5} className="px-4 py-3">
+                          <tr key={`${r.id}-expand`} className="border-t bg-secondary/30">
+                            <td colSpan={7} className="px-4 py-3">
                               <div className="flex flex-wrap items-end gap-3">
                                 <div className="flex-1 min-w-[240px]">
                                   <Label className="text-xs">
@@ -677,25 +627,20 @@ function OTApprovalsPage() {
                                     className="mt-1"
                                     placeholder={
                                       expandingApprove
-                                        ? "Any notes for the department head…"
+                                        ? "Any notes for the next approver…"
                                         : "Explain why this OT budget is being denied…"
                                     }
                                     value={decisionNotes}
-                                    onChange={(e) =>
-                                      setDecisionNotes(e.target.value)
-                                    }
+                                    onChange={(e) => setDecisionNotes(e.target.value)}
                                   />
                                 </div>
                                 <div className="flex gap-2 pb-0.5">
                                   {expandingApprove && (
                                     <Button
                                       size="sm"
-                                      disabled={isApprove.isPending}
+                                      disabled={approveStep.isPending}
                                       onClick={() =>
-                                        isApprove.mutate({
-                                          requestId: r.id,
-                                          notes: decisionNotes,
-                                        })
+                                        approveStep.mutate({ requestId: r.id, notes: decisionNotes })
                                       }
                                     >
                                       Confirm approval
@@ -705,12 +650,9 @@ function OTApprovalsPage() {
                                     <Button
                                       size="sm"
                                       variant="destructive"
-                                      disabled={isReject.isPending}
+                                      disabled={rejectStep.isPending}
                                       onClick={() =>
-                                        isReject.mutate({
-                                          requestId: r.id,
-                                          notes: decisionNotes,
-                                        })
+                                        rejectStep.mutate({ requestId: r.id, notes: decisionNotes })
                                       }
                                     >
                                       Confirm rejection
@@ -741,170 +683,8 @@ function OTApprovalsPage() {
         </Card>
       )}
 
-      {/* ── Section 4: Pending DH Approvals ─────────────────────────────── */}
-      {hasDhQueue && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-display text-2xl flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-success" /> Pending DH
-              Approvals
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {dhLoading ? (
-              <div className="px-6 py-10 text-center text-sm text-muted-foreground">
-                Loading…
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Employee</th>
-                    <th className="px-4 py-2 text-left">Month</th>
-                    <th className="px-4 py-2 text-right">Hours Requested</th>
-                    <th className="px-4 py-2 text-left">IS Notes</th>
-                    <th className="px-4 py-2 text-left">Filed</th>
-                    <th className="px-4 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dhRequests?.map((r) => {
-                    const approveKey = `${r.id}-approve`;
-                    const rejectKey = `${r.id}-reject`;
-                    const expandingApprove = decidingId === approveKey;
-                    const expandingReject = decidingId === rejectKey;
-                    const expanding = expandingApprove || expandingReject;
-                    return (
-                      <>
-                        <tr key={r.id} className="border-t">
-                          <td className="px-4 py-2 font-medium">
-                            {r.profile?.full_name ?? "—"}
-                          </td>
-                          <td className="px-4 py-2">
-                            {formatMonth(r.target_month)}
-                          </td>
-                          <td className="px-4 py-2 text-right">
-                            {r.requested_hours}h
-                          </td>
-                          <td className="px-4 py-2 text-muted-foreground">
-                            {r.is_notes ?? "—"}
-                          </td>
-                          <td className="px-4 py-2 text-muted-foreground">
-                            {formatDate(r.created_at)}
-                          </td>
-                          <td className="px-4 py-2">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                size="sm"
-                                variant={
-                                  expandingApprove ? "default" : "outline"
-                                }
-                                className="text-success border-success/40 hover:bg-success/10"
-                                onClick={() =>
-                                  toggleDecision(r.id, "approve")
-                                }
-                              >
-                                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />{" "}
-                                Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={
-                                  expandingReject ? "default" : "outline"
-                                }
-                                className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                                onClick={() => toggleDecision(r.id, "reject")}
-                              >
-                                <XCircle className="mr-1.5 h-3.5 w-3.5" />{" "}
-                                Reject
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                        {expanding && (
-                          <tr
-                            key={`${r.id}-expand`}
-                            className="border-t bg-secondary/30"
-                          >
-                            <td colSpan={6} className="px-4 py-3">
-                              <div className="flex flex-wrap items-end gap-3">
-                                <div className="flex-1 min-w-[240px]">
-                                  <Label className="text-xs">
-                                    {expandingApprove
-                                      ? "Approval notes (optional)"
-                                      : "Rejection reason (optional)"}
-                                  </Label>
-                                  <Textarea
-                                    rows={2}
-                                    className="mt-1"
-                                    placeholder={
-                                      expandingApprove
-                                        ? "Final notes before approval…"
-                                        : "Explain why this OT budget is being denied…"
-                                    }
-                                    value={decisionNotes}
-                                    onChange={(e) =>
-                                      setDecisionNotes(e.target.value)
-                                    }
-                                  />
-                                </div>
-                                <div className="flex gap-2 pb-0.5">
-                                  {expandingApprove && (
-                                    <Button
-                                      size="sm"
-                                      disabled={dhApprove.isPending}
-                                      onClick={() =>
-                                        dhApprove.mutate({
-                                          requestId: r.id,
-                                          notes: decisionNotes,
-                                        })
-                                      }
-                                    >
-                                      Confirm approval
-                                    </Button>
-                                  )}
-                                  {expandingReject && (
-                                    <Button
-                                      size="sm"
-                                      variant="destructive"
-                                      disabled={dhReject.isPending}
-                                      onClick={() =>
-                                        dhReject.mutate({
-                                          requestId: r.id,
-                                          notes: decisionNotes,
-                                        })
-                                      }
-                                    >
-                                      Confirm rejection
-                                    </Button>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => {
-                                      setDecidingId(null);
-                                      setDecisionNotes("");
-                                    }}
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Empty state when user is HR and has no queues */}
-      {isHR && !hasIsQueue && !hasDhQueue && (
+      {/* Empty state when user is HR and has no queue */}
+      {isHR && !hasPendingQueue && (
         <Card>
           <CardContent className="px-6 py-10 text-center text-sm text-muted-foreground">
             No overtime budget requests pending your review.
@@ -962,7 +742,7 @@ function OTApprovalsPage() {
                 id="budget-notes"
                 rows={2}
                 className="mt-1"
-                placeholder="Context for your IS and department head…"
+                placeholder="Context for the approvers up the chain…"
                 value={budgetForm.notes}
                 onChange={(e) =>
                   setBudgetForm({ ...budgetForm, notes: e.target.value })

@@ -63,26 +63,129 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
   }) => data)
   .handler(async ({ data }) => {
     const { pool } = await import("@/lib/db.server");
+    const { resolveChain } = await import("@/lib/chain.server");
+    const chain = await resolveChain(pool, data.employeeId);
+
+    // Group Head filing — auto-approve since there's no one above.
+    const isAutoApproved = chain.length === 0;
+    const status = isAutoApproved ? "approved" : "pending";
+    const reviewedAt = isAutoApproved ? new Date().toISOString() : null;
+    const reviewedBy = isAutoApproved ? data.employeeId : null;
+
     await pool.query(
-      `INSERT INTO leave_requests (employee_id, leave_type, start_date, end_date, reason)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [data.employeeId, data.leaveType, data.startDate, data.endDate, data.reason],
+      `INSERT INTO leave_requests
+         (employee_id, leave_type, start_date, end_date, reason,
+          status, approver_chain, current_approver_index, reviewed_by, reviewed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9)`,
+      [data.employeeId, data.leaveType, data.startDate, data.endDate, data.reason,
+       status, chain, reviewedBy, reviewedAt],
     );
   });
 
-export const updateLeaveRequestStatus = createServerFn({ method: "POST" })
-  .inputValidator((data: {
-    id: string; status: string;
-    reviewedBy: string | null; reviewedAt: string; notes?: string;
-  }) => data)
+// Approver at current step approves → advance the chain.
+// If past the end, mark fully approved.
+export const approveLeaveStep = createServerFn({ method: "POST" })
+  .inputValidator((data: { id: string; approverId: string; notes?: string }) => data)
   .handler(async ({ data }) => {
     const { pool } = await import("@/lib/db.server");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const { rows: [req] } = await client.query<{
+        approver_chain: string[]; current_approver_index: number; status: string;
+      }>(
+        `SELECT approver_chain, current_approver_index, status
+         FROM leave_requests WHERE id = $1 FOR UPDATE`,
+        [data.id],
+      );
+      if (!req) throw new Error("NOT_FOUND");
+      if (req.status !== "pending") throw new Error("NOT_PENDING");
+
+      const expected = req.approver_chain[req.current_approver_index];
+      if (expected !== data.approverId) throw new Error("NOT_CURRENT_APPROVER");
+
+      const nextIndex = req.current_approver_index + 1;
+      const isFinal = nextIndex >= req.approver_chain.length;
+
+      if (isFinal) {
+        await client.query(
+          `UPDATE leave_requests
+              SET status = 'approved',
+                  current_approver_index = $1,
+                  reviewed_by = $2,
+                  reviewed_at = $3,
+                  review_notes = COALESCE($4, review_notes)
+            WHERE id = $5`,
+          [nextIndex, data.approverId, new Date().toISOString(), data.notes ?? null, data.id],
+        );
+      } else {
+        await client.query(
+          `UPDATE leave_requests SET current_approver_index = $1 WHERE id = $2`,
+          [nextIndex, data.id],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  });
+
+// Approver rejects → request is final regardless of chain position.
+export const rejectLeaveStep = createServerFn({ method: "POST" })
+  .inputValidator((data: { id: string; approverId: string; notes?: string }) => data)
+  .handler(async ({ data }) => {
+    const { pool } = await import("@/lib/db.server");
+    const { rows: [req] } = await pool.query<{
+      approver_chain: string[]; current_approver_index: number; status: string;
+    }>(
+      `SELECT approver_chain, current_approver_index, status FROM leave_requests WHERE id = $1`,
+      [data.id],
+    );
+    if (!req) throw new Error("NOT_FOUND");
+    if (req.status !== "pending") throw new Error("NOT_PENDING");
+    if (req.approver_chain[req.current_approver_index] !== data.approverId) {
+      throw new Error("NOT_CURRENT_APPROVER");
+    }
+
     await pool.query(
       `UPDATE leave_requests
-       SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = COALESCE($4, review_notes)
-       WHERE id = $5`,
-      [data.status, data.reviewedBy, data.reviewedAt, data.notes ?? null, data.id],
+          SET status = 'rejected',
+              reviewed_by = $1,
+              reviewed_at = $2,
+              review_notes = COALESCE($3, review_notes)
+        WHERE id = $4`,
+      [data.approverId, new Date().toISOString(), data.notes ?? null, data.id],
     );
+  });
+
+// Queue for the current user: leaves where they are the next approver in line.
+// PostgreSQL arrays are 1-indexed, so we add 1 to the 0-based JS index.
+export const fetchMyPendingLeaveApprovals = createServerFn({ method: "POST" })
+  .inputValidator((data: { userId: string }) => data)
+  .handler(async ({ data }) => {
+    const { pool } = await import("@/lib/db.server");
+    const { rows } = await pool.query(
+      `SELECT lr.id, lr.employee_id, lr.leave_type, lr.start_date, lr.end_date,
+              lr.reason, lr.current_approver_index, lr.approver_chain, lr.created_at,
+              p.full_name AS employee_full_name, p.department AS employee_department
+         FROM leave_requests lr
+         LEFT JOIN profiles p ON p.id = lr.employee_id
+        WHERE lr.status = 'pending'
+          AND lr.approver_chain[lr.current_approver_index + 1] = $1
+        ORDER BY lr.created_at DESC`,
+      [data.userId],
+    );
+    return rows as {
+      id: string; employee_id: string; leave_type: string;
+      start_date: string; end_date: string; reason: string | null;
+      current_approver_index: number; approver_chain: string[]; created_at: string;
+      employee_full_name: string | null; employee_department: string | null;
+    }[];
   });
 
 export const deleteLeaveRequest = createServerFn({ method: "POST" })

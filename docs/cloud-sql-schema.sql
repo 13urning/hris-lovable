@@ -201,18 +201,20 @@ CREATE INDEX idx_logs_submission ON public.dtr_approval_logs(dtr_cutoff_submissi
 -- =============================================================================
 
 CREATE TABLE public.leave_requests (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  employee_id  UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-  leave_type   TEXT NOT NULL,
-  start_date   DATE NOT NULL,
-  end_date     DATE NOT NULL,
-  reason       TEXT,
-  status       public.leave_request_status NOT NULL DEFAULT 'pending',
-  reviewed_by  UUID REFERENCES public.users(id),
-  reviewed_at  TIMESTAMPTZ,
-  review_notes TEXT,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id            UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  leave_type             TEXT NOT NULL,
+  start_date             DATE NOT NULL,
+  end_date               DATE NOT NULL,
+  reason                 TEXT,
+  status                 public.leave_request_status NOT NULL DEFAULT 'pending',
+  approver_chain         UUID[] NOT NULL DEFAULT '{}',
+  current_approver_index INTEGER NOT NULL DEFAULT 0,
+  reviewed_by            UUID REFERENCES public.users(id),
+  reviewed_at            TIMESTAMPTZ,
+  review_notes           TEXT,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (end_date >= start_date)
 );
 
@@ -243,24 +245,21 @@ CREATE TABLE public.org_nodes (
 -- =============================================================================
 
 CREATE TABLE public.ot_approval_requests (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  dtr_id          UUID REFERENCES public.daily_time_reports(id) ON DELETE CASCADE,
-  employee_id     UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  requested_hours NUMERIC(4,2) NOT NULL,
-  work_date       DATE NOT NULL,
-  step            TEXT NOT NULL DEFAULT 'is' CHECK (step IN ('is', 'dh')),
-  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
-  is_approver_id  UUID REFERENCES public.profiles(id),
-  dh_approver_id  UUID REFERENCES public.profiles(id),
-  is_decided_at   TIMESTAMPTZ,
-  dh_decided_at   TIMESTAMPTZ,
-  is_notes        TEXT,
-  dh_notes        TEXT,
-  request_type    TEXT NOT NULL DEFAULT 'pre_approved'
-                    CHECK (request_type IN ('pre_approved', 'actual')),
-  pre_approved_id UUID REFERENCES public.ot_approval_requests(id) ON DELETE SET NULL,
-  target_month    DATE,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  dtr_id                 UUID REFERENCES public.daily_time_reports(id) ON DELETE CASCADE,
+  employee_id            UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  requested_hours        NUMERIC(4,2) NOT NULL,
+  work_date              DATE NOT NULL,
+  status                 TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  approver_chain         UUID[] NOT NULL DEFAULT '{}',
+  current_approver_index INTEGER NOT NULL DEFAULT 0,
+  reviewed_at            TIMESTAMPTZ,
+  review_notes           TEXT,
+  request_type           TEXT NOT NULL DEFAULT 'pre_approved'
+                           CHECK (request_type IN ('pre_approved', 'actual')),
+  pre_approved_id        UUID REFERENCES public.ot_approval_requests(id) ON DELETE SET NULL,
+  target_month           DATE,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 

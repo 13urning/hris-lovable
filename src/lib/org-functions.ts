@@ -1,5 +1,18 @@
 ﻿import { createServerFn } from "@tanstack/react-start";
 
+// Client-callable wrapper around resolveChain (for preview UIs).
+// Walks up the org tree from `employeeId` and returns the ordered chain of
+// approver employee_ids — immediate supervisor first, group head last.
+// Returns [] if the filer is the group head (no parent).
+// Throws NO_ORG_NODE if the employee isn't in the org chart.
+export const resolveApprovalChain = createServerFn({ method: "POST" })
+  .inputValidator((data: { employeeId: string }) => data)
+  .handler(async ({ data }): Promise<string[]> => {
+    const { pool } = await import("@/lib/db.server");
+    const { resolveChain } = await import("@/lib/chain.server");
+    return resolveChain(pool, data.employeeId);
+  });
+
 export const fetchProfilesForOrg = createServerFn({ method: "POST" })
   .handler(async () => {
     const { pool } = await import("@/lib/db.server");
