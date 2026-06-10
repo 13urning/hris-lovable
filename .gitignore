@@ -39,3 +39,4 @@ api/_server/
 .env
 .env.*
 !.env.example
+drafts/

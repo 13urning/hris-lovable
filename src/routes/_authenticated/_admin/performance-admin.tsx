@@ -285,7 +285,6 @@ function PerformanceAdminPage() {
       await approveEvaluation({ data: {
         id: reviewingEval.id,
         approvedAt: new Date().toISOString(),
-        approvedBy: user!.id,
         groupHeadNotes: groupHeadNotes,
         kpiScore,
         behavioralScore,

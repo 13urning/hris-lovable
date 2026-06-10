@@ -59,7 +59,7 @@ function KpiBuilderPage() {
 
   const upsert = useMutation({
     mutationFn: async (payload: typeof EMPTY & { id?: string }) => {
-      await upsertKpiTemplate({ data: { ...payload, created_by: !payload.id ? user!.id : undefined } });
+      await upsertKpiTemplate({ data: payload });
     },
     onSuccess: () => {
       toast.success(editing ? "KPI updated" : "KPI created");

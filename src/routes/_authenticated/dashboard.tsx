@@ -27,13 +27,13 @@ function Dashboard() {
   const { data: otBudgets } = useQuery({
     queryKey: ["ot-budget", user?.id, firstOfMonth],
     enabled: !!user && !isHR,
-    queryFn: () => getOTBudgetsForDashboard({ data: { employeeId: user!.id, targetMonth: firstOfMonth } }),
+    queryFn: () => getOTBudgetsForDashboard({ data: { targetMonth: firstOfMonth } }),
   });
 
   const { data: otFiled } = useQuery({
     queryKey: ["ot-filed", user?.id, firstOfMonth],
     enabled: !!user && !isHR,
-    queryFn: () => getFiledOTForDashboard({ data: { employeeId: user!.id } }),
+    queryFn: () => getFiledOTForDashboard(),
   });
 
   const totalApprovedOT = (otBudgets ?? []).reduce((s, b) => s + Number(b.requested_hours), 0);
@@ -47,26 +47,26 @@ function Dashboard() {
   const { data: myProfile } = useQuery({
     queryKey: ["my-profile", user?.id],
     enabled: !!user && !isHR,
-    queryFn: () => fetchMyProfile({ data: { userId: user!.id } }),
+    queryFn: () => fetchMyProfile(),
   });
 
   const { data: myLeaves } = useQuery({
     queryKey: ["my-leaves", user?.id],
     enabled: !!user && !isHR,
-    queryFn: () => fetchMyLeaves({ data: { userId: user!.id } }),
+    queryFn: () => fetchMyLeaves(),
   });
 
   // ── Today's attendance ─────────────────────────────────────────────────
   const { data: todayEntry, refetch: refetchToday } = useQuery({
     queryKey: ["dtr-today", user?.id, today],
-    queryFn: () => getTodayDTR({ data: { employeeId: user!.id, date: today } }),
+    queryFn: () => getTodayDTR({ data: { date: today } }),
     enabled: !!user && !isHR,
   });
 
   // ── Recent DTRs (current month) ────────────────────────────────────────
   const { data: recentDtrs } = useQuery({
     queryKey: ["recent-dtrs", user?.id],
-    queryFn: () => getRecentDTRs(user!.id),
+    queryFn: () => getRecentDTRs(),
     enabled: !!user && !isHR,
   });
 
@@ -75,7 +75,7 @@ function Dashboard() {
   const clockIn = useMutation({
     mutationFn: async (shiftLabel: "7-4" | "8-5" | "9-6") => {
       const timeIn = new Date().toTimeString().slice(0, 5);
-      await clockInDTR({ data: { employeeId: user!.id, workDate: today, timeIn, shiftLabel } });
+      await clockInDTR({ data: { workDate: today, timeIn, shiftLabel } });
     },
     onSuccess: () => {
       toast.success("Clocked in!");

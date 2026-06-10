@@ -142,21 +142,21 @@ function OTApprovalsPage() {
   // ── Section 1: My pre-approved OT budget requests ───────────────────────
   const { data: myBudgets, isLoading: myBudgetsLoading } = useQuery({
     queryKey: ["ot-budgets-mine", user?.id],
-    queryFn: () => getMyOTBudgets({ data: { employeeId: user!.id } }) as Promise<OTRequest[]>,
+    queryFn: () => getMyOTBudgets() as Promise<OTRequest[]>,
     enabled: !!user && !isHR,
   });
 
   // ── Section 2a: My filed OT (actual) ────────────────────────────────────
   const { data: myActuals, isLoading: myActualsLoading } = useQuery({
     queryKey: ["ot-actuals-mine", user?.id],
-    queryFn: () => getMyActualOTs({ data: { employeeId: user!.id } }) as Promise<OTRequest[]>,
+    queryFn: () => getMyActualOTs() as Promise<OTRequest[]>,
     enabled: !!user && !isHR,
   });
 
   // ── Section 2b: Approved budgets (for dropdown in file dialog) ───────────
   const { data: approvedBudgets } = useQuery({
     queryKey: ["ot-budgets-approved", user?.id],
-    queryFn: () => getApprovedOTBudgets({ data: { employeeId: user!.id } }) as Promise<OTRequest[]>,
+    queryFn: () => getApprovedOTBudgets() as Promise<OTRequest[]>,
     enabled: !!user && !isHR,
   });
 
@@ -190,7 +190,7 @@ function OTApprovalsPage() {
   // ── Pending my approval (chain) ─────────────────────────────────────────
   const { data: pendingForMe, isLoading: pendingLoading } = useQuery({
     queryKey: ["ot-pending-for-me", user?.id],
-    queryFn: () => fetchMyPendingOTApprovals({ data: { userId: user!.id } }) as Promise<PendingOTRow[]>,
+    queryFn: () => fetchMyPendingOTApprovals() as Promise<PendingOTRow[]>,
     enabled: !!user,
   });
 
@@ -201,7 +201,6 @@ function OTApprovalsPage() {
     mutationFn: async () => {
       if (!user) throw new Error("Not signed in");
       await fileOTBudgetRequest({ data: {
-        employeeId: user.id,
         targetMonth: budgetForm.month,
         requestedHours: budgetForm.requested_hours,
         notes: budgetForm.notes || null,
@@ -234,7 +233,6 @@ function OTApprovalsPage() {
         throw new Error(`Hours exceed remaining budget (${remainingForSelected}h left)`);
       }
       await fileActualOTHours({ data: {
-        employeeId: user.id,
         preApprovedId: selectedBudget.id,
         workDate: fileForm.work_date,
         hours: fileForm.hours,
@@ -258,7 +256,7 @@ function OTApprovalsPage() {
   const approveStep = useMutation({
     mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
       if (!user) throw new Error("Not signed in");
-      await approveOTStep({ data: { id: requestId, approverId: user.id, notes } });
+      await approveOTStep({ data: { id: requestId, notes } });
     },
     onSuccess: () => {
       toast.success("Approved");
@@ -273,7 +271,7 @@ function OTApprovalsPage() {
   const rejectStep = useMutation({
     mutationFn: async ({ requestId, notes }: { requestId: string; notes: string }) => {
       if (!user) throw new Error("Not signed in");
-      await rejectOTStep({ data: { id: requestId, approverId: user.id, notes } });
+      await rejectOTStep({ data: { id: requestId, notes } });
     },
     onSuccess: () => {
       toast.success("Request rejected");

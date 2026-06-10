@@ -1,20 +1,24 @@
 ﻿import { createServerFn } from "@tanstack/react-start";
+import { authMiddleware, assertUser, assertAdmin } from "@/lib/auth-middleware";
 
 // Client-callable wrapper around resolveChain (for preview UIs).
-// Walks up the org tree from `employeeId` and returns the ordered chain of
+// Walks up the org tree from the caller and returns the ordered chain of
 // approver employee_ids — immediate supervisor first, group head last.
 // Returns [] if the filer is the group head (no parent).
 // Throws NO_ORG_NODE if the employee isn't in the org chart.
 export const resolveApprovalChain = createServerFn({ method: "POST" })
-  .inputValidator((data: { employeeId: string }) => data)
-  .handler(async ({ data }): Promise<string[]> => {
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<string[]> => {
+    assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { resolveChain } = await import("@/lib/chain.server");
-    return resolveChain(pool, data.employeeId);
+    return resolveChain(pool, context.user.dbUserId);
   });
 
 export const fetchProfilesForOrg = createServerFn({ method: "POST" })
-  .handler(async () => {
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertAdmin(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT id, full_name, position, department FROM profiles ORDER BY full_name`,
@@ -22,8 +26,11 @@ export const fetchProfilesForOrg = createServerFn({ method: "POST" })
     return rows as { id: string; full_name: string; position: string | null; department: string | null }[];
   });
 
+// Org chart is readable to any signed-in user (chain resolution depends on it).
 export const fetchAllOrgNodes = createServerFn({ method: "POST" })
-  .handler(async () => {
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(`SELECT * FROM org_nodes`);
     return rows as {
@@ -39,8 +46,10 @@ type OrgNodeInsert = {
 };
 
 export const saveOrgChartData = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator((data: { nodes: OrgNodeInsert[]; edgePairs: { childEmpId: string; parentEmpId: string }[] }) => data)
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    assertAdmin(context.user);
     const { pool } = await import("@/lib/db.server");
     const client = await pool.connect();
     try {

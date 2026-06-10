@@ -39,7 +39,7 @@ function AttendancePage() {
 
   const { data: dtrs, isLoading } = useQuery({
     queryKey: ["dtrs-month", user?.id, selectedMonth],
-    queryFn: () => getMyDTRsByMonth(user!.id, selectedMonth),
+    queryFn: () => getMyDTRsByMonth(selectedMonth),
     enabled: !!user,
   });
 

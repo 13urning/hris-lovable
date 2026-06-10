@@ -1,13 +1,16 @@
-﻿import { createServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/react-start";
+import { authMiddleware, assertUser, assertHR } from "@/lib/auth-middleware";
 
 export const getTodayDTR = createServerFn({ method: "POST" })
-  .inputValidator((data: { employeeId: string; date: string }) => data)
-  .handler(async ({ data }) => {
+  .middleware([authMiddleware])
+  .inputValidator((data: { date: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT id, time_in, time_out, hours_worked, shift_label, is_undertime, undertime_minutes
        FROM daily_time_reports WHERE employee_id = $1 AND work_date = $2 LIMIT 1`,
-      [data.employeeId, data.date],
+      [context.user.dbUserId, data.date],
     );
     return (rows[0] ?? null) as {
       id: string; time_in: string | null; time_out: string | null;
@@ -17,22 +20,25 @@ export const getTodayDTR = createServerFn({ method: "POST" })
   });
 
 export const getRecentDTRsQuery = createServerFn({ method: "POST" })
-  .inputValidator((data: { employeeId: string }) => data)
-  .handler(async ({ data }) => {
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT * FROM daily_time_reports
        WHERE employee_id = $1
          AND work_date >= date_trunc('month', CURRENT_DATE)::date
        ORDER BY work_date DESC`,
-      [data.employeeId],
+      [context.user.dbUserId],
     );
     return rows;
   });
 
 export const getDTRsForMonth = createServerFn({ method: "POST" })
-  .inputValidator((data: { employeeId: string; yearMonth: string }) => data)
-  .handler(async ({ data }) => {
+  .middleware([authMiddleware])
+  .inputValidator((data: { yearMonth: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const [y, m] = data.yearMonth.split("-").map(Number);
     const startDate = `${data.yearMonth}-01`;
@@ -42,36 +48,44 @@ export const getDTRsForMonth = createServerFn({ method: "POST" })
       `SELECT * FROM daily_time_reports
        WHERE employee_id = $1 AND work_date >= $2 AND work_date <= $3
        ORDER BY work_date ASC`,
-      [data.employeeId, startDate, endDate],
+      [context.user.dbUserId, startDate, endDate],
     );
     return rows;
   });
 
 export const clockInDTR = createServerFn({ method: "POST" })
-  .inputValidator((data: { employeeId: string; workDate: string; timeIn: string; shiftLabel: string }) => data)
-  .handler(async ({ data }) => {
+  .middleware([authMiddleware])
+  .inputValidator((data: { workDate: string; timeIn: string; shiftLabel: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     await pool.query(
       `INSERT INTO daily_time_reports (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes)
        VALUES ($1, $2, $3, $4, NULL, FALSE, 0)`,
-      [data.employeeId, data.workDate, data.timeIn, data.shiftLabel],
+      [context.user.dbUserId, data.workDate, data.timeIn, data.shiftLabel],
     );
   });
 
 export const clockOutDTR = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator((data: { dtrId: string; timeOut: string; hoursWorked: number; isUndertime: boolean; undertimeMins: number }) => data)
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
-    await pool.query(
+    // Ownership guard: the dtrId must belong to the caller.
+    const { rowCount } = await pool.query(
       `UPDATE daily_time_reports
-       SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4
-       WHERE id = $5`,
-      [data.timeOut, data.hoursWorked, data.isUndertime, data.undertimeMins, data.dtrId],
+         SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4
+       WHERE id = $5 AND employee_id = $6`,
+      [data.timeOut, data.hoursWorked, data.isUndertime, data.undertimeMins, data.dtrId, context.user.dbUserId],
     );
+    if (!rowCount) throw new Error("NOT_FOUND");
   });
 
 export const getActivityLogDTRs = createServerFn({ method: "POST" })
-  .handler(async () => {
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT d.id, d.employee_id, d.work_date, d.time_in, d.time_out,

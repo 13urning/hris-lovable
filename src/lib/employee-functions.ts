@@ -1,4 +1,6 @@
-﻿import { createServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/react-start";
+import { randomInt } from "node:crypto";
+import { authMiddleware, assertHR, assertAdmin } from "@/lib/auth-middleware";
 
 type EmployeeRow = {
   id: string; full_name: string;
@@ -20,14 +22,14 @@ type ImportEmployee = {
   vl_credits: string; sl_credits: string;
 };
 
-function joinFullName(first: string, middle: string, last: string): string {
-  return [first, middle, last].map((s) => s.trim()).filter(Boolean).join(" ");
-}
-
 type ImportResult = {
   email: string; full_name: string;
   success: boolean; temp_password?: string; error?: string;
 };
+
+function joinFullName(first: string, middle: string, last: string): string {
+  return [first, middle, last].map((s) => s.trim()).filter(Boolean).join(" ");
+}
 
 function businessDaysBetween(start: string, end: string): number {
   let count = 0;
@@ -42,18 +44,30 @@ function businessDaysBetween(start: string, end: string): number {
   return count;
 }
 
+// CSPRNG temp password using node:crypto.randomInt. The previous Math.random
+// version was predictable from V8 internal state.
 function generateTempPassword(): string {
-  // Use crypto.getRandomValues equivalent in Node
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
   let pwd = "";
   for (let i = 0; i < 10; i++) {
-    pwd += chars[Math.floor(Math.random() * chars.length)];
+    pwd += chars[randomInt(0, chars.length)];
   }
   return pwd + "!1";
 }
 
+// Explicit allowlist of columns the admin UI may patch. Any key not in this set
+// is rejected — prevents SQL identifier injection AND silent role/credential
+// escalation via crafted patches.
+const PATCHABLE_COLUMNS = new Set([
+  "full_name", "first_name", "middle_name", "last_name",
+  "department", "position", "company", "employee_code",
+  "vl_credits", "sl_credits", "vl_remaining", "sl_remaining",
+]);
+
 export const fetchAllEmployees = createServerFn({ method: "POST" })
-  .handler(async () => {
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
 
     const [{ rows: profiles }, { rows: roles }, { rows: leaves }] = await Promise.all([
@@ -81,13 +95,18 @@ export const fetchAllEmployees = createServerFn({ method: "POST" })
   });
 
 export const updateEmployeeProfile = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator((data: { id: string; patches: Record<string, string | number> }) => data)
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
-    const entries = Object.entries(data.patches);
-    if (entries.length === 0) return;
-    const sets = entries.map(([col], i) => `${col} = $${i + 1}`).join(", ");
-    const vals = [...entries.map(([, v]) => v), data.id];
+
+    // Filter to allowlisted columns only — anything else is silently dropped.
+    const safeEntries = Object.entries(data.patches).filter(([col]) => PATCHABLE_COLUMNS.has(col));
+    if (safeEntries.length === 0) return;
+
+    const sets = safeEntries.map(([col], i) => `"${col}" = $${i + 1}`).join(", ");
+    const vals = [...safeEntries.map(([, v]) => v), data.id];
     await pool.query(
       `UPDATE profiles SET ${sets} WHERE id = $${vals.length}`,
       vals,
@@ -95,8 +114,10 @@ export const updateEmployeeProfile = createServerFn({ method: "POST" })
   });
 
 export const setEmployeeRole = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator((data: { userId: string; roles: { user_id: string; role: string }[] }) => data)
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
+    assertAdmin(context.user);
     const { pool } = await import("@/lib/db.server");
     const client = await pool.connect();
     try {
@@ -118,8 +139,10 @@ export const setEmployeeRole = createServerFn({ method: "POST" })
   });
 
 export const bulkCreateEmployees = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
   .inputValidator((data: { employees: ImportEmployee[] }) => data)
-  .handler(async ({ data }): Promise<ImportResult[]> => {
+  .handler(async ({ data, context }): Promise<ImportResult[]> => {
+    assertAdmin(context.user);
     const { pool } = await import("@/lib/db.server");
     const apiKey = process.env.FIREBASE_WEB_API_KEY;
     if (!apiKey) throw new Error("FIREBASE_WEB_API_KEY not configured");
@@ -135,7 +158,6 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
 
       const tempPassword = generateTempPassword();
       try {
-        // 1. Create Firebase user via REST API
         const fbRes = await fetch(
           `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
           {
@@ -150,7 +172,6 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
         }
         const firebaseUid = fbData.localId;
 
-        // 2. Provision DB records in a transaction
         const client = await pool.connect();
         try {
           await client.query("BEGIN");

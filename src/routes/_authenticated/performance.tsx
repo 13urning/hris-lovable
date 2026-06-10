@@ -82,7 +82,7 @@ function PerformancePage() {
   const { data: evaluations = [], isLoading } = useQuery({
     queryKey: ["my-evaluations", user?.id],
     enabled: !!user,
-    queryFn: () => fetchMyEvaluations({ data: { userId: user!.id } }) as Promise<Evaluation[]>,
+    queryFn: () => fetchMyEvaluations() as Promise<Evaluation[]>,
   });
 
   const { data: kpiScores = [] } = useQuery({

@@ -31,7 +31,7 @@ function ForcePasswordChange({ onDone }: { onDone: () => void }) {
     setBusy(true);
     try {
       await updatePassword(user!.firebaseUser, newPassword);
-      await clearPasswordChangeFlag({ data: user!.uid });
+      await clearPasswordChangeFlag();
       toast.success("Password updated — welcome!");
       onDone();
     } catch (err) {
@@ -106,7 +106,7 @@ function Gate() {
   // Check whether this user must change their password (set for all imported accounts)
   const { data: profileFlags, isLoading: flagsLoading } = useQuery({
     queryKey: ["profile-flags", user?.uid],
-    queryFn: () => getProfileFlags({ data: user!.uid }),
+    queryFn: () => getProfileFlags(),
     enabled: !!user && rolesInitialized,
     staleTime: Infinity,
   });

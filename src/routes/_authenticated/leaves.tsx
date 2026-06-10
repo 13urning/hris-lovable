@@ -156,7 +156,7 @@ function LeavesPage() {
       if (isWeekend(form.end_date)) throw new Error("End date cannot be a weekend");
       if (new Date(form.end_date) < new Date(form.start_date))
         throw new Error("End date must be on or after start date");
-      await fileLeaveRequest({ data: { employeeId: user.id, leaveType: form.leave_type, startDate: form.start_date, endDate: form.end_date, reason: form.reason || null } });
+      await fileLeaveRequest({ data: { leaveType: form.leave_type, startDate: form.start_date, endDate: form.end_date, reason: form.reason || null } });
     },
     onSuccess: () => {
       toast.success("Leave filed");
@@ -169,13 +169,13 @@ function LeavesPage() {
   const { data: pendingForMe } = useQuery({
     queryKey: ["leaves-pending-for-me", user?.id],
     enabled: !!user?.id,
-    queryFn: () => fetchMyPendingLeaveApprovals({ data: { userId: user!.id } }),
+    queryFn: () => fetchMyPendingLeaveApprovals(),
   });
 
   const approveStep = useMutation({
     mutationFn: async ({ id, notes }: { id: string; notes?: string }) => {
       if (!user) throw new Error("not signed in");
-      await approveLeaveStep({ data: { id, approverId: user.id, notes } });
+      await approveLeaveStep({ data: { id, notes } });
     },
     onSuccess: () => {
       toast.success("Approved");
@@ -188,7 +188,7 @@ function LeavesPage() {
   const rejectStep = useMutation({
     mutationFn: async ({ id, notes }: { id: string; notes?: string }) => {
       if (!user) throw new Error("not signed in");
-      await rejectLeaveStep({ data: { id, approverId: user.id, notes } });
+      await rejectLeaveStep({ data: { id, notes } });
     },
     onSuccess: () => {
       toast.success("Rejected");

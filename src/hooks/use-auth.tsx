@@ -64,13 +64,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!rolesInitializedRef.current) setRolesLoading(true);
 
       try {
-        let data = await fetchUserData({ data: firebaseUser.uid });
+        let data = await fetchUserData();
 
         if (!data) {
-          // First login after signup — provision DB records
-          const userId = await provisionUser({
-            data: { firebaseUid: firebaseUser.uid, email: firebaseUser.email ?? "" },
-          });
+          // First login after signup — provision DB records (firebaseUid + email
+          // come from the verified ID token on the server)
+          const userId = await provisionUser({ data: {} });
           data = {
             profile: {
               id: userId,
@@ -116,8 +115,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp: AuthState["signUp"] = async (email, password, fullName) => {
     try {
-      const { user: fbUser } = await createUserWithEmailAndPassword(auth, email, password);
-      await provisionUser({ data: { firebaseUid: fbUser.uid, email, fullName } });
+      await createUserWithEmailAndPassword(auth, email, password);
+      await provisionUser({ data: { fullName } });
       return { error: null };
     } catch (e: any) {
       const msg: Record<string, string> = {
