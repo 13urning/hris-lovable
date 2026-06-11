@@ -8,11 +8,6 @@
 --   • auth.uid() removed from trigger functions
 --   • on_auth_user_created trigger removed — replaced by Cloud Function in Phase 5
 --
--- ⚠️  Performance tables (evaluation_periods, kpi_templates, performance_evaluations,
---     evaluation_kpi_scores, evaluation_behavioral_scores, behavioral_competencies)
---     are NOT in local migrations. Dump them separately from Supabase and run after
---     this script.
---
 -- Run order: apply this entire file first, then import data.
 -- =============================================================================
 
@@ -264,6 +259,125 @@ CREATE TABLE public.ot_approval_requests (
   target_month           DATE,
   created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+
+-- =============================================================================
+-- KPI TEMPLATES
+-- =============================================================================
+
+CREATE TABLE public.kpi_templates (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title         TEXT NOT NULL,
+  description   TEXT,
+  metric_unit   TEXT NOT NULL,
+  target_value  NUMERIC NOT NULL,
+  weight        NUMERIC NOT NULL,
+  team          TEXT NOT NULL,
+  designation   TEXT,
+  is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by    UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- =============================================================================
+-- BEHAVIORAL COMPETENCIES
+-- =============================================================================
+
+CREATE TABLE public.behavioral_competencies (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                   TEXT NOT NULL,
+  behavioral_indicators  TEXT NOT NULL,
+  display_order          INTEGER NOT NULL DEFAULT 0,
+  is_active              BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- =============================================================================
+-- EVALUATION PERIODS
+-- =============================================================================
+
+CREATE TABLE public.evaluation_periods (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title        TEXT NOT NULL,
+  period_type  TEXT NOT NULL,
+  start_date   DATE NOT NULL,
+  end_date     DATE NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'draft',
+  created_by   UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
+-- =============================================================================
+-- PERFORMANCE EVALUATIONS
+-- =============================================================================
+
+CREATE TABLE public.performance_evaluations (
+  id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id                   UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  period_id                     UUID NOT NULL REFERENCES public.evaluation_periods(id) ON DELETE CASCADE,
+  status                        TEXT NOT NULL DEFAULT 'pending',
+  overall_score                 NUMERIC,
+  kpi_score                     NUMERIC,
+  behavioral_score              NUMERIC,
+  overall_rating                TEXT,
+  self_assessment_submitted_at  TIMESTAMPTZ,
+  approved_at                   TIMESTAMPTZ,
+  approved_by                   UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  group_head_notes              TEXT,
+  created_at                    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_perf_evals_period   ON public.performance_evaluations(period_id);
+CREATE INDEX idx_perf_evals_employee ON public.performance_evaluations(employee_id);
+
+
+-- =============================================================================
+-- EVALUATION KPI SCORES
+-- =============================================================================
+
+CREATE TABLE public.evaluation_kpi_scores (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  evaluation_id      UUID NOT NULL REFERENCES public.performance_evaluations(id) ON DELETE CASCADE,
+  kpi_template_id    UUID REFERENCES public.kpi_templates(id) ON DELETE SET NULL,
+  kpi_title          TEXT NOT NULL,
+  kpi_weight         NUMERIC NOT NULL,
+  kpi_target         NUMERIC NOT NULL,
+  kpi_metric_unit    TEXT NOT NULL,
+  self_actual_value  NUMERIC,
+  self_score         NUMERIC,
+  self_comments      TEXT,
+  hr_actual_value    NUMERIC,
+  hr_score           NUMERIC,
+  hr_comments        TEXT,
+  final_score        NUMERIC,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_kpi_scores_eval ON public.evaluation_kpi_scores(evaluation_id);
+
+
+-- =============================================================================
+-- EVALUATION BEHAVIORAL SCORES
+-- =============================================================================
+
+CREATE TABLE public.evaluation_behavioral_scores (
+  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  evaluation_id             UUID NOT NULL REFERENCES public.performance_evaluations(id) ON DELETE CASCADE,
+  competency_id             UUID REFERENCES public.behavioral_competencies(id) ON DELETE SET NULL,
+  competency_name           TEXT NOT NULL,
+  competency_indicators     TEXT NOT NULL,
+  employee_accomplishments  TEXT,
+  employee_rating           NUMERIC,
+  gh_rating                 NUMERIC,
+  gh_comments               TEXT,
+  final_rating              NUMERIC,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_behavioral_scores_eval ON public.evaluation_behavioral_scores(evaluation_id);
 
 
 -- =============================================================================
