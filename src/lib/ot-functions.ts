@@ -110,7 +110,9 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
     );
   });
 
-// File actual OT hours against an approved budget — no approval needed.
+// File actual OT hours against an approved budget. Goes through the same
+// approval chain as the budget request (immediate supervisor → group head).
+// Group Head filing auto-approves (empty chain).
 export const fileActualOTHours = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data: {
@@ -120,9 +122,9 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
+    const { resolveChain } = await import("@/lib/chain.server");
 
-    // Guard: the budget must belong to the caller. Prevents filing actuals
-    // against someone else's pre-approved budget.
+    // Guard: the budget must belong to the caller and be approved.
     const { rows: [budget] } = await pool.query<{ employee_id: string; status: string }>(
       `SELECT employee_id, status FROM ot_approval_requests WHERE id = $1`,
       [data.preApprovedId],
@@ -131,12 +133,18 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
     if (budget.employee_id !== context.user.dbUserId) throw new Error("FORBIDDEN");
     if (budget.status !== "approved") throw new Error("BUDGET_NOT_APPROVED");
 
+    const chain = await resolveChain(pool, context.user.dbUserId);
+    const isAutoApproved = chain.length === 0;
+    const status = isAutoApproved ? "approved" : "pending";
+    const reviewedAt = isAutoApproved ? new Date().toISOString() : null;
+
     await pool.query(
       `INSERT INTO ot_approval_requests
          (employee_id, request_type, pre_approved_id, work_date,
-          requested_hours, status, approver_chain, current_approver_index)
-       VALUES ($1, 'actual', $2, $3, $4, 'approved', '{}', 0)`,
-      [context.user.dbUserId, data.preApprovedId, data.workDate, data.hours],
+          requested_hours, status, approver_chain, current_approver_index, reviewed_at)
+       VALUES ($1, 'actual', $2, $3, $4, $5, $6, 0, $7)`,
+      [context.user.dbUserId, data.preApprovedId, data.workDate, data.hours,
+       status, chain, reviewedAt],
     );
   });
 
@@ -146,19 +154,23 @@ export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
-      `SELECT r.id, r.employee_id, r.requested_hours, r.target_month,
+      `SELECT r.id, r.employee_id, r.request_type, r.requested_hours,
+              r.target_month, r.work_date,
               r.approver_chain, r.current_approver_index, r.review_notes, r.created_at,
               p.full_name AS employee_full_name
          FROM ot_approval_requests r
          LEFT JOIN profiles p ON p.id = r.employee_id
-        WHERE r.status = 'pending' AND r.request_type = 'pre_approved'
+        WHERE r.status = 'pending'
           AND r.approver_chain[r.current_approver_index + 1] = $1
         ORDER BY r.created_at DESC`,
       [context.user.dbUserId],
     );
     return rows as {
-      id: string; employee_id: string; requested_hours: number;
-      target_month: string | null; approver_chain: string[];
+      id: string; employee_id: string;
+      request_type: "pre_approved" | "actual";
+      requested_hours: number;
+      target_month: string | null; work_date: string | null;
+      approver_chain: string[];
       current_approver_index: number; review_notes: string | null;
       created_at: string; employee_full_name: string | null;
     }[];

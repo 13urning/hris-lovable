@@ -49,8 +49,10 @@ interface OTRequest {
 interface PendingOTRow {
   id: string;
   employee_id: string;
+  request_type: "pre_approved" | "actual";
   requested_hours: number;
   target_month: string | null;
+  work_date: string | null;
   approver_chain: string[];
   current_approver_index: number;
   review_notes: string | null;
@@ -511,7 +513,7 @@ function OTApprovalsPage() {
                             : "—"}
                         </td>
                         <td className="px-4 py-2">
-                          <StatusBadge status="logged" />
+                          <StatusBadge status={r.status} />
                         </td>
                       </tr>
                     );
@@ -551,8 +553,9 @@ function OTApprovalsPage() {
                 <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 text-left">Employee</th>
-                    <th className="px-4 py-2 text-left">Month</th>
-                    <th className="px-4 py-2 text-right">Hours Requested</th>
+                    <th className="px-4 py-2 text-left">Type</th>
+                    <th className="px-4 py-2 text-left">For</th>
+                    <th className="px-4 py-2 text-right">Hours</th>
                     <th className="px-4 py-2 text-left">Notes</th>
                     <th className="px-4 py-2 text-left">Step</th>
                     <th className="px-4 py-2 text-left">Filed</th>
@@ -566,6 +569,7 @@ function OTApprovalsPage() {
                     const expandingApprove = decidingId === approveKey;
                     const expandingReject = decidingId === rejectKey;
                     const expanding = expandingApprove || expandingReject;
+                    const isBudget = r.request_type === "pre_approved";
                     return (
                       <>
                         <tr key={r.id} className="border-t">
@@ -573,7 +577,12 @@ function OTApprovalsPage() {
                             {r.employee_full_name ?? "—"}
                           </td>
                           <td className="px-4 py-2">
-                            {formatMonth(r.target_month)}
+                            <span className={`rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${isBudget ? "bg-primary/10 text-primary" : "bg-accent/15 text-accent"}`}>
+                              {isBudget ? "Budget" : "Filed hours"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2">
+                            {isBudget ? formatMonth(r.target_month) : formatDate(r.work_date)}
                           </td>
                           <td className="px-4 py-2 text-right">
                             {r.requested_hours}h
@@ -612,7 +621,7 @@ function OTApprovalsPage() {
                         </tr>
                         {expanding && (
                           <tr key={`${r.id}-expand`} className="border-t bg-secondary/30">
-                            <td colSpan={7} className="px-4 py-3">
+                            <td colSpan={8} className="px-4 py-3">
                               <div className="flex flex-wrap items-end gap-3">
                                 <div className="flex-1 min-w-[240px]">
                                   <Label className="text-xs">
