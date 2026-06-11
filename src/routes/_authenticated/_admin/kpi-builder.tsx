@@ -44,7 +44,7 @@ const EMPTY: Omit<KpiTemplate, "id" | "created_at"> = {
 };
 
 function KpiBuilderPage() {
-  const { user, isGroupHead, loading, rolesLoading } = useAuth();
+  const { user, isHR, loading, rolesLoading } = useAuth();
   const qc = useQueryClient();
   const [teamFilter, setTeamFilter] = useState<string>("all");
   const [showForm, setShowForm] = useState(false);
@@ -53,7 +53,7 @@ function KpiBuilderPage() {
 
   const { data: kpis = [], isLoading } = useQuery({
     queryKey: ["kpi-templates"],
-    enabled: isGroupHead,
+    enabled: isHR,
     queryFn: () => fetchKpiTemplates() as Promise<KpiTemplate[]>,
   });
 
@@ -115,7 +115,7 @@ function KpiBuilderPage() {
       </div>
     );
   }
-  if (!isGroupHead) {
+  if (!isHR) {
     return (
       <Card className="border-destructive/20">
         <CardContent className="py-12 text-center space-y-2">

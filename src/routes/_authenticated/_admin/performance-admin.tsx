@@ -89,7 +89,7 @@ function ScoreStars({ score, onChange }: { score: number | null; onChange?: (v: 
 }
 
 function PerformanceAdminPage() {
-  const { user, isGroupHead, loading, rolesLoading } = useAuth();
+  const { user, isHR, loading, rolesLoading } = useAuth();
   const qc = useQueryClient();
   const [showPeriodForm, setShowPeriodForm] = useState(false);
   const [activePeriod, setActivePeriod] = useState<Period | null>(null);
@@ -106,13 +106,13 @@ function PerformanceAdminPage() {
 
   const { data: periods = [] } = useQuery({
     queryKey: ["eval-periods"],
-    enabled: isGroupHead,
+    enabled: isHR,
     queryFn: () => fetchEvaluationPeriods() as Promise<Period[]>,
   });
 
   const { data: evaluations = [] } = useQuery({
     queryKey: ["evaluations", activePeriod?.id],
-    enabled: !!activePeriod && isGroupHead,
+    enabled: !!activePeriod && isHR,
     queryFn: () => fetchEvaluationsByPeriod({ data: { periodId: activePeriod!.id } }) as Promise<Evaluation[]>,
   });
 
@@ -130,19 +130,19 @@ function PerformanceAdminPage() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ["all-employees"],
-    enabled: isGroupHead,
+    enabled: isHR,
     queryFn: () => fetchAllProfiles() as Promise<Employee[]>,
   });
 
   const { data: kpiTemplates = [] } = useQuery({
     queryKey: ["kpi-templates"],
-    enabled: isGroupHead,
+    enabled: isHR,
     queryFn: () => fetchActiveKpiTemplates(),
   });
 
   const { data: competencies = [] } = useQuery({
     queryKey: ["behavioral-competencies"],
-    enabled: isGroupHead,
+    enabled: isHR,
     queryFn: () => fetchActiveBehavioralCompetencies(),
   });
 
@@ -319,7 +319,7 @@ function PerformanceAdminPage() {
       </div>
     );
   }
-  if (!isGroupHead) {
+  if (!isHR) {
     return (
       <Card className="border-destructive/20">
         <CardContent className="py-12 text-center space-y-2">
