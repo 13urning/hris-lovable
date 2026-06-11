@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchAllEmployees, updateEmployeeProfile, setEmployeeRole, bulkCreateEmployees } from "@/lib/employee-functions";
+import { fetchAllEmployees, updateEmployeeProfile, setEmployeeRole, bulkCreateEmployees, deleteEmployee } from "@/lib/employee-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Download, Upload, Check, X, Copy, Users, Pencil, FileDown } from "lucide-react";
+import { Download, Upload, Check, X, Copy, Users, Pencil, FileDown, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/_admin/employees")({ component: EmployeesPage });
@@ -225,6 +225,7 @@ function copyCredentials(results: ImportResult[]) {
 
 type EditForm = {
   first_name: string; middle_name: string; last_name: string;
+  employee_code: string;
   company: string; department: string; position: string;
   vl_credits: string; vl_remaining: string;
   sl_credits: string; sl_remaining: string;
@@ -241,6 +242,7 @@ function rowToForm(r: Row): EditForm {
     first_name: r.first_name ?? "",
     middle_name: r.middle_name ?? "",
     last_name: r.last_name ?? "",
+    employee_code: r.employee_code ?? "",
     company: r.company ?? "",
     department: r.department ?? "",
     position: r.position ?? "",
@@ -269,6 +271,7 @@ function diffPatches(orig: Row, form: EditForm): Record<string, string | number 
   setText("first_name", orig.first_name);
   setText("middle_name", orig.middle_name);
   setText("last_name", orig.last_name);
+  setText("employee_code", orig.employee_code);
   setText("company", orig.company);
   setText("department", orig.department);
   setText("position", orig.position);
@@ -292,7 +295,7 @@ function diffPatches(orig: Row, form: EditForm): Record<string, string | number 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 function EmployeesPage() {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -302,6 +305,9 @@ function EmployeesPage() {
   const [editingRow, setEditingRow] = useState<Row | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Delete confirm dialog state
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
 
   // Import dialog state
   const [importOpen, setImportOpen] = useState(false);
@@ -330,6 +336,21 @@ function EmployeesPage() {
       setEditForm(null);
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const removeEmployee = useMutation({
+    mutationFn: async (id: string) => {
+      await deleteEmployee({ data: { id } });
+    },
+    onSuccess: () => {
+      toast.success("Employee deleted");
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      setDeleteTarget(null);
+    },
+    onError: (e: Error) => {
+      if (e.message === "CANNOT_DELETE_SELF") toast.error("You can't delete your own account");
+      else toast.error(e.message);
+    },
   });
 
   const setRole = useMutation({
@@ -521,9 +542,23 @@ function EmployeesPage() {
                         </Select>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
-                          <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
+                            <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
+                          </Button>
+                          {isAdmin && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:bg-destructive/10"
+                              onClick={() => setDeleteTarget(r)}
+                              disabled={r.id === user?.id}
+                              title={r.id === user?.id ? "You can't delete your own account" : "Delete employee"}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -571,14 +606,19 @@ function EmployeesPage() {
                       onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })} />
                   </div>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs text-muted-foreground">Email</Label>
-                    <div className="mt-1 text-sm">{editingRow.email ?? "—"}</div>
+                    <div className="mt-1 text-sm py-2">{editingRow.email ?? "—"}</div>
                   </div>
                   <div>
-                    <Label className="text-xs text-muted-foreground">Employee code</Label>
-                    <div className="mt-1 text-sm font-mono">{editingRow.employee_code ?? "—"}</div>
+                    <Label className="text-xs">Employee code</Label>
+                    <Input
+                      className="font-mono"
+                      placeholder="—"
+                      value={editForm.employee_code}
+                      onChange={(e) => setEditForm({ ...editForm, employee_code: e.target.value })}
+                    />
                   </div>
                 </div>
               </section>
@@ -659,6 +699,40 @@ function EmployeesPage() {
             <Button variant="outline" onClick={closeEdit}>Cancel</Button>
             <Button onClick={handleSaveEdit} disabled={savingEdit}>
               {savingEdit ? "Saving…" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirm Dialog ───────────────────────────────────────── */}
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl">Delete employee?</DialogTitle>
+          </DialogHeader>
+
+          {deleteTarget && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm">
+                This permanently removes <strong>{displayName(deleteTarget)}</strong> and all linked records:
+                profile, role assignments, leave history, attendance, performance evaluations.
+                This cannot be undone.
+              </p>
+              <div className="rounded-md border bg-secondary/30 p-3 text-xs text-muted-foreground">
+                Email: <span className="text-foreground">{deleteTarget.email ?? "—"}</span><br />
+                Code: <span className="font-mono text-foreground">{deleteTarget.employee_code ?? "—"}</span>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={removeEmployee.isPending}
+              onClick={() => deleteTarget && removeEmployee.mutate(deleteTarget.id)}
+            >
+              {removeEmployee.isPending ? "Deleting…" : "Delete permanently"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -85,6 +85,64 @@ function EmployeeNode({ data }: { data: EmployeeNodeData }) {
 
 const nodeTypes = { employee: EmployeeNode };
 
+// ── Auto-layout ──────────────────────────────────────────────────────────────
+// Lays the org tree out top-down with siblings spread horizontally. Stored
+// position_x / position_y are ignored on render so the chart always shows a
+// proper hierarchy (the user's complaint was that teams under one IS were
+// stacking vertically because the saved coords had drifted). Stored coords are
+// still written on save, so manual drags inside a session persist until the
+// next reload.
+const NODE_WIDTH = 200;
+const HORIZONTAL_GAP = 40;
+const VERTICAL_GAP = 140;
+
+function computeAutoLayout(orgNodes: OrgNode[]): Record<string, { x: number; y: number }> {
+  const idSet = new Set(orgNodes.map((n) => n.id));
+  const children: Record<string, string[]> = {};
+  for (const n of orgNodes) children[n.id] = [];
+  for (const n of orgNodes) {
+    if (n.parent_id && idSet.has(n.parent_id)) children[n.parent_id].push(n.id);
+  }
+  const roots = orgNodes
+    .filter((n) => !n.parent_id || !idSet.has(n.parent_id))
+    .map((n) => n.id);
+
+  // Width = number of leaf descendants. Each leaf occupies one slot.
+  const widthOf: Record<string, number> = {};
+  function calcWidth(id: string, seen = new Set<string>()): number {
+    if (id in widthOf) return widthOf[id];
+    if (seen.has(id)) return 1; // cycle guard — shouldn't happen
+    seen.add(id);
+    const kids = children[id];
+    if (!kids || kids.length === 0) { widthOf[id] = 1; return 1; }
+    const w = kids.reduce((s, k) => s + calcWidth(k, seen), 0);
+    widthOf[id] = Math.max(1, w);
+    return widthOf[id];
+  }
+  for (const r of roots) calcWidth(r);
+
+  const pos: Record<string, { x: number; y: number }> = {};
+  function place(id: string, leftSlot: number, depth: number) {
+    const w = widthOf[id] ?? 1;
+    const centerSlot = leftSlot + w / 2;
+    pos[id] = {
+      x: (centerSlot - 0.5) * (NODE_WIDTH + HORIZONTAL_GAP),
+      y: depth * VERTICAL_GAP,
+    };
+    let slot = leftSlot;
+    for (const k of children[id] ?? []) {
+      place(k, slot, depth + 1);
+      slot += widthOf[k] ?? 1;
+    }
+  }
+  let rootSlot = 0;
+  for (const r of roots) {
+    place(r, rootSlot, 0);
+    rootSlot += widthOf[r] ?? 1;
+  }
+  return pos;
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 function OrgChartPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -123,13 +181,15 @@ function OrgChartPage() {
     if (!orgNodes.length || !profiles.length) return;
 
     const profileMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
+    const layout = computeAutoLayout(orgNodes);
 
     const initialNodes: Node[] = orgNodes.map((on) => {
       const profile = profileMap[on.employee_id];
+      const p = layout[on.id] ?? { x: on.position_x, y: on.position_y };
       return {
         id: on.id,
         type: "employee",
-        position: { x: on.position_x, y: on.position_y },
+        position: p,
         data: {
           label: profile?.full_name ?? on.employee_id,
           position: profile?.position ?? undefined,

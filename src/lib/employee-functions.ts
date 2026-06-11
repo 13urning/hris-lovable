@@ -126,6 +126,35 @@ export const updateEmployeeProfile = createServerFn({ method: "POST" })
     );
   });
 
+// Admin-only employee deletion. Cascade-deletes the DB rows (profile, roles,
+// leaves, DTRs, evaluations) via FK constraints. Best-effort Firebase Auth
+// cleanup — failure logged but does not block the DB delete.
+export const deleteEmployee = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { id: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertAdmin(context.user);
+    if (data.id === context.user.dbUserId) throw new Error("CANNOT_DELETE_SELF");
+    const { pool } = await import("@/lib/db.server");
+
+    const { rows: [user] } = await pool.query<{ firebase_uid: string | null }>(
+      `SELECT firebase_uid FROM users WHERE id = $1`,
+      [data.id],
+    );
+    if (!user) throw new Error("NOT_FOUND");
+
+    if (user.firebase_uid) {
+      try {
+        const { adminAuth } = await import("@/lib/firebase-admin.server");
+        await adminAuth.deleteUser(user.firebase_uid);
+      } catch (err) {
+        console.warn("[deleteEmployee] Firebase Auth delete failed for", user.firebase_uid, err);
+      }
+    }
+
+    await pool.query(`DELETE FROM users WHERE id = $1`, [data.id]);
+  });
+
 export const setEmployeeRole = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data: { userId: string; roles: { user_id: string; role: string }[] }) => data)
