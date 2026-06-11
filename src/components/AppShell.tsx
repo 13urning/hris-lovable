@@ -81,9 +81,9 @@ export function AppShell() {
       {drawerItem("/ot-approvals", "OT Approvals", Timer)}
 
       {sectionLabel("Performance")}
-      {isGroupHead && drawerItem("/kpi-builder", "KPI Builder", Target)}
-      {isGroupHead && drawerItem("/performance-admin", "Performance Admin", BarChart3)}
-      {!isElevated && drawerItem("/performance", "Performance", BarChart3)}
+      {isHR && drawerItem("/kpi-builder", "KPI Builder", Target)}
+      {isHR && drawerItem("/performance-admin", "Performance Admin", BarChart3)}
+      {drawerItem("/performance", "Performance", BarChart3)}
     </nav>
   );
 
