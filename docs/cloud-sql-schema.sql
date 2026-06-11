@@ -276,7 +276,8 @@ CREATE TABLE public.kpi_templates (
   designation   TEXT,
   is_active     BOOLEAN NOT NULL DEFAULT TRUE,
   created_by    UUID REFERENCES public.users(id) ON DELETE SET NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 
@@ -287,10 +288,12 @@ CREATE TABLE public.kpi_templates (
 CREATE TABLE public.behavioral_competencies (
   id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name                   TEXT NOT NULL,
+  description            TEXT,
   behavioral_indicators  TEXT NOT NULL,
   display_order          INTEGER NOT NULL DEFAULT 0,
   is_active              BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 
@@ -306,7 +309,8 @@ CREATE TABLE public.evaluation_periods (
   end_date     DATE NOT NULL,
   status       TEXT NOT NULL DEFAULT 'draft',
   created_by   UUID REFERENCES public.users(id) ON DELETE SET NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 
@@ -327,7 +331,11 @@ CREATE TABLE public.performance_evaluations (
   approved_at                   TIMESTAMPTZ,
   approved_by                   UUID REFERENCES public.users(id) ON DELETE SET NULL,
   group_head_notes              TEXT,
-  created_at                    TIMESTAMPTZ NOT NULL DEFAULT now()
+  hr_notes                      TEXT,
+  hr_reviewed_at                TIMESTAMPTZ,
+  hr_reviewed_by                UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_perf_evals_period   ON public.performance_evaluations(period_id);
@@ -353,7 +361,8 @@ CREATE TABLE public.evaluation_kpi_scores (
   hr_score           NUMERIC,
   hr_comments        TEXT,
   final_score        NUMERIC,
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_kpi_scores_eval ON public.evaluation_kpi_scores(evaluation_id);
@@ -374,7 +383,8 @@ CREATE TABLE public.evaluation_behavioral_scores (
   gh_rating                 NUMERIC,
   gh_comments               TEXT,
   final_rating              NUMERIC,
-  created_at                TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_behavioral_scores_eval ON public.evaluation_behavioral_scores(evaluation_id);
