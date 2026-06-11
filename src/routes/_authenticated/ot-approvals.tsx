@@ -162,25 +162,42 @@ function OTApprovalsPage() {
     enabled: !!user && !isHR,
   });
 
-  // Compute used hours per budget from actuals
-  const usedHoursById = useMemo(() => {
-    const map: Record<string, number> = {};
+  // Hours per budget split by status. "approved" drives the displayed Used /
+  // Remaining numbers (pending hours don't reduce remaining until they're
+  // actually approved). "pending" surfaces alongside as an indicator, and the
+  // total (approved + pending) caps how much can still be filed so multiple
+  // pending requests can't collectively over-commit a budget.
+  const { approvedHoursById, pendingHoursById } = useMemo(() => {
+    const approved: Record<string, number> = {};
+    const pending: Record<string, number> = {};
     for (const a of myActuals ?? []) {
-      if (a.pre_approved_id) {
-        map[a.pre_approved_id] = (map[a.pre_approved_id] ?? 0) + a.requested_hours;
+      if (!a.pre_approved_id) continue;
+      if (a.status === "approved") {
+        approved[a.pre_approved_id] = (approved[a.pre_approved_id] ?? 0) + a.requested_hours;
+      } else if (a.status === "pending") {
+        pending[a.pre_approved_id] = (pending[a.pre_approved_id] ?? 0) + a.requested_hours;
       }
     }
-    return map;
+    return { approvedHoursById: approved, pendingHoursById: pending };
   }, [myActuals]);
 
   const selectedBudget = approvedBudgets?.find(
     (b) => b.id === fileForm.pre_approved_id,
   ) ?? null;
-  const usedForSelected = selectedBudget
-    ? (usedHoursById[selectedBudget.id] ?? 0)
+  const approvedForSelected = selectedBudget
+    ? (approvedHoursById[selectedBudget.id] ?? 0)
     : 0;
+  const pendingForSelected = selectedBudget
+    ? (pendingHoursById[selectedBudget.id] ?? 0)
+    : 0;
+  // What's shown as "remaining" — only deducts approved.
   const remainingForSelected = selectedBudget
-    ? Math.max(0, selectedBudget.requested_hours - usedForSelected)
+    ? Math.max(0, selectedBudget.requested_hours - approvedForSelected)
+    : 0;
+  // What you can still file — also subtracts pending so you can't queue up
+  // requests that collectively exceed the budget.
+  const availableForSelected = selectedBudget
+    ? Math.max(0, selectedBudget.requested_hours - approvedForSelected - pendingForSelected)
     : 0;
 
   const nextMonthIso = nextMonthValue() + "-01";
@@ -231,8 +248,12 @@ function OTApprovalsPage() {
     mutationFn: async () => {
       if (!user) throw new Error("Not signed in");
       if (!selectedBudget) throw new Error("Select a budget first");
-      if (fileForm.hours > remainingForSelected) {
-        throw new Error(`Hours exceed remaining budget (${remainingForSelected}h left)`);
+      if (fileForm.hours > availableForSelected) {
+        throw new Error(
+          pendingForSelected > 0
+            ? `Hours exceed budget. ${availableForSelected}h available (${pendingForSelected}h already pending approval).`
+            : `Hours exceed remaining budget (${availableForSelected}h left)`,
+        );
       }
       await fileActualOTHours({ data: {
         preApprovedId: selectedBudget.id,
@@ -347,7 +368,8 @@ function OTApprovalsPage() {
                   </div>
                 )}
                 {nextMonthBudget.status === "approved" && (() => {
-                  const used = usedHoursById[nextMonthBudget.id] ?? 0;
+                  const used = approvedHoursById[nextMonthBudget.id] ?? 0;
+                  const pending = pendingHoursById[nextMonthBudget.id] ?? 0;
                   const remaining = Math.max(0, nextMonthBudget.requested_hours - used);
                   return (
                     <>
@@ -355,6 +377,12 @@ function OTApprovalsPage() {
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Used</p>
                         <p className="text-lg font-semibold tabular-nums text-muted-foreground">{used}h</p>
                       </div>
+                      {pending > 0 && (
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Pending</p>
+                          <p className="text-lg font-semibold tabular-nums text-warning-foreground">{pending}h</p>
+                        </div>
+                      )}
                       <div>
                         <p className="text-xs uppercase tracking-wide text-muted-foreground">Remaining</p>
                         <p className={`text-lg font-semibold tabular-nums ${remaining === 0 ? "text-destructive" : "text-success"}`}>
@@ -408,6 +436,7 @@ function OTApprovalsPage() {
                     <th className="px-4 py-2 text-left">Month</th>
                     <th className="px-4 py-2 text-right">Approved</th>
                     <th className="px-4 py-2 text-right">Used</th>
+                    <th className="px-4 py-2 text-right">Pending</th>
                     <th className="px-4 py-2 text-right">Remaining</th>
                     <th className="px-4 py-2 text-left">Step</th>
                     <th className="px-4 py-2 text-left">Status</th>
@@ -415,7 +444,8 @@ function OTApprovalsPage() {
                 </thead>
                 <tbody>
                   {myBudgets.map((r) => {
-                    const used = r.status === "approved" ? (usedHoursById[r.id] ?? 0) : null;
+                    const used = r.status === "approved" ? (approvedHoursById[r.id] ?? 0) : null;
+                    const pending = r.status === "approved" ? (pendingHoursById[r.id] ?? 0) : null;
                     const remaining = used !== null ? Math.max(0, r.requested_hours - used) : null;
                     return (
                       <tr key={r.id} className="border-t">
@@ -423,6 +453,11 @@ function OTApprovalsPage() {
                         <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
                         <td className="px-4 py-2 text-right text-muted-foreground">
                           {used !== null ? `${used}h` : "—"}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          {pending !== null && pending > 0 ? (
+                            <span className="text-warning-foreground">{pending}h</span>
+                          ) : <span className="text-muted-foreground">—</span>}
                         </td>
                         <td className="px-4 py-2 text-right">
                           {remaining !== null ? (
@@ -798,27 +833,28 @@ function OTApprovalsPage() {
                 onChange={(e) => {
                   const id = e.target.value;
                   const budget = approvedBudgets?.find((b) => b.id === id);
-                  const used = budget
-                    ? (usedHoursById[budget.id] ?? 0)
-                    : 0;
-                  const remaining = budget
-                    ? Math.max(0, budget.requested_hours - used)
+                  const approved = budget ? (approvedHoursById[budget.id] ?? 0) : 0;
+                  const pending = budget ? (pendingHoursById[budget.id] ?? 0) : 0;
+                  const available = budget
+                    ? Math.max(0, budget.requested_hours - approved - pending)
                     : 0;
                   setFileForm({
                     ...fileForm,
                     pre_approved_id: id,
-                    hours: Math.min(fileForm.hours, remaining || 1),
+                    hours: Math.min(fileForm.hours, available || 1),
                   });
                 }}
               >
                 <option value="">— choose a budget —</option>
                 {approvedBudgets?.map((b) => {
-                  const used = usedHoursById[b.id] ?? 0;
+                  const used = approvedHoursById[b.id] ?? 0;
+                  const pending = pendingHoursById[b.id] ?? 0;
                   const remaining = Math.max(0, b.requested_hours - used);
+                  const pendingTag = pending > 0 ? `, ${pending}h pending` : "";
                   return (
                     <option key={b.id} value={b.id}>
                       {formatMonth(b.target_month)} — {b.requested_hours}h (
-                      {used}h used, {remaining}h remaining)
+                      {used}h used{pendingTag}, {remaining}h remaining)
                     </option>
                   );
                 })}
@@ -838,6 +874,14 @@ function OTApprovalsPage() {
                   {remainingForSelected}h
                 </span>{" "}
                 of {selectedBudget.requested_hours}h
+                {pendingForSelected > 0 && (
+                  <>
+                    {" · "}
+                    <span className="text-warning-foreground font-medium">
+                      {pendingForSelected}h pending approval
+                    </span>
+                  </>
+                )}
               </p>
             )}
 
@@ -861,25 +905,28 @@ function OTApprovalsPage() {
                 type="number"
                 min={0.5}
                 step={0.5}
-                max={remainingForSelected || undefined}
+                max={availableForSelected || undefined}
                 className="mt-1"
                 value={fileForm.hours}
                 onChange={(e) =>
                   setFileForm({ ...fileForm, hours: Number(e.target.value) })
                 }
-                disabled={!selectedBudget || remainingForSelected === 0}
+                disabled={!selectedBudget || availableForSelected === 0}
               />
               {selectedBudget &&
-                remainingForSelected === 0 && (
+                availableForSelected === 0 && (
                   <p className="mt-1 text-[11px] text-destructive">
-                    This budget is fully used.
+                    {pendingForSelected > 0
+                      ? `Budget is fully committed (${pendingForSelected}h pending approval).`
+                      : "This budget is fully used."}
                   </p>
                 )}
               {selectedBudget &&
-                remainingForSelected > 0 &&
-                fileForm.hours > remainingForSelected && (
+                availableForSelected > 0 &&
+                fileForm.hours > availableForSelected && (
                   <p className="mt-1 text-[11px] text-destructive">
-                    Cannot exceed remaining budget of {remainingForSelected}h.
+                    Cannot exceed {availableForSelected}h
+                    {pendingForSelected > 0 && ` (${pendingForSelected}h already pending)`}.
                   </p>
                 )}
             </div>
@@ -898,8 +945,8 @@ function OTApprovalsPage() {
                 !fileForm.pre_approved_id ||
                 !fileForm.work_date ||
                 fileForm.hours <= 0 ||
-                fileForm.hours > remainingForSelected ||
-                remainingForSelected === 0
+                fileForm.hours > availableForSelected ||
+                availableForSelected === 0
               }
               onClick={() => fileActual.mutate()}
             >

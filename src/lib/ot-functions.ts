@@ -125,13 +125,29 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
     const { resolveChain } = await import("@/lib/chain.server");
 
     // Guard: the budget must belong to the caller and be approved.
-    const { rows: [budget] } = await pool.query<{ employee_id: string; status: string }>(
-      `SELECT employee_id, status FROM ot_approval_requests WHERE id = $1`,
+    const { rows: [budget] } = await pool.query<{ employee_id: string; status: string; requested_hours: number }>(
+      `SELECT employee_id, status, requested_hours FROM ot_approval_requests WHERE id = $1`,
       [data.preApprovedId],
     );
     if (!budget) throw new Error("NOT_FOUND");
     if (budget.employee_id !== context.user.dbUserId) throw new Error("FORBIDDEN");
     if (budget.status !== "approved") throw new Error("BUDGET_NOT_APPROVED");
+
+    // Cap on committed (approved + pending) actuals against this budget.
+    // Pending hours don't reduce displayed "remaining" in the UI, but they
+    // count here so a user can't queue up multiple filings that would
+    // collectively exceed the budget if all eventually get approved.
+    const { rows: [committedRow] } = await pool.query<{ committed: number }>(
+      `SELECT COALESCE(SUM(requested_hours), 0) AS committed
+         FROM ot_approval_requests
+        WHERE pre_approved_id = $1
+          AND request_type = 'actual'
+          AND status IN ('approved', 'pending')`,
+      [data.preApprovedId],
+    );
+    if (Number(committedRow.committed) + Number(data.hours) > Number(budget.requested_hours)) {
+      throw new Error("EXCEEDS_BUDGET");
+    }
 
     const chain = await resolveChain(pool, context.user.dbUserId);
     const isAutoApproved = chain.length === 0;
