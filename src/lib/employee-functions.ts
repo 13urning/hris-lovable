@@ -7,8 +7,13 @@ type EmployeeRow = {
   first_name: string | null; middle_name: string | null; last_name: string | null;
   email: string | null; department: string;
   employee_code: string | null; position: string | null; company: string | null;
-  vl_credits: number | null; sl_credits: number | null;
-  vl_remaining: number | null; sl_remaining: number | null;
+  vl_credits: number | null; vl_remaining: number | null;
+  sl_credits: number | null; sl_remaining: number | null;
+  el_credits: number | null; el_remaining: number | null;
+  bday_credits: number | null; bday_remaining: number | null;
+  ml_credits: number | null; ml_remaining: number | null;
+  pl_credits: number | null; pl_remaining: number | null;
+  bl_credits: number | null; bl_remaining: number | null;
   roles: string[];
   vl_used: number;
   sl_used: number;
@@ -20,6 +25,8 @@ type ImportEmployee = {
   employee_code: string;
   company: string; department: string; position: string;
   vl_credits: string; sl_credits: string;
+  el_credits: string; bday_credits: string;
+  ml_credits: string; pl_credits: string; bl_credits: string;
 };
 
 type ImportResult = {
@@ -61,7 +68,13 @@ function generateTempPassword(): string {
 const PATCHABLE_COLUMNS = new Set([
   "full_name", "first_name", "middle_name", "last_name",
   "department", "position", "company", "employee_code",
-  "vl_credits", "sl_credits", "vl_remaining", "sl_remaining",
+  "vl_credits", "vl_remaining",
+  "sl_credits", "sl_remaining",
+  "el_credits", "el_remaining",
+  "bday_credits", "bday_remaining",
+  "ml_credits", "ml_remaining",
+  "pl_credits", "pl_remaining",
+  "bl_credits", "bl_remaining",
 ]);
 
 export const fetchAllEmployees = createServerFn({ method: "POST" })
@@ -181,11 +194,32 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
             [firebaseUid, emp.email],
           );
 
+          const parseCredit = (raw: string | undefined, fallback: number | null): number | null => {
+            if (raw === undefined || raw === "") return fallback;
+            const n = parseInt(raw);
+            return Number.isFinite(n) ? n : fallback;
+          };
+          const vl = parseCredit(emp.vl_credits, 10);
+          const sl = parseCredit(emp.sl_credits, 10);
+          const el = parseCredit(emp.el_credits, null);
+          const bday = parseCredit(emp.bday_credits, null);
+          const ml = parseCredit(emp.ml_credits, null);
+          const pl = parseCredit(emp.pl_credits, null);
+          const bl = parseCredit(emp.bl_credits, null);
           await client.query(
             `INSERT INTO profiles (id, full_name, first_name, middle_name, last_name,
                                    email, employee_code, company, department, position,
-                                   vl_credits, sl_credits, vl_remaining, sl_remaining, must_change_password)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$11,$12,TRUE)`,
+                                   vl_credits, vl_remaining,
+                                   sl_credits, sl_remaining,
+                                   el_credits, el_remaining,
+                                   bday_credits, bday_remaining,
+                                   ml_credits, ml_remaining,
+                                   pl_credits, pl_remaining,
+                                   bl_credits, bl_remaining,
+                                   must_change_password)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                     $11,$11, $12,$12, $13,$13, $14,$14, $15,$15, $16,$16, $17,$17,
+                     TRUE)`,
             [
               user.id, fullName,
               emp.first_name.trim(),
@@ -194,7 +228,7 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
               emp.email,
               emp.employee_code || null, emp.company || null,
               emp.department || "General", emp.position || null,
-              parseInt(emp.vl_credits) || 10, parseInt(emp.sl_credits) || 10,
+              vl, sl, el, bday, ml, pl, bl,
             ],
           );
 
