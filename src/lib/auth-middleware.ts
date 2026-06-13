@@ -49,19 +49,24 @@ export const authMiddleware = createMiddleware({ type: "function" })
       const { adminAuth } = await import("@/lib/firebase-admin.server");
       const decoded = await adminAuth.verifyIdToken(idToken);
       const { pool } = await import("@/lib/db.server");
-      const { rows } = await pool.query<{ id: string; email: string | null }>(
-        `SELECT id, email FROM users WHERE firebase_uid = $1 LIMIT 1`,
+      // Single round-trip: resolve the user row and aggregate its roles in one
+      // query. LEFT JOIN keeps users with no roles; array_remove drops the NULL
+      // produced for those so they come back as an empty array.
+      // Cast role to text so the aggregate comes back as text[] (well-known OID
+      // 1009) — node-postgres won't auto-parse an array of the custom app_role
+      // enum and would otherwise hand back a raw "{employee,hr}" string.
+      const { rows } = await pool.query<{ id: string; email: string | null; roles: AuthRole[] }>(
+        `SELECT u.id, u.email,
+                array_remove(array_agg(ur.role::text), NULL) AS roles
+           FROM users u
+           LEFT JOIN user_roles ur ON ur.user_id = u.id
+          WHERE u.firebase_uid = $1
+          GROUP BY u.id, u.email
+          LIMIT 1`,
         [decoded.uid],
       );
       const dbUserId = rows[0]?.id ?? null;
-      let roles: AuthRole[] = [];
-      if (dbUserId) {
-        const { rows: roleRows } = await pool.query<{ role: AuthRole }>(
-          `SELECT role FROM user_roles WHERE user_id = $1`,
-          [dbUserId],
-        );
-        roles = roleRows.map((r) => r.role);
-      }
+      const roles: AuthRole[] = rows[0]?.roles ?? [];
       user = {
         firebaseUid: decoded.uid,
         dbUserId,
