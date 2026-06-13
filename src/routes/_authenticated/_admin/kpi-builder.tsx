@@ -13,7 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Target, ShieldAlert } from "lucide-react";
+import { Plus, Pencil, Trash2, Target, ShieldAlert, FileDown } from "lucide-react";
+import { exportRowsToCSV } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/_admin/kpi-builder")({ component: KpiBuilderPage });
 
@@ -98,6 +99,23 @@ function KpiBuilderPage() {
 
   const filtered = teamFilter === "all" ? kpis : kpis.filter((k) => k.team === teamFilter);
 
+  const handleExport = () => {
+    exportRowsToCSV(
+      filtered,
+      [
+        { header: "Team", value: (k) => k.team },
+        { header: "KPI", value: (k) => k.title },
+        { header: "Description", value: (k) => k.description ?? "" },
+        { header: "Metric", value: (k) => k.metric_unit },
+        { header: "Target", value: (k) => k.target_value },
+        { header: "Weight (%)", value: (k) => k.weight },
+        { header: "Designation", value: (k) => k.designation ?? "All" },
+        { header: "Status", value: (k) => (k.is_active ? "Active" : "Inactive") },
+      ],
+      "kpi-templates",
+    );
+  };
+
   // Group by team
   const grouped = TEAMS.reduce<Record<string, KpiTemplate[]>>((acc, t) => {
     acc[t] = filtered.filter((k) => k.team === t);
@@ -142,7 +160,12 @@ function KpiBuilderPage() {
             Define KPIs per team and designation. Weights should sum to 100% per team.
           </p>
         </div>
-        <Button onClick={openCreate}><Plus className="mr-1.5 h-4 w-4" /> New KPI</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleExport} disabled={filtered.length === 0}>
+            <FileDown className="mr-1.5 h-4 w-4" /> Export CSV
+          </Button>
+          <Button onClick={openCreate}><Plus className="mr-1.5 h-4 w-4" /> New KPI</Button>
+        </div>
       </div>
 
       {/* Team filter */}

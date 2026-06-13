@@ -35,6 +35,9 @@ dist-ssr
 .vercel
 api/_server/
 
+# Playwright MCP verification artifacts
+.playwright-mcp/
+
 # Local env — never commit secrets
 .env
 .env.*

@@ -25,6 +25,38 @@ function brandedErrorResponse(): Response {
   });
 }
 
+// Baseline security headers applied to every response. CSP is intentionally
+// omitted here — a strict policy needs per-route testing against Firebase Auth
+// and the SSR inline bootstrap, so it's tracked as a follow-up.
+const SECURITY_HEADERS: Record<string, string> = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+};
+
+function withSecurityHeaders(response: Response): Response {
+  // Handler responses expose mutable headers, so set them in place to avoid
+  // re-streaming the body. Fall back to a copy if a response has frozen headers.
+  try {
+    for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+      if (!response.headers.has(key)) response.headers.set(key, value);
+    }
+    return response;
+  } catch {
+    const headers = new Headers(response.headers);
+    for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+      if (!headers.has(key)) headers.set(key, value);
+    }
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+}
+
 function isCatastrophicSsrErrorBody(body: string, responseStatus: number): boolean {
   let payload: unknown;
   try {
@@ -71,10 +103,10 @@ export default {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
-      return brandedErrorResponse();
+      return withSecurityHeaders(brandedErrorResponse());
     }
   },
 };
