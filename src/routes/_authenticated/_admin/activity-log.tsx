@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { getActivityLogDTRs } from "@/lib/dtr-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock3 } from "lucide-react";
+import { Clock3, FileDown } from "lucide-react";
+import { exportRowsToCSV } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/_admin/activity-log")({ component: ActivityLogPage });
 
@@ -73,6 +75,33 @@ function ActivityLogPage() {
     return true;
   });
 
+  const statusText = (entry: LogEntry) => {
+    if (!entry.time_in) return "No record";
+    if (!entry.time_out) return "In progress";
+    if (entry.is_undertime) return "Undertime";
+    return "Present";
+  };
+
+  const handleExport = () => {
+    exportRowsToCSV(
+      filtered,
+      [
+        { header: "Employee", value: (e) => e.profile?.full_name ?? "Unknown" },
+        { header: "Employee Code", value: (e) => e.profile?.employee_code ?? "" },
+        { header: "Department", value: (e) => e.profile?.department ?? "" },
+        { header: "Date", value: (e) => e.work_date },
+        { header: "Shift", value: (e) => e.shift_label ?? "" },
+        { header: "Clock In", value: (e) => formatTime(e.time_in) },
+        { header: "Clock In Timestamp", value: (e) => formatTimestamp(e.created_at) },
+        { header: "Clock Out", value: (e) => formatTime(e.time_out) },
+        { header: "Hours", value: (e) => (e.hours_worked != null ? e.hours_worked.toFixed(2) : "") },
+        { header: "Undertime (min)", value: (e) => e.undertime_minutes ?? "" },
+        { header: "Status", value: statusText },
+      ],
+      "activity-log",
+    );
+  };
+
   const statusBadge = (entry: LogEntry) => {
     if (!entry.time_in) return <Badge variant="outline" className="text-muted-foreground">No record</Badge>;
     if (!entry.time_out) return <Badge variant="secondary">In progress</Badge>;
@@ -117,6 +146,13 @@ function ActivityLogPage() {
                   onChange={(e) => setDateTo(e.target.value)}
                 />
               </div>
+              <Button
+                variant="outline"
+                onClick={handleExport}
+                disabled={filtered.length === 0}
+              >
+                <FileDown className="mr-2 h-4 w-4" /> Export CSV
+              </Button>
             </div>
           </div>
         </CardHeader>

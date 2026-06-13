@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { formatDate, todayIso } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
-import { Plane, Check, X, Trash2, CalendarDays, Clock3, CalendarCheck2, Users } from "lucide-react";
+import { Plane, Check, X, Trash2, CalendarDays, Clock3, CalendarCheck2, Users, FileDown } from "lucide-react";
+import { exportRowsToCSV } from "@/lib/csv-export";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/leaves")({ component: LeavesPage });
@@ -210,6 +211,27 @@ function LeavesPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const handleExport = () => {
+    exportRowsToCSV(
+      filtered,
+      [
+        { header: "Employee", value: (l) => profilesMap?.[l.employee_id]?.full_name ?? "" },
+        { header: "Department", value: (l) => profilesMap?.[l.employee_id]?.department ?? "" },
+        { header: "Type", value: (l) => l.leave_type },
+        { header: "Type Label", value: (l) => LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type },
+        { header: "Start Date", value: (l) => l.start_date },
+        { header: "End Date", value: (l) => l.end_date },
+        { header: "Days", value: (l) => daysBetween(l.start_date, l.end_date) },
+        { header: "Reason", value: (l) => l.reason ?? "" },
+        { header: "Status", value: (l) => l.status },
+        { header: "Filed", value: (l) => l.created_at },
+        { header: "Reviewed", value: (l) => l.reviewed_at ?? "" },
+        { header: "Review Notes", value: (l) => l.review_notes ?? "" },
+      ],
+      "leaves",
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -496,6 +518,11 @@ function LeavesPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+            {isHR && (
+              <Button variant="outline" onClick={handleExport} disabled={filtered.length === 0}>
+                <FileDown className="mr-2 h-4 w-4" /> Export CSV
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-0">

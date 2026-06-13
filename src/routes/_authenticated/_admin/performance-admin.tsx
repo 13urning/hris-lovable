@@ -20,8 +20,9 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Plus, Users, ClipboardList, CheckCircle2, ChevronDown, ChevronUp, ShieldAlert, Heart, Target } from "lucide-react";
+import { Plus, Users, ClipboardList, CheckCircle2, ChevronDown, ChevronUp, ShieldAlert, Heart, Target, FileDown } from "lucide-react";
 import { computeOverallRating, RATING_COLORS, RATING_DESCRIPTIONS } from "@/lib/performance-rating";
+import { exportRowsToCSV } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/_admin/performance-admin")({ component: PerformanceAdminPage });
 
@@ -363,6 +364,25 @@ function PerformanceAdminPage() {
     approved: filteredEvaluations.filter((e) => e.status === "approved"),
   };
 
+  const handleExportEvaluations = () => {
+    exportRowsToCSV(
+      filteredEvaluations,
+      [
+        { header: "Employee", value: (e) => e.employee?.full_name ?? "" },
+        { header: "Email", value: (e) => e.employee?.email ?? "" },
+        { header: "Department", value: (e) => e.employee?.department ?? "" },
+        { header: "Position", value: (e) => e.employee?.position ?? "" },
+        { header: "Status", value: (e) => e.status },
+        { header: "KPI Score", value: (e) => (e.kpi_score != null ? Number(e.kpi_score).toFixed(2) : "") },
+        { header: "Behavioral Score", value: (e) => (e.behavioral_score != null ? Number(e.behavioral_score).toFixed(2) : "") },
+        { header: "Overall Score", value: (e) => (e.overall_score != null ? Number(e.overall_score).toFixed(2) : "") },
+        { header: "Overall Rating", value: (e) => e.overall_rating ?? "" },
+        { header: "Approved At", value: (e) => e.approved_at ?? "" },
+      ],
+      `performance-${activePeriod?.title?.replace(/\s+/g, "-").toLowerCase() ?? "evaluations"}`,
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
@@ -424,13 +444,18 @@ function PerformanceAdminPage() {
               <CardTitle className="font-display text-xl">{activePeriod.title}</CardTitle>
               <p className="text-sm text-muted-foreground mt-0.5">{evaluations.length} evaluations</p>
             </div>
-            {activePeriod.status === "active" && (
-              <Button onClick={() => generateEvaluations.mutate(activePeriod.id)}
-                disabled={generateEvaluations.isPending}>
-                <Users className="mr-1.5 h-4 w-4" />
-                {generateEvaluations.isPending ? "Generating…" : "Generate for All"}
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={handleExportEvaluations} disabled={filteredEvaluations.length === 0}>
+                <FileDown className="mr-1.5 h-4 w-4" /> Export CSV
               </Button>
-            )}
+              {activePeriod.status === "active" && (
+                <Button onClick={() => generateEvaluations.mutate(activePeriod.id)}
+                  disabled={generateEvaluations.isPending}>
+                  <Users className="mr-1.5 h-4 w-4" />
+                  {generateEvaluations.isPending ? "Generating…" : "Generate for All"}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <div className="mb-4 grid grid-cols-3 gap-3">

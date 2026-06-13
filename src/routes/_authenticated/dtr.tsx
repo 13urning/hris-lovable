@@ -6,8 +6,10 @@ import { getMyDTRsByMonth } from "@/lib/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/dtr";
-import { Clock3, AlertTriangle } from "lucide-react";
+import { exportRowsToCSV } from "@/lib/csv-export";
+import { Clock3, AlertTriangle, FileDown } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dtr")({ component: AttendancePage });
 
@@ -51,6 +53,38 @@ function AttendancePage() {
 
   const displayMonth = new Date(selectedMonth + "-01T00:00:00").toLocaleString("default", { month: "long", year: "numeric" });
 
+  const handleExport = () => {
+    type DtrRow = (typeof sortedDtrs)[number] & {
+      shift_label?: string | null;
+      is_undertime?: boolean;
+      undertime_minutes?: number | null;
+      ot_status?: string | null;
+    };
+    exportRowsToCSV(
+      sortedDtrs as DtrRow[],
+      [
+        { header: "Date", value: (d) => d.work_date },
+        { header: "Shift", value: (d) => d.shift_label ?? "" },
+        { header: "Time In", value: (d) => d.time_in ?? "" },
+        { header: "Time Out", value: (d) => d.time_out ?? "" },
+        { header: "Hours", value: (d) => Number(d.hours_worked ?? 0).toFixed(2) },
+        { header: "Late (min)", value: (d) => Number(d.late_minutes ?? 0) },
+        { header: "Undertime (min)", value: (d) => Number(d.undertime_minutes ?? 0) },
+        { header: "OT Hours", value: (d) => Number(d.overtime_hours ?? 0).toFixed(2) },
+        { header: "OT Status", value: (d) => d.ot_status ?? "" },
+        {
+          header: "Flag",
+          value: (d) =>
+            d.is_absent ? "Absent"
+            : d.is_leave ? `Leave (${d.leave_type ?? ""})`
+            : d.is_undertime ? "Undertime"
+            : "Present",
+        },
+      ],
+      `attendance-${selectedMonth}`,
+    );
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -68,6 +102,9 @@ function AttendancePage() {
             max={todayYearMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
           />
+          <Button variant="outline" onClick={handleExport} disabled={sortedDtrs.length === 0}>
+            <FileDown className="mr-2 h-4 w-4" /> Export CSV
+          </Button>
         </div>
       </div>
 

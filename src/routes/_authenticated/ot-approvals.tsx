@@ -20,8 +20,9 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/dtr";
+import { exportRowsToCSV } from "@/lib/csv-export";
 import { toast } from "sonner";
-import { Clock3, CheckCircle2, XCircle, Send, CalendarClock } from "lucide-react";
+import { Clock3, CheckCircle2, XCircle, Send, CalendarClock, FileDown } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/ot-approvals")({
   component: OTApprovalsPage,
@@ -214,6 +215,22 @@ function OTApprovalsPage() {
   });
 
   const hasPendingQueue = (pendingForMe?.length ?? 0) > 0;
+
+  const handleExportPending = () => {
+    exportRowsToCSV(
+      pendingForMe ?? [],
+      [
+        { header: "Employee", value: (r) => r.employee_full_name ?? "" },
+        { header: "Type", value: (r) => (r.request_type === "pre_approved" ? "Budget" : "Filed hours") },
+        { header: "For", value: (r) => (r.request_type === "pre_approved" ? formatMonth(r.target_month) : formatDate(r.work_date)) },
+        { header: "Hours", value: (r) => r.requested_hours },
+        { header: "Notes", value: (r) => r.review_notes ?? "" },
+        { header: "Step", value: (r) => `${Math.min(r.current_approver_index + 1, r.approver_chain.length)} of ${r.approver_chain.length}` },
+        { header: "Filed", value: (r) => r.created_at },
+      ],
+      "ot-pending-approvals",
+    );
+  };
 
   // ── Mutation: request OT budget ──────────────────────────────────────────
   const requestBudget = useMutation({
@@ -570,13 +587,16 @@ function OTApprovalsPage() {
       {/* ── Pending my approval (chain queue) ───────────────────────────── */}
       {hasPendingQueue && (
         <Card className="border-warning/30 bg-warning/5">
-          <CardHeader>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
             <CardTitle className="font-display text-2xl flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-warning-foreground" /> Pending my approval
               <span className="ml-1 rounded bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
                 {pendingForMe?.length ?? 0}
               </span>
             </CardTitle>
+            <Button variant="outline" onClick={handleExportPending} disabled={!pendingForMe?.length}>
+              <FileDown className="mr-2 h-4 w-4" /> Export CSV
+            </Button>
           </CardHeader>
           <CardContent className="p-0">
             {pendingLoading ? (
