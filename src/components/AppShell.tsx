@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   LogOut, Clock3, LayoutDashboard, Users,
-  Plane, BarChart3, Target, Menu, GitBranch, Timer, Activity,
+  Plane, BarChart3, Target, Menu, GitBranch, Timer, Activity, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import tidalLogo from "@/assets/tidal-logo.png";
@@ -76,6 +76,7 @@ export function AppShell() {
       {isHR && drawerItem("/employees", "Employees", Users)}
       {isHR && drawerItem("/activity-log", "Activity Log", Activity)}
       {isAdmin && drawerItem("/org-chart", "Org Chart", GitBranch)}
+      {isAdmin && drawerItem("/office-networks", "Office Networks", ShieldCheck)}
 
       {sectionLabel("Overtime")}
       {drawerItem("/ot-approvals", "OT Approvals", Timer)}

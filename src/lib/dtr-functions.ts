@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { authMiddleware, assertUser, assertHR } from "@/lib/auth-middleware";
 
 export const getTodayDTR = createServerFn({ method: "POST" })
@@ -59,6 +60,10 @@ export const clockInDTR = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
+    // Geofence: reject clock-ins that don't originate from a configured office
+    // network. No-op when no networks are configured (see office-network-functions).
+    const { resolveClientIp, assertOnOfficeNetwork } = await import("@/lib/office-network-functions");
+    await assertOnOfficeNetwork(pool, resolveClientIp(getRequest()));
     await pool.query(
       `INSERT INTO daily_time_reports (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes)
        VALUES ($1, $2, $3, $4, NULL, FALSE, 0)`,

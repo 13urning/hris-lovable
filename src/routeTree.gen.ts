@@ -20,6 +20,7 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/_admin'
 import { Route as AuthenticatedAdminPerformanceAdminRouteImport } from './routes/_authenticated/_admin/performance-admin'
 import { Route as AuthenticatedAdminOrgChartRouteImport } from './routes/_authenticated/_admin/org-chart'
+import { Route as AuthenticatedAdminOfficeNetworksRouteImport } from './routes/_authenticated/_admin/office-networks'
 import { Route as AuthenticatedAdminKpiBuilderRouteImport } from './routes/_authenticated/_admin/kpi-builder'
 import { Route as AuthenticatedAdminEmployeesRouteImport } from './routes/_authenticated/_admin/employees'
 import { Route as AuthenticatedAdminActivityLogRouteImport } from './routes/_authenticated/_admin/activity-log'
@@ -81,6 +82,12 @@ const AuthenticatedAdminOrgChartRoute =
     path: '/org-chart',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
+const AuthenticatedAdminOfficeNetworksRoute =
+  AuthenticatedAdminOfficeNetworksRouteImport.update({
+    id: '/office-networks',
+    path: '/office-networks',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 const AuthenticatedAdminKpiBuilderRoute =
   AuthenticatedAdminKpiBuilderRouteImport.update({
     id: '/kpi-builder',
@@ -111,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
+  '/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
 }
@@ -125,6 +133,7 @@ export interface FileRoutesByTo {
   '/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
+  '/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
 }
@@ -142,6 +151,7 @@ export interface FileRoutesById {
   '/_authenticated/_admin/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/_authenticated/_admin/employees': typeof AuthenticatedAdminEmployeesRoute
   '/_authenticated/_admin/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
+  '/_authenticated/_admin/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/_authenticated/_admin/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/_authenticated/_admin/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
 }
@@ -158,6 +168,7 @@ export interface FileRouteTypes {
     | '/activity-log'
     | '/employees'
     | '/kpi-builder'
+    | '/office-networks'
     | '/org-chart'
     | '/performance-admin'
   fileRoutesByTo: FileRoutesByTo
@@ -172,6 +183,7 @@ export interface FileRouteTypes {
     | '/activity-log'
     | '/employees'
     | '/kpi-builder'
+    | '/office-networks'
     | '/org-chart'
     | '/performance-admin'
   id:
@@ -188,6 +200,7 @@ export interface FileRouteTypes {
     | '/_authenticated/_admin/activity-log'
     | '/_authenticated/_admin/employees'
     | '/_authenticated/_admin/kpi-builder'
+    | '/_authenticated/_admin/office-networks'
     | '/_authenticated/_admin/org-chart'
     | '/_authenticated/_admin/performance-admin'
   fileRoutesById: FileRoutesById
@@ -277,6 +290,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminOrgChartRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
+    '/_authenticated/_admin/office-networks': {
+      id: '/_authenticated/_admin/office-networks'
+      path: '/office-networks'
+      fullPath: '/office-networks'
+      preLoaderRoute: typeof AuthenticatedAdminOfficeNetworksRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
     '/_authenticated/_admin/kpi-builder': {
       id: '/_authenticated/_admin/kpi-builder'
       path: '/kpi-builder'
@@ -305,6 +325,7 @@ interface AuthenticatedAdminRouteChildren {
   AuthenticatedAdminActivityLogRoute: typeof AuthenticatedAdminActivityLogRoute
   AuthenticatedAdminEmployeesRoute: typeof AuthenticatedAdminEmployeesRoute
   AuthenticatedAdminKpiBuilderRoute: typeof AuthenticatedAdminKpiBuilderRoute
+  AuthenticatedAdminOfficeNetworksRoute: typeof AuthenticatedAdminOfficeNetworksRoute
   AuthenticatedAdminOrgChartRoute: typeof AuthenticatedAdminOrgChartRoute
   AuthenticatedAdminPerformanceAdminRoute: typeof AuthenticatedAdminPerformanceAdminRoute
 }
@@ -313,6 +334,7 @@ const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
   AuthenticatedAdminActivityLogRoute: AuthenticatedAdminActivityLogRoute,
   AuthenticatedAdminEmployeesRoute: AuthenticatedAdminEmployeesRoute,
   AuthenticatedAdminKpiBuilderRoute: AuthenticatedAdminKpiBuilderRoute,
+  AuthenticatedAdminOfficeNetworksRoute: AuthenticatedAdminOfficeNetworksRoute,
   AuthenticatedAdminOrgChartRoute: AuthenticatedAdminOrgChartRoute,
   AuthenticatedAdminPerformanceAdminRoute:
     AuthenticatedAdminPerformanceAdminRoute,
