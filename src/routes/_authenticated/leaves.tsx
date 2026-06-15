@@ -2,18 +2,46 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
-import { fetchAllLeaves, fetchProfilesByIds, fileLeaveRequest, approveLeaveStep, rejectLeaveStep, fetchMyPendingLeaveApprovals, deleteLeaveRequest } from "@/lib/leave-functions";
+import {
+  fetchAllLeaves,
+  fetchProfilesByIds,
+  fileLeaveRequest,
+  approveLeaveStep,
+  rejectLeaveStep,
+  fetchMyPendingLeaveApprovals,
+  deleteLeaveRequest,
+  fileLeaveOnBehalf,
+  fetchProfilesForLeaveFiling,
+} from "@/lib/leave-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, todayIso } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
-import { Plane, Check, X, Trash2, CalendarDays, Clock3, CalendarCheck2, Users, FileDown } from "lucide-react";
+import {
+  Plane,
+  Check,
+  X,
+  Trash2,
+  CalendarDays,
+  Clock3,
+  CalendarCheck2,
+  Users,
+  FileDown,
+  UserPlus,
+} from "lucide-react";
 import { exportRowsToCSV } from "@/lib/csv-export";
 import { toast } from "sonner";
 
@@ -79,7 +107,12 @@ function toIso(d: Date) {
 
 function initials(name?: string) {
   if (!name) return "—";
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase()).join("");
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase())
+    .join("");
 }
 
 function isBetween(date: string, start: string, end: string) {
@@ -104,6 +137,44 @@ const LEAVE_TONE: Record<string, string> = {
   Other: "bg-secondary text-secondary-foreground border-border",
 };
 
+// Weekend-blocking single date picker. `minIso` disables dates before it.
+function DatePickerField({
+  value,
+  onSelect,
+  minIso,
+}: {
+  value: string;
+  onSelect: (iso: string) => void;
+  minIso?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className="w-full justify-start text-left font-normal">
+          <CalendarDays className="mr-2 h-4 w-4" />
+          {formatDate(value)}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={fromIso(value)}
+          onSelect={(date) => {
+            if (!date) return;
+            onSelect(toIso(date));
+            setOpen(false);
+          }}
+          disabled={(date) => {
+            const dow = date.getDay();
+            return dow === 0 || dow === 6 || (minIso ? toIso(date) < minIso : false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function LeavesPage() {
   const { user, isHR } = useAuth();
   const qc = useQueryClient();
@@ -117,6 +188,19 @@ function LeavesPage() {
   const [filter, setFilter] = useState<"all" | "mine" | LeaveStatus>(isHR ? "all" : "mine");
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+
+  // ── Admin: file a leave on an employee's behalf ──────────────────────────
+  const [behalf, setBehalf] = useState(() => {
+    const d = nextWeekday(todayIso());
+    return {
+      employee_id: "",
+      leave_type: "VL",
+      start_date: d,
+      end_date: d,
+      reason: "",
+      auto_approve: true,
+    };
+  });
 
   const { data: leaves } = useQuery({
     queryKey: ["leaves"],
@@ -159,7 +243,14 @@ function LeavesPage() {
       if (isWeekend(form.end_date)) throw new Error("End date cannot be a weekend");
       if (new Date(form.end_date) < new Date(form.start_date))
         throw new Error("End date must be on or after start date");
-      await fileLeaveRequest({ data: { leaveType: form.leave_type, startDate: form.start_date, endDate: form.end_date, reason: form.reason || null } });
+      await fileLeaveRequest({
+        data: {
+          leaveType: form.leave_type,
+          startDate: form.start_date,
+          endDate: form.end_date,
+          reason: form.reason || null,
+        },
+      });
     },
     onSuccess: () => {
       toast.success("Leave filed");
@@ -173,6 +264,45 @@ function LeavesPage() {
     queryKey: ["leaves-pending-for-me", user?.id],
     enabled: !!user?.id,
     queryFn: () => fetchMyPendingLeaveApprovals(),
+  });
+
+  // Employee picker for on-behalf filing (HR/admin only).
+  const { data: filingProfiles } = useQuery({
+    queryKey: ["leave-filing-profiles"],
+    enabled: isHR,
+    queryFn: () => fetchProfilesForLeaveFiling(),
+  });
+
+  const fileBehalf = useMutation({
+    mutationFn: async () => {
+      if (!behalf.employee_id) throw new Error("Pick an employee");
+      if (isWeekend(behalf.start_date)) throw new Error("Start date cannot be a weekend");
+      if (isWeekend(behalf.end_date)) throw new Error("End date cannot be a weekend");
+      if (new Date(behalf.end_date) < new Date(behalf.start_date))
+        throw new Error("End date must be on or after start date");
+      await fileLeaveOnBehalf({
+        data: {
+          employeeId: behalf.employee_id,
+          leaveType: behalf.leave_type,
+          startDate: behalf.start_date,
+          endDate: behalf.end_date,
+          reason: behalf.reason || null,
+          autoApprove: behalf.auto_approve,
+        },
+      });
+    },
+    onSuccess: () => {
+      toast.success(behalf.auto_approve ? "Leave filed and approved" : "Leave filed for approval");
+      setBehalf({ ...behalf, reason: "" });
+      qc.invalidateQueries({ queryKey: ["leaves"] });
+      qc.invalidateQueries({ queryKey: ["leaves-pending-for-me"] });
+    },
+    onError: (e: Error) =>
+      toast.error(
+        e.message === "NO_ORG_NODE"
+          ? "This employee isn't in the org chart, so it can't be routed for approval. Turn on \"Approve immediately\" to file it anyway."
+          : e.message,
+      ),
   });
 
   const approveStep = useMutation({
@@ -219,7 +349,10 @@ function LeavesPage() {
         { header: "Employee", value: (l) => profilesMap?.[l.employee_id]?.full_name ?? "" },
         { header: "Department", value: (l) => profilesMap?.[l.employee_id]?.department ?? "" },
         { header: "Type", value: (l) => l.leave_type },
-        { header: "Type Label", value: (l) => LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type },
+        {
+          header: "Type Label",
+          value: (l) => LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type,
+        },
         { header: "Start Date", value: (l) => l.start_date },
         { header: "End Date", value: (l) => l.end_date },
         { header: "Days", value: (l) => daysBetween(l.start_date, l.end_date) },
@@ -263,13 +396,16 @@ function LeavesPage() {
               <div className="flex flex-wrap gap-3">
                 {onLeaveToday.map((l) => {
                   const p = profilesMap?.[l.employee_id];
-                  const typeLabel = LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
+                  const typeLabel =
+                    LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
                   const tone = LEAVE_TONE[l.leave_type] ?? LEAVE_TONE.Other;
                   const isPending = l.status === "pending";
                   return (
-                    <div key={l.id}
+                    <div
+                      key={l.id}
                       className={`group flex items-center gap-3 rounded-xl border bg-card/80 px-3 py-2 shadow-sm transition hover:shadow-md ${isPending ? "border-dashed opacity-80" : ""}`}
-                      title={typeLabel}>
+                      title={typeLabel}
+                    >
                       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
                         {initials(p?.full_name)}
                       </div>
@@ -283,7 +419,9 @@ function LeavesPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}
+                          >
                             {l.leave_type}
                           </span>
                           <span className="text-[11px] text-muted-foreground truncate">
@@ -312,7 +450,9 @@ function LeavesPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-baseline justify-between">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">Upcoming</span>
+              <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                Upcoming
+              </span>
               <span className="font-display text-3xl">{upcoming.length}</span>
             </div>
             <div className="flex items-baseline justify-between">
@@ -341,7 +481,9 @@ function LeavesPage() {
           <CardHeader>
             <CardTitle className="font-display text-2xl flex items-center gap-2">
               <Check className="h-5 w-5 text-warning-foreground" /> Pending my approval
-              <Badge variant="secondary" className="ml-1">{pendingForMe.length}</Badge>
+              <Badge variant="secondary" className="ml-1">
+                {pendingForMe.length}
+              </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -359,7 +501,8 @@ function LeavesPage() {
               </thead>
               <tbody>
                 {pendingForMe.map((l) => {
-                  const typeLabel = LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
+                  const typeLabel =
+                    LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
                   const tone = LEAVE_TONE[l.leave_type] ?? LEAVE_TONE.Other;
                   const step = l.current_approver_index + 1;
                   const total = l.approver_chain.length;
@@ -371,31 +514,53 @@ function LeavesPage() {
                             {initials(l.employee_full_name ?? undefined)}
                           </div>
                           <div className="min-w-0">
-                            <div className="font-medium truncate">{l.employee_full_name ?? "—"}</div>
-                            <div className="text-xs text-muted-foreground truncate">{l.employee_department ?? ""}</div>
+                            <div className="font-medium truncate">
+                              {l.employee_full_name ?? "—"}
+                            </div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {l.employee_department ?? ""}
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-2">
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}
+                        >
                           {l.leave_type}
                         </span>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">{typeLabel}</div>
                       </td>
-                      <td className="px-4 py-2">{formatDate(l.start_date)} → {formatDate(l.end_date)}</td>
-                      <td className="px-4 py-2 text-right">{daysBetween(l.start_date, l.end_date)}</td>
-                      <td className="px-4 py-2 text-muted-foreground max-w-[260px]">{l.reason ?? ""}</td>
-                      <td className="px-4 py-2 text-xs text-muted-foreground">{step} of {total}</td>
+                      <td className="px-4 py-2">
+                        {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {daysBetween(l.start_date, l.end_date)}
+                      </td>
+                      <td className="px-4 py-2 text-muted-foreground max-w-[260px]">
+                        {l.reason ?? ""}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
+                        {step} of {total}
+                      </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
-                          <Button size="icon" variant="ghost" title="Approve"
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            title="Approve"
                             onClick={() => approveStep.mutate({ id: l.id })}
-                            disabled={approveStep.isPending || rejectStep.isPending}>
+                            disabled={approveStep.isPending || rejectStep.isPending}
+                          >
                             <Check className="h-4 w-4 text-success" />
                           </Button>
-                          <Button size="icon" variant="ghost" title="Reject"
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            title="Reject"
                             onClick={() => rejectStep.mutate({ id: l.id })}
-                            disabled={approveStep.isPending || rejectStep.isPending}>
+                            disabled={approveStep.isPending || rejectStep.isPending}
+                          >
                             <X className="h-4 w-4 text-destructive" />
                           </Button>
                         </div>
@@ -419,11 +584,18 @@ function LeavesPage() {
           <div className="grid gap-4 md:grid-cols-4">
             <div>
               <Label>Leave type</Label>
-              <Select value={form.leave_type} onValueChange={(v) => setForm({ ...form, leave_type: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={form.leave_type}
+                onValueChange={(v) => setForm({ ...form, leave_type: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {LEAVE_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -452,9 +624,7 @@ function LeavesPage() {
                   />
                 </PopoverContent>
               </Popover>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Past or future dates allowed
-              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Past or future dates allowed</p>
             </div>
             <div>
               <Label>End date</Label>
@@ -487,9 +657,12 @@ function LeavesPage() {
             </div>
             <div className="md:col-span-4">
               <Label>Reason</Label>
-              <Textarea rows={2} value={form.reason}
+              <Textarea
+                rows={2}
+                value={form.reason}
                 onChange={(e) => setForm({ ...form, reason: e.target.value })}
-                placeholder="Optional — give HR context for this leave" />
+                placeholder="Optional — give HR context for this leave"
+              />
             </div>
           </div>
           <div className="mt-4 flex justify-end">
@@ -500,15 +673,125 @@ function LeavesPage() {
         </CardContent>
       </Card>
 
+      {/* Admin: file a leave on an employee's behalf */}
+      {isHR && (
+        <Card className="border-accent/30">
+          <CardHeader>
+            <CardTitle className="font-display text-2xl flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-accent" /> File on behalf of an employee
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Record a leave for someone who didn't file it themselves.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-4">
+              <div>
+                <Label>Employee</Label>
+                <Select
+                  value={behalf.employee_id}
+                  onValueChange={(v) => setBehalf({ ...behalf, employee_id: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select employee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(filingProfiles ?? []).map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.full_name}
+                        {p.department ? ` · ${p.department}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Leave type</Label>
+                <Select
+                  value={behalf.leave_type}
+                  onValueChange={(v) => setBehalf({ ...behalf, leave_type: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LEAVE_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Start date</Label>
+                <DatePickerField
+                  value={behalf.start_date}
+                  onSelect={(iso) =>
+                    setBehalf({
+                      ...behalf,
+                      start_date: iso,
+                      end_date: iso > behalf.end_date ? iso : behalf.end_date,
+                    })
+                  }
+                />
+              </div>
+              <div>
+                <Label>End date</Label>
+                <DatePickerField
+                  value={behalf.end_date}
+                  minIso={behalf.start_date}
+                  onSelect={(iso) => setBehalf({ ...behalf, end_date: iso })}
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {daysBetween(behalf.start_date, behalf.end_date)} day(s)
+                </p>
+              </div>
+              <div className="md:col-span-4">
+                <Label>Reason</Label>
+                <Textarea
+                  rows={2}
+                  value={behalf.reason}
+                  onChange={(e) => setBehalf({ ...behalf, reason: e.target.value })}
+                  placeholder="Optional — context for this leave"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+              <label className="flex items-center gap-3 text-sm">
+                <Switch
+                  checked={behalf.auto_approve}
+                  onCheckedChange={(v) => setBehalf({ ...behalf, auto_approve: v })}
+                />
+                <span>
+                  <span className="font-medium">Approve immediately</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {behalf.auto_approve
+                      ? "Filed as approved right away."
+                      : "Routed through the employee's supervisor chain for approval."}
+                  </span>
+                </span>
+              </label>
+              <Button onClick={() => fileBehalf.mutate()} disabled={fileBehalf.isPending}>
+                File for employee
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle className="font-display text-2xl flex items-center gap-2">
-            <CalendarDays className="h-5 w-5" /> {isHR ? "All leaves" : filter === "mine" ? "My leaves" : "Leaves"}
+            <CalendarDays className="h-5 w-5" />{" "}
+            {isHR ? "All leaves" : filter === "mine" ? "My leaves" : "Leaves"}
           </CardTitle>
           <div className="flex items-center gap-2">
             <Label className="text-xs text-muted-foreground">Filter</Label>
             <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-              <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="mine">Mine</SelectItem>
@@ -543,8 +826,11 @@ function LeavesPage() {
                 {filtered.map((l) => {
                   const p = profilesMap?.[l.employee_id];
                   const isMine = l.employee_id === user?.id;
-                  const typeLabel = LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
-                  const isToday = (l.status === "approved" || l.status === "pending") && isBetween(today, l.start_date, l.end_date);
+                  const typeLabel =
+                    LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
+                  const isToday =
+                    (l.status === "approved" || l.status === "pending") &&
+                    isBetween(today, l.start_date, l.end_date);
                   const tone = LEAVE_TONE[l.leave_type] ?? LEAVE_TONE.Other;
                   return (
                     <tr key={l.id} className={`border-t align-top ${isToday ? "bg-accent/5" : ""}`}>
@@ -556,34 +842,56 @@ function LeavesPage() {
                           <div className="min-w-0">
                             <div className="font-medium truncate flex items-center gap-2">
                               {p?.full_name ?? "—"}
-                              {isMine && <span className="text-[10px] uppercase tracking-wide text-muted-foreground">you</span>}
+                              {isMine && (
+                                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                  you
+                                </span>
+                              )}
                             </div>
-                            <div className="text-xs text-muted-foreground truncate">{p?.department ?? ""}</div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {p?.department ?? ""}
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-2">
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}
+                        >
                           {l.leave_type}
                         </span>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">{typeLabel}</div>
                       </td>
                       <td className="px-4 py-2">
-                        <div>{formatDate(l.start_date)} → {formatDate(l.end_date)}</div>
+                        <div>
+                          {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                        </div>
                         {isToday && (
-                          <div className="mt-0.5 text-[10px] uppercase tracking-wide text-accent">On leave today</div>
+                          <div className="mt-0.5 text-[10px] uppercase tracking-wide text-accent">
+                            On leave today
+                          </div>
                         )}
                       </td>
-                      <td className="px-4 py-2 text-right">{daysBetween(l.start_date, l.end_date)}</td>
-                      <td className="px-4 py-2 text-muted-foreground max-w-[260px]">{l.reason ?? ""}</td>
+                      <td className="px-4 py-2 text-right">
+                        {daysBetween(l.start_date, l.end_date)}
+                      </td>
+                      <td className="px-4 py-2 text-muted-foreground max-w-[260px]">
+                        {l.reason ?? ""}
+                      </td>
                       <td className="px-4 py-2">
-                        <Badge className={STATUS_TONE[l.status]} variant="secondary">{l.status}</Badge>
+                        <Badge className={STATUS_TONE[l.status]} variant="secondary">
+                          {l.status}
+                        </Badge>
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
                           {(isMine && l.status === "pending") || isHR ? (
-                            <Button size="icon" variant="ghost" title="Remove"
-                              onClick={() => cancelLeave.mutate(l.id)}>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              title="Remove"
+                              onClick={() => cancelLeave.mutate(l.id)}
+                            >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           ) : null}
