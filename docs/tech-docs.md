@@ -324,6 +324,19 @@ There is no ORM — all queries are hand-written SQL.
   `fileLeaveOnBehalf`. A per-request flag either approves it immediately or routes
   it through that employee's normal supervisor chain (`resolveChain`). On-behalf
   filings are annotated in `review_notes` for audit.
+- **Leave balance gate (employees).** When an employee self-files via
+  `fileLeaveRequest`, every type except **Leave without Pay (WP)** requires enough
+  remaining balance to cover the requested business days: VL→`vl_remaining`,
+  SL→`sl_remaining`, all other paid types→combined pool. Insufficient balance is
+  rejected with `INSUFFICIENT_BALANCE`; with no balance left, WP is the only
+  filable type. HR/admins self-filing and `fileLeaveOnBehalf` are **not** gated.
+  The leaves page also reflects this client-side (disabled button + message).
+- **Cancel vs delete.** An employee (or HR) can **cancel** their own *pending*
+  request via `cancelLeaveRequest`, which soft-cancels it (status `cancelled`,
+  kept for history). Hard delete (`deleteLeaveRequest`) remains HR-only.
+- **Employee leaves view.** The leaves page loads `fetchAllLeaves` for HR and
+  `fetchMyLeaves` (own rows only) for employees, so a regular employee can view
+  and cancel their own pending requests there.
 
 ---
 
