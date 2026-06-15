@@ -4,12 +4,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import {
   fetchAllLeaves,
+  fetchMyLeaves,
+  fetchMyProfile,
   fetchProfilesByIds,
   fileLeaveRequest,
   approveLeaveStep,
   rejectLeaveStep,
   fetchMyPendingLeaveApprovals,
   deleteLeaveRequest,
+  cancelLeaveRequest,
   fileLeaveOnBehalf,
   fetchProfilesForLeaveFiling,
 } from "@/lib/leave-functions";
@@ -35,6 +38,7 @@ import {
   Check,
   X,
   Trash2,
+  Ban,
   CalendarDays,
   Clock3,
   CalendarCheck2,
@@ -202,10 +206,22 @@ function LeavesPage() {
     };
   });
 
+  // HR sees everyone's leaves; a regular employee sees only their own (the
+  // all-leaves query is HR-gated server-side).
   const { data: leaves } = useQuery({
-    queryKey: ["leaves"],
-    queryFn: () => fetchAllLeaves() as Promise<LeaveRow[]>,
+    queryKey: ["leaves", isHR ? "all" : user?.id],
+    enabled: !!user,
+    queryFn: () => (isHR ? fetchAllLeaves() : fetchMyLeaves()) as Promise<LeaveRow[]>,
   });
+
+  // Leave balances for the filing gate (employees only).
+  const { data: myBalance } = useQuery({
+    queryKey: ["my-leave-balance", user?.id],
+    enabled: !!user && !isHR,
+    queryFn: () => fetchMyProfile(),
+  });
+  const vlRemaining = Number(myBalance?.vl_remaining ?? 0);
+  const slRemaining = Number(myBalance?.sl_remaining ?? 0);
 
   const employeeIds = useMemo(
     () => Array.from(new Set((leaves ?? []).map((l) => l.employee_id))),
@@ -236,6 +252,24 @@ function LeavesPage() {
     .sort((a, b) => a.start_date.localeCompare(b.start_date));
   const pendingCount = (leaves ?? []).filter((l) => l.status === "pending").length;
 
+  // Filing balance gate: every type except Leave without Pay needs enough
+  // balance for the requested days. VL→vacation, SL→sick, other paid types draw
+  // from the combined pool. HR/admins aren't gated.
+  const formDays = daysBetween(form.start_date, form.end_date);
+  const availableForType =
+    form.leave_type === "WP"
+      ? Infinity
+      : form.leave_type === "VL"
+        ? vlRemaining
+        : form.leave_type === "SL"
+          ? slRemaining
+          : vlRemaining + slRemaining;
+  // Don't gate until the balance query has resolved (undefined = still loading)
+  // to avoid a false "insufficient" flash on first render.
+  const insufficientBalance = !isHR && myBalance !== undefined && availableForType < formDays;
+  const formTypeLabel =
+    LEAVE_TYPES.find((t) => t.value === form.leave_type)?.label ?? form.leave_type;
+
   const fileLeave = useMutation({
     mutationFn: async () => {
       if (!user) throw new Error("not signed in");
@@ -243,6 +277,10 @@ function LeavesPage() {
       if (isWeekend(form.end_date)) throw new Error("End date cannot be a weekend");
       if (new Date(form.end_date) < new Date(form.start_date))
         throw new Error("End date must be on or after start date");
+      if (insufficientBalance)
+        throw new Error(
+          `Not enough ${formTypeLabel} balance for ${formDays} day(s). File Leave without Pay instead.`,
+        );
       await fileLeaveRequest({
         data: {
           leaveType: form.leave_type,
@@ -257,7 +295,12 @@ function LeavesPage() {
       setForm({ ...form, reason: "" });
       qc.invalidateQueries({ queryKey: ["leaves"] });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) =>
+      toast.error(
+        e.message === "INSUFFICIENT_BALANCE"
+          ? `Not enough ${formTypeLabel} balance for ${formDays} day(s). File Leave without Pay instead.`
+          : e.message,
+      ),
   });
 
   const { data: pendingForMe } = useQuery({
@@ -331,7 +374,20 @@ function LeavesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Soft-cancel a pending request (keeps it as 'cancelled' for history).
   const cancelLeave = useMutation({
+    mutationFn: async (id: string) => {
+      await cancelLeaveRequest({ data: { id } });
+    },
+    onSuccess: () => {
+      toast.success("Request cancelled");
+      qc.invalidateQueries({ queryKey: ["leaves"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // HR-only hard delete (e.g. to clear out old/cancelled rows).
+  const deleteLeave = useMutation({
     mutationFn: async (id: string) => {
       await deleteLeaveRequest({ data: { id } });
     },
@@ -665,8 +721,25 @@ function LeavesPage() {
               />
             </div>
           </div>
-          <div className="mt-4 flex justify-end">
-            <Button onClick={() => fileLeave.mutate()} disabled={fileLeave.isPending}>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-muted-foreground">
+              {!isHR && (
+                <>
+                  Balance — <span className="font-medium text-foreground">VL {vlRemaining}</span> ·{" "}
+                  <span className="font-medium text-foreground">SL {slRemaining}</span> day(s).
+                  {insufficientBalance && (
+                    <span className="ml-2 font-medium text-destructive">
+                      Not enough {formTypeLabel} for {formDays} day(s) — only Leave without Pay is
+                      available.
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+            <Button
+              onClick={() => fileLeave.mutate()}
+              disabled={fileLeave.isPending || insufficientBalance}
+            >
               File leave
             </Button>
           </div>
@@ -885,16 +958,28 @@ function LeavesPage() {
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
-                          {(isMine && l.status === "pending") || isHR ? (
+                          {l.status === "pending" && (isMine || isHR) && (
                             <Button
                               size="icon"
                               variant="ghost"
-                              title="Remove"
+                              title="Cancel request"
                               onClick={() => cancelLeave.mutate(l.id)}
+                              disabled={cancelLeave.isPending}
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Ban className="h-4 w-4 text-warning-foreground" />
                             </Button>
-                          ) : null}
+                          )}
+                          {isHR && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              title="Delete permanently"
+                              onClick={() => deleteLeave.mutate(l.id)}
+                              disabled={deleteLeave.isPending}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>

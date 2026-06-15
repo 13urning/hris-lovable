@@ -24,16 +24,23 @@ export const fetchMyLeaves = createServerFn({ method: "POST" })
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
-      `SELECT id, leave_type, start_date, end_date, status FROM leave_requests
+      `SELECT id, employee_id, leave_type, start_date, end_date, reason,
+              status, reviewed_at, review_notes, created_at
+       FROM leave_requests
        WHERE employee_id = $1 ORDER BY start_date DESC`,
       [context.user.dbUserId],
     );
     return rows as {
       id: string;
+      employee_id: string;
       leave_type: string;
       start_date: string;
       end_date: string;
-      status: string;
+      reason: string | null;
+      status: "pending" | "approved" | "rejected" | "cancelled";
+      reviewed_at: string | null;
+      review_notes: string | null;
+      created_at: string;
     }[];
   });
 
@@ -89,6 +96,27 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
+
+    // Balance gate (employees only): every leave type except Leave without Pay
+    // (WP) requires enough remaining balance to cover the requested business
+    // days. VL draws from vl_remaining, SL from sl_remaining, and all other paid
+    // types from the combined pool. When nothing remains, WP is the only filable
+    // type. HR/admins filing their own leave are not balance-limited.
+    if (!context.user.isHR && data.leaveType !== "WP") {
+      const { businessDaysBetween } = await import("@/lib/utils");
+      const days = businessDaysBetween(data.startDate, data.endDate);
+      const {
+        rows: [prof],
+      } = await pool.query<{ vl_remaining: number | null; sl_remaining: number | null }>(
+        `SELECT vl_remaining, sl_remaining FROM profiles WHERE id = $1`,
+        [context.user.dbUserId],
+      );
+      const vl = Number(prof?.vl_remaining ?? 0);
+      const sl = Number(prof?.sl_remaining ?? 0);
+      const available = data.leaveType === "VL" ? vl : data.leaveType === "SL" ? sl : vl + sl;
+      if (available < days) throw new Error("INSUFFICIENT_BALANCE");
+    }
+
     const { resolveChain } = await import("@/lib/chain.server");
     const chain = await resolveChain(pool, context.user.dbUserId);
 
@@ -330,4 +358,32 @@ export const deleteLeaveRequest = createServerFn({ method: "POST" })
     const isOwner = req.employee_id === context.user.dbUserId;
     if (!isOwner && !context.user.isHR) throw new Error("FORBIDDEN");
     await pool.query(`DELETE FROM leave_requests WHERE id = $1`, [data.id]);
+  });
+
+// Soft-cancel a leave request: owner can cancel their own pending request,
+// HR/admin can cancel any pending one. Sets status to 'cancelled' (kept for
+// history) rather than deleting. Already-decided requests can't be cancelled.
+export const cancelLeaveRequest = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { id: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const {
+      rows: [req],
+    } = await pool.query<{ employee_id: string; status: string }>(
+      `SELECT employee_id, status FROM leave_requests WHERE id = $1`,
+      [data.id],
+    );
+    if (!req) throw new Error("NOT_FOUND");
+    const isOwner = req.employee_id === context.user.dbUserId;
+    if (!isOwner && !context.user.isHR) throw new Error("FORBIDDEN");
+    if (req.status !== "pending") throw new Error("NOT_PENDING");
+    await pool.query(
+      `UPDATE leave_requests
+          SET status = 'cancelled',
+              review_notes = COALESCE(review_notes, $2)
+        WHERE id = $1`,
+      [data.id, isOwner ? "Cancelled by employee" : "Cancelled by HR"],
+    );
   });
