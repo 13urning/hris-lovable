@@ -9,7 +9,7 @@ import { fetchMyProfile, fetchMyLeaves } from "@/lib/leave-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { formatDate } from "@/lib/dtr";
+import { formatDate, todayIso } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +20,7 @@ function Dashboard() {
   const { user, isHR } = useAuth();
   const qc = useQueryClient();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso(); // local business date (not UTC) — see todayIso()
   const firstOfMonth = today.slice(0, 7) + "-01";
 
   // ── OT budget for current month ────────────────────────────────────────

@@ -35,7 +35,14 @@ export function formatDateTime(iso: string | null | undefined) {
   });
 }
 
-export function todayIso() { return new Date().toISOString().slice(0, 10); }
+// Local calendar date as YYYY-MM-DD. Must use local time (not toISOString,
+// which is UTC) so the business date matches the local time-of-day recorded at
+// clock-in. Otherwise a clock-in before UTC midnight (e.g. before 08:00 in
+// GMT+8) is stored under the previous day and can't be clocked out later.
+export function todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export function toCsv(rows: Record<string, unknown>[]): string {
   if (!rows.length) return "";
