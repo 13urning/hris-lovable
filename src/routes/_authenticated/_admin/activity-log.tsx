@@ -6,12 +6,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock3, FileDown } from "lucide-react";
+import { Clock3, FileDown, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 import { exportRowsToCSV } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/_admin/activity-log")({
   component: ActivityLogPage,
 });
+
+type SortKey = "employee" | "date" | "hours" | "late" | "status";
+type SortState = { key: SortKey; dir: "asc" | "desc" };
+
+// Flag severity for sorting by Status: Late+Undertime (3) > Late (2) >
+// Undertime (1) > on-time / in-progress / no-record (0).
+function flagScore(e: LogEntry): number {
+  if (!e.time_in) return 0;
+  return ((e.late_minutes ?? 0) > 0 ? 2 : 0) + (e.is_undertime ? 1 : 0);
+}
 
 type LogEntry = {
   id: string;
@@ -62,10 +72,48 @@ function formatTimestamp(iso: string | null) {
   });
 }
 
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  setSort,
+  align = "left",
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortState;
+  setSort: (updater: (s: SortState) => SortState) => void;
+  align?: "left" | "right";
+}) {
+  const active = sort.key === sortKey;
+  const Icon = !active ? ChevronsUpDown : sort.dir === "asc" ? ChevronUp : ChevronDown;
+  return (
+    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : "text-left"}`}>
+      <button
+        type="button"
+        onClick={() =>
+          setSort((s) => ({
+            key: sortKey,
+            // New column starts descending; same column toggles direction.
+            dir: s.key === sortKey && s.dir === "desc" ? "asc" : "desc",
+          }))
+        }
+        className={`inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-foreground ${
+          active ? "text-foreground" : ""
+        } ${align === "right" ? "flex-row-reverse" : ""}`}
+      >
+        {label}
+        <Icon className={`h-3 w-3 ${active ? "opacity-90" : "opacity-40"}`} />
+      </button>
+    </th>
+  );
+}
+
 function ActivityLogPage() {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [sort, setSort] = useState<SortState>({ key: "date", dir: "desc" });
 
   const { data: logs, isLoading } = useQuery({
     queryKey: ["activity-log"],
@@ -83,6 +131,35 @@ function ActivityLogPage() {
     if (dateFrom && entry.work_date < dateFrom) return false;
     if (dateTo && entry.work_date > dateTo) return false;
     return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    switch (sort.key) {
+      case "employee":
+        cmp = (a.profile?.full_name ?? "").localeCompare(b.profile?.full_name ?? "");
+        break;
+      case "hours":
+        cmp = (a.hours_worked ?? 0) - (b.hours_worked ?? 0);
+        break;
+      case "late":
+        cmp = (a.late_minutes ?? 0) - (b.late_minutes ?? 0);
+        break;
+      case "status":
+        cmp = flagScore(a) - flagScore(b);
+        break;
+      case "date":
+      default:
+        cmp =
+          a.work_date.localeCompare(b.work_date) ||
+          (a.time_in ?? "").localeCompare(b.time_in ?? "");
+        break;
+    }
+    // Stable tiebreaker so equal keys keep a predictable (most-recent-first) order.
+    if (cmp === 0)
+      cmp =
+        a.work_date.localeCompare(b.work_date) || (a.time_in ?? "").localeCompare(b.time_in ?? "");
+    return sort.dir === "asc" ? cmp : -cmp;
   });
 
   const statusText = (entry: LogEntry) => {
@@ -211,46 +288,58 @@ function ActivityLogPage() {
           <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Employee</th>
+                <SortHeader label="Employee" sortKey="employee" sort={sort} setSort={setSort} />
                 <th className="px-3 py-2 text-left font-medium">Department</th>
-                <th className="px-3 py-2 text-left font-medium">Date</th>
+                <SortHeader label="Date" sortKey="date" sort={sort} setSort={setSort} />
                 <th className="px-3 py-2 text-center font-medium">Shift</th>
                 <th className="px-3 py-2 text-left font-medium">Clock In</th>
                 <th className="px-3 py-2 text-left font-medium">Clock Out</th>
-                <th className="px-3 py-2 text-right font-medium">Hours</th>
-                <th className="px-3 py-2 text-right font-medium">Late</th>
-                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <SortHeader
+                  label="Hours"
+                  sortKey="hours"
+                  sort={sort}
+                  setSort={setSort}
+                  align="right"
+                />
+                <SortHeader
+                  label="Late"
+                  sortKey="late"
+                  sort={sort}
+                  setSort={setSort}
+                  align="right"
+                />
+                <SortHeader label="Status" sortKey="status" sort={sort} setSort={setSort} />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((entry) => {
+              {sorted.map((entry) => {
                 const late = (entry.late_minutes ?? 0) > 0;
                 return (
                   <tr
                     key={entry.id}
-                    className={`border-t align-middle ${late ? "bg-red-50/30" : entry.is_undertime ? "bg-amber-50/30" : ""}`}
+                    className={`border-t align-top ${late ? "bg-red-50/30" : entry.is_undertime ? "bg-amber-50/30" : ""}`}
                   >
-                    {/* Employee */}
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{entry.profile?.full_name ?? "Unknown"}</span>
-                        {entry.profile?.employee_code && (
-                          <span className="rounded bg-secondary/60 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-                            {entry.profile.employee_code}
-                          </span>
-                        )}
+                    {/* Employee — name over code so long names don't wrap awkwardly */}
+                    <td className="px-3 py-3">
+                      <div className="font-medium leading-tight">
+                        {entry.profile?.full_name ?? "Unknown"}
                       </div>
+                      {entry.profile?.employee_code && (
+                        <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                          {entry.profile.employee_code}
+                        </div>
+                      )}
                     </td>
                     {/* Department */}
-                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                    <td className="px-3 py-3 text-xs text-muted-foreground">
                       {entry.profile?.department ?? "—"}
                     </td>
                     {/* Date */}
-                    <td className="whitespace-nowrap px-3 py-2 text-xs">
+                    <td className="whitespace-nowrap px-3 py-3 text-xs">
                       {formatDate(entry.work_date)}
                     </td>
                     {/* Shift */}
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-3 py-3 text-center">
                       {entry.shift_label ? (
                         <span className="rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
                           {entry.shift_label}
@@ -260,18 +349,18 @@ function ActivityLogPage() {
                       )}
                     </td>
                     {/* Clock In (time + full timestamp subtitle) */}
-                    <td className="whitespace-nowrap px-3 py-2">
+                    <td className="whitespace-nowrap px-3 py-3">
                       <div className="tabular-nums">{formatTime(entry.time_in)}</div>
                       <div className="text-[11px] text-muted-foreground">
                         {formatTimestamp(entry.created_at)}
                       </div>
                     </td>
                     {/* Clock Out */}
-                    <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">
                       {formatTime(entry.time_out)}
                     </td>
                     {/* Hours */}
-                    <td className="px-3 py-2 text-right tabular-nums">
+                    <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
                       {entry.hours_worked != null ? (
                         <span className={entry.is_undertime ? "font-medium text-amber-700" : ""}>
                           {entry.hours_worked.toFixed(2)}h
@@ -286,7 +375,7 @@ function ActivityLogPage() {
                       )}
                     </td>
                     {/* Late */}
-                    <td className="px-3 py-2 text-right tabular-nums">
+                    <td className="px-3 py-3 text-right tabular-nums">
                       {late ? (
                         <span className="font-medium text-red-600">{entry.late_minutes}m</span>
                       ) : (
@@ -294,7 +383,7 @@ function ActivityLogPage() {
                       )}
                     </td>
                     {/* Status */}
-                    <td className="px-3 py-2">{statusBadges(entry)}</td>
+                    <td className="px-3 py-3">{statusBadges(entry)}</td>
                   </tr>
                 );
               })}
