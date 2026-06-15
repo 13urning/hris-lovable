@@ -2,6 +2,15 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { authMiddleware, assertUser, assertHR } from "@/lib/auth-middleware";
 
+// Company-wide tardiness rule: any clock-in after 09:00 is late, regardless of
+// the employee's shift. Returns minutes past 09:00 (0 = on time).
+const LATE_CUTOFF_MINUTES = 9 * 60; // 09:00
+function lateMinutesFor(timeIn: string): number {
+  const [h, m] = timeIn.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return Math.max(0, h * 60 + m - LATE_CUTOFF_MINUTES);
+}
+
 export const getTodayDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data: { date: string }) => data)
@@ -9,14 +18,19 @@ export const getTodayDTR = createServerFn({ method: "POST" })
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
-      `SELECT id, time_in, time_out, hours_worked, shift_label, is_undertime, undertime_minutes
+      `SELECT id, time_in, time_out, hours_worked, shift_label, is_undertime, undertime_minutes, late_minutes
        FROM daily_time_reports WHERE employee_id = $1 AND work_date = $2 LIMIT 1`,
       [context.user.dbUserId, data.date],
     );
     return (rows[0] ?? null) as {
-      id: string; time_in: string | null; time_out: string | null;
-      hours_worked: number | null; shift_label: string | null;
-      is_undertime: boolean | null; undertime_minutes: number | null;
+      id: string;
+      time_in: string | null;
+      time_out: string | null;
+      hours_worked: number | null;
+      shift_label: string | null;
+      is_undertime: boolean | null;
+      undertime_minutes: number | null;
+      late_minutes: number | null;
     } | null;
   });
 
@@ -62,18 +76,28 @@ export const clockInDTR = createServerFn({ method: "POST" })
     const { pool } = await import("@/lib/db.server");
     // Geofence: reject clock-ins that don't originate from a configured office
     // network. No-op when no networks are configured (see office-network-functions).
-    const { resolveClientIp, assertOnOfficeNetwork } = await import("@/lib/office-network-functions");
+    const { resolveClientIp, assertOnOfficeNetwork } =
+      await import("@/lib/office-network-functions");
     await assertOnOfficeNetwork(pool, resolveClientIp(getRequest()));
+    const lateMinutes = lateMinutesFor(data.timeIn);
     await pool.query(
-      `INSERT INTO daily_time_reports (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes)
-       VALUES ($1, $2, $3, $4, NULL, FALSE, 0)`,
-      [context.user.dbUserId, data.workDate, data.timeIn, data.shiftLabel],
+      `INSERT INTO daily_time_reports (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes, late_minutes)
+       VALUES ($1, $2, $3, $4, NULL, FALSE, 0, $5)`,
+      [context.user.dbUserId, data.workDate, data.timeIn, data.shiftLabel, lateMinutes],
     );
   });
 
 export const clockOutDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { dtrId: string; timeOut: string; hoursWorked: number; isUndertime: boolean; undertimeMins: number }) => data)
+  .inputValidator(
+    (data: {
+      dtrId: string;
+      timeOut: string;
+      hoursWorked: number;
+      isUndertime: boolean;
+      undertimeMins: number;
+    }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -82,7 +106,14 @@ export const clockOutDTR = createServerFn({ method: "POST" })
       `UPDATE daily_time_reports
          SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4
        WHERE id = $5 AND employee_id = $6`,
-      [data.timeOut, data.hoursWorked, data.isUndertime, data.undertimeMins, data.dtrId, context.user.dbUserId],
+      [
+        data.timeOut,
+        data.hoursWorked,
+        data.isUndertime,
+        data.undertimeMins,
+        data.dtrId,
+        context.user.dbUserId,
+      ],
     );
     if (!rowCount) throw new Error("NOT_FOUND");
   });
@@ -94,7 +125,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT d.id, d.employee_id, d.work_date, d.time_in, d.time_out,
-              d.hours_worked, d.shift_label, d.is_undertime, d.undertime_minutes, d.created_at,
+              d.hours_worked, d.shift_label, d.is_undertime, d.undertime_minutes, d.late_minutes, d.created_at,
               p.full_name, p.employee_code, p.department
        FROM daily_time_reports d
        LEFT JOIN profiles p ON p.id = d.employee_id
@@ -111,9 +142,14 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       shift_label: r.shift_label as string | null,
       is_undertime: r.is_undertime as boolean | null,
       undertime_minutes: r.undertime_minutes as number | null,
+      late_minutes: r.late_minutes as number | null,
       created_at: r.created_at as string | null,
       profile: r.full_name
-        ? { full_name: r.full_name as string, employee_code: r.employee_code as string | null, department: r.department as string | null }
+        ? {
+            full_name: r.full_name as string,
+            employee_code: r.employee_code as string | null,
+            department: r.department as string | null,
+          }
         : null,
     }));
   });

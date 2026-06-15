@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getActivityLogDTRs } from "@/lib/dtr-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Clock3, FileDown } from "lucide-react";
 import { exportRowsToCSV } from "@/lib/csv-export";
 
-export const Route = createFileRoute("/_authenticated/_admin/activity-log")({ component: ActivityLogPage });
+export const Route = createFileRoute("/_authenticated/_admin/activity-log")({
+  component: ActivityLogPage,
+});
 
 type LogEntry = {
   id: string;
@@ -21,6 +23,7 @@ type LogEntry = {
   shift_label: string | null;
   is_undertime: boolean | null;
   undertime_minutes: number | null;
+  late_minutes: number | null;
   created_at: string | null;
   profile: {
     full_name: string;
@@ -40,15 +43,22 @@ function formatTime(t: string | null) {
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-PH", {
-    month: "short", day: "numeric", year: "numeric", weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    weekday: "short",
   });
 }
 
 function formatTimestamp(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("en-PH", {
-    month: "short", day: "numeric", year: "numeric",
-    hour: "numeric", minute: "2-digit", hour12: true,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
   });
 }
 
@@ -77,9 +87,12 @@ function ActivityLogPage() {
 
   const statusText = (entry: LogEntry) => {
     if (!entry.time_in) return "No record";
-    if (!entry.time_out) return "In progress";
-    if (entry.is_undertime) return "Undertime";
-    return "Present";
+    const tags: string[] = [];
+    if ((entry.late_minutes ?? 0) > 0) tags.push("Late");
+    if (!entry.time_out) tags.push("In progress");
+    else if (entry.is_undertime) tags.push("Undertime");
+    if (tags.length === 0) tags.push("Present");
+    return tags.join(", ");
   };
 
   const handleExport = () => {
@@ -94,7 +107,11 @@ function ActivityLogPage() {
         { header: "Clock In", value: (e) => formatTime(e.time_in) },
         { header: "Clock In Timestamp", value: (e) => formatTimestamp(e.created_at) },
         { header: "Clock Out", value: (e) => formatTime(e.time_out) },
-        { header: "Hours", value: (e) => (e.hours_worked != null ? e.hours_worked.toFixed(2) : "") },
+        {
+          header: "Hours",
+          value: (e) => (e.hours_worked != null ? e.hours_worked.toFixed(2) : ""),
+        },
+        { header: "Late (min)", value: (e) => e.late_minutes ?? 0 },
         { header: "Undertime (min)", value: (e) => e.undertime_minutes ?? "" },
         { header: "Status", value: statusText },
       ],
@@ -102,11 +119,48 @@ function ActivityLogPage() {
     );
   };
 
-  const statusBadge = (entry: LogEntry) => {
-    if (!entry.time_in) return <Badge variant="outline" className="text-muted-foreground">No record</Badge>;
-    if (!entry.time_out) return <Badge variant="secondary">In progress</Badge>;
-    if (entry.is_undertime) return <Badge className="bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-100">Undertime</Badge>;
-    return <Badge className="bg-green-50 text-green-700 border border-green-200 hover:bg-green-50">Present</Badge>;
+  const statusBadges = (entry: LogEntry) => {
+    if (!entry.time_in)
+      return (
+        <Badge variant="outline" className="text-muted-foreground">
+          No record
+        </Badge>
+      );
+    const badges: ReactNode[] = [];
+    if ((entry.late_minutes ?? 0) > 0)
+      badges.push(
+        <Badge
+          key="late"
+          className="bg-red-100 text-red-800 border border-red-200 hover:bg-red-100"
+        >
+          Late
+        </Badge>,
+      );
+    if (!entry.time_out)
+      badges.push(
+        <Badge key="inprog" variant="secondary">
+          In progress
+        </Badge>,
+      );
+    else if (entry.is_undertime)
+      badges.push(
+        <Badge
+          key="under"
+          className="bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-100"
+        >
+          Undertime
+        </Badge>,
+      );
+    if (badges.length === 0)
+      badges.push(
+        <Badge
+          key="present"
+          className="bg-green-50 text-green-700 border border-green-200 hover:bg-green-50"
+        >
+          Present
+        </Badge>,
+      );
+    return <div className="flex flex-wrap gap-1">{badges}</div>;
   };
 
   return (
@@ -146,11 +200,7 @@ function ActivityLogPage() {
                   onChange={(e) => setDateTo(e.target.value)}
                 />
               </div>
-              <Button
-                variant="outline"
-                onClick={handleExport}
-                disabled={filtered.length === 0}
-              >
+              <Button variant="outline" onClick={handleExport} disabled={filtered.length === 0}>
                 <FileDown className="mr-2 h-4 w-4" /> Export CSV
               </Button>
             </div>
@@ -158,79 +208,96 @@ function ActivityLogPage() {
         </CardHeader>
 
         <CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
-                <th className="px-3 py-2 text-left">Employee</th>
-                <th className="px-3 py-2 text-left">Department</th>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Shift</th>
-                <th className="px-3 py-2 text-left">Clock In</th>
-                <th className="px-3 py-2 text-left">Clock In Timestamp</th>
-                <th className="px-3 py-2 text-left">Clock Out</th>
-                <th className="px-3 py-2 text-right">Hours</th>
-                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left font-medium">Employee</th>
+                <th className="px-3 py-2 text-left font-medium">Department</th>
+                <th className="px-3 py-2 text-left font-medium">Date</th>
+                <th className="px-3 py-2 text-center font-medium">Shift</th>
+                <th className="px-3 py-2 text-left font-medium">Clock In</th>
+                <th className="px-3 py-2 text-left font-medium">Clock Out</th>
+                <th className="px-3 py-2 text-right font-medium">Hours</th>
+                <th className="px-3 py-2 text-right font-medium">Late</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((entry) => (
-                <tr key={entry.id} className={`border-t ${entry.is_undertime ? "bg-amber-50/30" : ""}`}>
-                  {/* Employee */}
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{entry.profile?.full_name ?? "Unknown"}</span>
-                      {entry.profile?.employee_code && (
-                        <span className="text-xs font-mono bg-secondary/60 px-1.5 py-0.5 rounded text-muted-foreground">
-                          {entry.profile.employee_code}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  {/* Department */}
-                  <td className="px-3 py-2 text-muted-foreground text-xs">
-                    {entry.profile?.department ?? "—"}
-                  </td>
-                  {/* Date */}
-                  <td className="px-3 py-2 whitespace-nowrap text-xs">
-                    {formatDate(entry.work_date)}
-                  </td>
-                  {/* Shift */}
-                  <td className="px-3 py-2">
-                    {entry.shift_label ? (
-                      <span className="text-xs bg-secondary px-1.5 py-0.5 rounded font-medium">{entry.shift_label}</span>
-                    ) : "—"}
-                  </td>
-                  {/* Clock In time */}
-                  <td className="px-3 py-2 tabular-nums">
-                    {formatTime(entry.time_in)}
-                  </td>
-                  {/* Clock In full timestamp */}
-                  <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
-                    {formatTimestamp(entry.created_at)}
-                  </td>
-                  {/* Clock Out */}
-                  <td className="px-3 py-2 tabular-nums">
-                    {formatTime(entry.time_out)}
-                  </td>
-                  {/* Hours */}
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {entry.hours_worked != null ? (
-                      <span className={entry.is_undertime ? "text-amber-700 font-medium" : ""}>
-                        {entry.hours_worked.toFixed(2)}h
-                        {entry.is_undertime && entry.undertime_minutes != null && (
-                          <span className="ml-1 text-xs text-amber-600">
-                            (−{entry.undertime_minutes}m)
+              {filtered.map((entry) => {
+                const late = (entry.late_minutes ?? 0) > 0;
+                return (
+                  <tr
+                    key={entry.id}
+                    className={`border-t align-middle ${late ? "bg-red-50/30" : entry.is_undertime ? "bg-amber-50/30" : ""}`}
+                  >
+                    {/* Employee */}
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{entry.profile?.full_name ?? "Unknown"}</span>
+                        {entry.profile?.employee_code && (
+                          <span className="rounded bg-secondary/60 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                            {entry.profile.employee_code}
                           </span>
                         )}
-                      </span>
-                    ) : "—"}
-                  </td>
-                  {/* Status */}
-                  <td className="px-3 py-2">
-                    {statusBadge(entry)}
-                  </td>
-                </tr>
-              ))}
+                      </div>
+                    </td>
+                    {/* Department */}
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {entry.profile?.department ?? "—"}
+                    </td>
+                    {/* Date */}
+                    <td className="whitespace-nowrap px-3 py-2 text-xs">
+                      {formatDate(entry.work_date)}
+                    </td>
+                    {/* Shift */}
+                    <td className="px-3 py-2 text-center">
+                      {entry.shift_label ? (
+                        <span className="rounded bg-secondary px-1.5 py-0.5 text-xs font-medium">
+                          {entry.shift_label}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    {/* Clock In (time + full timestamp subtitle) */}
+                    <td className="whitespace-nowrap px-3 py-2">
+                      <div className="tabular-nums">{formatTime(entry.time_in)}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {formatTimestamp(entry.created_at)}
+                      </div>
+                    </td>
+                    {/* Clock Out */}
+                    <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                      {formatTime(entry.time_out)}
+                    </td>
+                    {/* Hours */}
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {entry.hours_worked != null ? (
+                        <span className={entry.is_undertime ? "font-medium text-amber-700" : ""}>
+                          {entry.hours_worked.toFixed(2)}h
+                          {entry.is_undertime && entry.undertime_minutes != null && (
+                            <span className="ml-1 text-xs text-amber-600">
+                              (−{entry.undertime_minutes}m)
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    {/* Late */}
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {late ? (
+                        <span className="font-medium text-red-600">{entry.late_minutes}m</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    {/* Status */}
+                    <td className="px-3 py-2">{statusBadges(entry)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 

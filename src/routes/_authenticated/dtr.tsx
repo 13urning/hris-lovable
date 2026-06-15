@@ -13,11 +13,21 @@ import { Clock3, AlertTriangle, FileDown } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dtr")({ component: AttendancePage });
 
-function Stat({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "warn" | "accent" }) {
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "warn" | "accent";
+}) {
   return (
     <div className="rounded-md border bg-background/60 p-3">
       <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`mt-1 font-display text-2xl ${tone === "warn" ? "text-warning-foreground" : tone === "accent" ? "text-accent" : ""}`}>
+      <p
+        className={`mt-1 font-display text-2xl ${tone === "warn" ? "text-warning-foreground" : tone === "accent" ? "text-accent" : ""}`}
+      >
         {value}
       </p>
     </div>
@@ -27,10 +37,14 @@ function Stat({ label, value, tone }: { label: string; value: React.ReactNode; t
 function OtBadge({ status }: { status: string | null | undefined }) {
   if (!status || status === "none") return <span className="text-xs text-muted-foreground">—</span>;
   const cls =
-    status === "approved" ? "bg-success/15 text-success"
-    : status === "rejected" ? "bg-destructive/15 text-destructive"
-    : "bg-warning/20 text-warning-foreground";
-  return <span className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${cls}`}>{status}</span>;
+    status === "approved"
+      ? "bg-success/15 text-success"
+      : status === "rejected"
+        ? "bg-destructive/15 text-destructive"
+        : "bg-warning/20 text-warning-foreground";
+  return (
+    <span className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${cls}`}>{status}</span>
+  );
 }
 
 function AttendancePage() {
@@ -48,10 +62,15 @@ function AttendancePage() {
   const sortedDtrs = dtrs ?? [];
   const totalDays = sortedDtrs.length;
   const totalHours = sortedDtrs.reduce((s, d) => s + Number(d.hours_worked ?? 0), 0);
-  const undertimeDays = sortedDtrs.filter((d) => (d as { is_undertime?: boolean }).is_undertime).length;
+  const undertimeDays = sortedDtrs.filter(
+    (d) => (d as { is_undertime?: boolean }).is_undertime,
+  ).length;
   const totalOt = sortedDtrs.reduce((s, d) => s + Number(d.overtime_hours ?? 0), 0);
 
-  const displayMonth = new Date(selectedMonth + "-01T00:00:00").toLocaleString("default", { month: "long", year: "numeric" });
+  const displayMonth = new Date(selectedMonth + "-01T00:00:00").toLocaleString("default", {
+    month: "long",
+    year: "numeric",
+  });
 
   const handleExport = () => {
     type DtrRow = (typeof sortedDtrs)[number] & {
@@ -74,11 +93,14 @@ function AttendancePage() {
         { header: "OT Status", value: (d) => d.ot_status ?? "" },
         {
           header: "Flag",
-          value: (d) =>
-            d.is_absent ? "Absent"
-            : d.is_leave ? `Leave (${d.leave_type ?? ""})`
-            : d.is_undertime ? "Undertime"
-            : "Present",
+          value: (d) => {
+            if (d.is_absent) return "Absent";
+            if (d.is_leave) return `Leave (${d.leave_type ?? ""})`;
+            const tags: string[] = [];
+            if (Number(d.late_minutes ?? 0) > 0) tags.push("Late");
+            if (d.is_undertime) tags.push("Undertime");
+            return tags.length ? tags.join(", ") : "Present";
+          },
         },
       ],
       `attendance-${selectedMonth}`,
@@ -112,7 +134,11 @@ function AttendancePage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Days logged" value={totalDays} />
         <Stat label="Hours worked" value={totalHours.toFixed(1)} tone="accent" />
-        <Stat label="Undertime days" value={undertimeDays} tone={undertimeDays > 0 ? "warn" : undefined} />
+        <Stat
+          label="Undertime days"
+          value={undertimeDays}
+          tone={undertimeDays > 0 ? "warn" : undefined}
+        />
         <Stat label="OT hours" value={totalOt.toFixed(2)} />
       </div>
 
@@ -125,7 +151,9 @@ function AttendancePage() {
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="px-6 py-10 text-center text-sm text-muted-foreground">Loading records…</div>
+            <div className="px-6 py-10 text-center text-sm text-muted-foreground">
+              Loading records…
+            </div>
           ) : sortedDtrs.length === 0 ? (
             <div className="px-6 py-10 text-center text-sm text-muted-foreground">
               No attendance records for {displayMonth}.
@@ -160,27 +188,46 @@ function AttendancePage() {
                     const undertimeMins = Number(row.undertime_minutes ?? 0);
                     const otHours = Number(d.overtime_hours ?? 0);
                     return (
-                      <tr key={d.id} className={`border-t ${isUndertime ? "bg-amber-50/40 dark:bg-amber-950/20" : ""}`}>
+                      <tr
+                        key={d.id}
+                        className={`border-t ${isUndertime ? "bg-amber-50/40 dark:bg-amber-950/20" : ""}`}
+                      >
                         <td className="px-4 py-2 whitespace-nowrap">{formatDate(d.work_date)}</td>
-                        <td className="px-4 py-2 text-muted-foreground">{row.shift_label ?? "—"}</td>
+                        <td className="px-4 py-2 text-muted-foreground">
+                          {row.shift_label ?? "—"}
+                        </td>
                         <td className="px-4 py-2 tabular-nums">{d.time_in ?? "—"}</td>
                         <td className="px-4 py-2 tabular-nums">{d.time_out ?? "—"}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{Number(d.hours_worked ?? 0).toFixed(2)}</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{Number(d.late_minutes ?? 0)}</td>
                         <td className="px-4 py-2 text-right tabular-nums">
-                          {undertimeMins > 0
-                            ? <span className="font-medium text-amber-600 dark:text-amber-400">{undertimeMins}</span>
-                            : <span className="text-muted-foreground">—</span>}
+                          {Number(d.hours_worked ?? 0).toFixed(2)}
                         </td>
                         <td className="px-4 py-2 text-right tabular-nums">
-                          {otHours > 0 ? otHours.toFixed(2) : <span className="text-muted-foreground">—</span>}
+                          {Number(d.late_minutes ?? 0)}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          {undertimeMins > 0 ? (
+                            <span className="font-medium text-amber-600 dark:text-amber-400">
+                              {undertimeMins}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          {otHours > 0 ? (
+                            otHours.toFixed(2)
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-2">
                           {otHours > 0 ? (
                             <div className="space-y-0.5">
                               <OtBadge status={row.ot_status} />
                               {row.ot_status === "rejected" && row.ot_review_notes && (
-                                <p className="max-w-[180px] text-[11px] italic text-destructive">"{row.ot_review_notes}"</p>
+                                <p className="max-w-[180px] text-[11px] italic text-destructive">
+                                  "{row.ot_review_notes}"
+                                </p>
                               )}
                             </div>
                           ) : (
@@ -188,13 +235,30 @@ function AttendancePage() {
                           )}
                         </td>
                         <td className="px-4 py-2">
-                          {d.is_absent
-                            ? <span className="flex items-center gap-1 text-destructive"><AlertTriangle className="h-3 w-3" />Absent</span>
-                            : d.is_leave
-                            ? <span className="text-accent">Leave ({d.leave_type ?? ""})</span>
-                            : row.is_undertime
-                            ? <span className="text-warning-foreground font-medium">Undertime</span>
-                            : <span className="text-muted-foreground">Present</span>}
+                          {d.is_absent ? (
+                            <span className="flex items-center gap-1 text-destructive">
+                              <AlertTriangle className="h-3 w-3" />
+                              Absent
+                            </span>
+                          ) : d.is_leave ? (
+                            <span className="text-accent">Leave ({d.leave_type ?? ""})</span>
+                          ) : (
+                            <span className="flex flex-wrap items-center gap-1">
+                              {Number(d.late_minutes ?? 0) > 0 && (
+                                <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">
+                                  Late
+                                </span>
+                              )}
+                              {isUndertime && (
+                                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                                  Undertime
+                                </span>
+                              )}
+                              {Number(d.late_minutes ?? 0) === 0 && !isUndertime && (
+                                <span className="text-muted-foreground">Present</span>
+                              )}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
