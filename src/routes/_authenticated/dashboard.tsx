@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { getRecentDTRs } from "@/lib/queries";
 import { getTodayDTR, clockInDTR, clockOutDTR } from "@/lib/dtr-functions";
@@ -151,18 +151,23 @@ function Dashboard() {
   const clockedIn = !!todayEntry?.time_in;
   const clockedOut = !!todayEntry?.time_out;
 
+  const firstName = user?.fullName?.trim().split(/\s+/)[0] || user?.email?.split("@")[0] || "there";
+
   return (
     <div className="space-y-8">
-      <div>
-        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-          {isHR ? "HR · Admin" : "Employee Dashboard"}
-        </p>
-        <h1 className="mt-1 font-display text-4xl">Hello.</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {isHR
-            ? "Manage attendance, leaves, OT, and team performance."
-            : "Track your daily attendance, leaves, and overtime."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            {isHR ? "HR · Admin" : "Employee Dashboard"}
+          </p>
+          <h1 className="mt-1 font-display text-4xl">Hello {firstName}.</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {isHR
+              ? "Manage attendance, leaves, OT, and team performance."
+              : "Track your daily attendance, leaves, and overtime."}
+          </p>
+        </div>
+        <LiveClock />
       </div>
 
       {/* Clock in / out card — every user tracks their own attendance */}
@@ -520,6 +525,34 @@ function Dashboard() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// Live local time + date for the dashboard header. Updates every second.
+function LiveClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="text-right" suppressHydrationWarning>
+      <p className="font-display text-3xl leading-none tabular-nums">
+        {now.toLocaleTimeString(undefined, {
+          hour: "numeric",
+          minute: "2-digit",
+          second: "2-digit",
+        })}
+      </p>
+      <p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">
+        {now.toLocaleDateString(undefined, {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        })}
+      </p>
     </div>
   );
 }
