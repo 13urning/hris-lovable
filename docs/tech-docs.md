@@ -310,6 +310,11 @@ There is no ORM — all queries are hand-written SQL.
 - **Clock-in audience.** The dashboard clock-in/out card and recent-attendance
   table are shown to **every** signed-in user, including HR and admins, so
   elevated users track their own attendance too.
+- **Tardiness rule.** Any clock-in after **09:00** is late, regardless of the
+  employee's shift. `clockInDTR` computes `late_minutes` (minutes past 09:00) at
+  clock-in; `late_minutes > 0` means late. Late and undertime are tagged
+  independently in the dashboard, attendance history, and clock-in activity log
+  (a record can be both).
 - **Business date is local, not UTC.** Clock times (`time_in`/`time_out`) and the
   `work_date` are both derived from the browser's local time via `todayIso()`.
   This must not use `toISOString()` (UTC): a clock-in before UTC midnight (before

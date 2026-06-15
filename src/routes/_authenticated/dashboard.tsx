@@ -190,6 +190,12 @@ function Dashboard() {
                 {" · "}
                 {todayEntry!.shift_label} shift
               </p>
+              {(todayEntry!.late_minutes ?? 0) > 0 && (
+                <div className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700">
+                  <AlertCircle className="h-4 w-4" />
+                  Late — clocked in {todayEntry!.late_minutes} min after 9:00 AM
+                </div>
+              )}
               <Button
                 size="lg"
                 variant="destructive"
@@ -213,12 +219,20 @@ function Dashboard() {
                 {" · "}
                 {todayEntry!.shift_label} shift
               </p>
-              {todayEntry!.is_undertime && (
-                <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning-foreground">
-                  <AlertCircle className="h-4 w-4" />
-                  Undertime — {todayEntry!.undertime_minutes} min short
-                </div>
-              )}
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {(todayEntry!.late_minutes ?? 0) > 0 && (
+                  <div className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700">
+                    <AlertCircle className="h-4 w-4" />
+                    Late — {todayEntry!.late_minutes} min after 9:00 AM
+                  </div>
+                )}
+                {todayEntry!.is_undertime && (
+                  <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning-foreground">
+                    <AlertCircle className="h-4 w-4" />
+                    Undertime — {todayEntry!.undertime_minutes} min short
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </CardContent>
@@ -409,10 +423,23 @@ function Dashboard() {
                         <span className="text-destructive">Absent</span>
                       ) : d.is_leave ? (
                         <span className="text-accent">Leave</span>
-                      ) : (d as { is_undertime?: boolean }).is_undertime ? (
-                        <span className="text-warning-foreground">Undertime</span>
                       ) : (
-                        <span className="text-muted-foreground">Present</span>
+                        <span className="flex flex-wrap items-center gap-1">
+                          {Number(d.late_minutes ?? 0) > 0 && (
+                            <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700">
+                              Late
+                            </span>
+                          )}
+                          {(d as { is_undertime?: boolean }).is_undertime && (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                              Undertime
+                            </span>
+                          )}
+                          {Number(d.late_minutes ?? 0) === 0 &&
+                            !(d as { is_undertime?: boolean }).is_undertime && (
+                              <span className="text-muted-foreground">Present</span>
+                            )}
+                        </span>
                       )}
                     </td>
                   </tr>
