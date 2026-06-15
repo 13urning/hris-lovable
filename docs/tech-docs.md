@@ -65,6 +65,7 @@ hris-lovable/
 │   │   ├── dtr-functions.ts          # DTR API server functions
 │   │   ├── dtr.ts                    # DTR calculation utilities
 │   │   ├── leave-functions.ts        # Leave request server functions
+│   │   ├── office-network-functions.ts # Clock-in IP allowlist + admin CRUD
 │   │   ├── ot-functions.ts           # Overtime approval server functions
 │   │   ├── employee-functions.ts     # Employee management server functions
 │   │   ├── org-functions.ts          # Org chart server functions
@@ -94,6 +95,7 @@ hris-lovable/
 │   │       ├── activity-log.tsx      # Audit log
 │   │       ├── org-chart.tsx         # Organization chart (React Flow)
 │   │       ├── kpi-builder.tsx       # KPI template builder
+│   │       ├── office-networks.tsx   # Office IP allowlist for clock-in (admin)
 │   │       └── performance-admin.tsx # Admin performance evaluations
 │   │
 │   ├── integrations/supabase/        # Legacy Supabase client (unused in prod)
@@ -106,6 +108,9 @@ hris-lovable/
 │   ├── cloud-sql-schema.sql          # Full PostgreSQL schema
 │   ├── gcp-migration.md              # Supabase → GCP migration guide
 │   └── tech-docs.md                  # This file
+│
+├── scripts/
+│   └── apply-migration.mjs           # Apply a SQL migration to a Cloud SQL DB (no psql)
 │
 ├── Dockerfile                        # Multi-stage Node 22-Alpine build
 ├── cloudbuild.yaml                   # Production Cloud Build pipeline
@@ -142,7 +147,7 @@ hris-lovable/
 │                                                      │
 │  Server functions (src/lib/*-functions.ts):           │
 │    dtr, leave, ot, employee, org, user,               │
-│    kpi, performance                                   │
+│    kpi, performance, office-network                    │
 │                                                      │
 │  Database driver: pg Pool                             │
 └──────────────────┬───────────────────────────────────┘
@@ -156,7 +161,7 @@ hris-lovable/
 │    wave_hris          (production)                    │
 │    wave_hris_staging  (staging)                       │
 │                                                      │
-│  15 tables, 7 enums, stored functions, triggers       │
+│  16 tables, 7 enums, stored functions, triggers       │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -242,6 +247,7 @@ Custom type parsers in `db.server.ts` ensure:
 | `performance_evaluations` | Per-employee evaluation records + scores |
 | `evaluation_kpi_scores` | Individual KPI scores within an evaluation |
 | `evaluation_behavioral_scores` | Behavioral ratings within an evaluation |
+| `office_networks` | Allowlisted office IP/CIDR ranges that gate clock-in |
 
 ### Key Stored Functions & Triggers
 
@@ -267,10 +273,11 @@ All server-side logic lives in `src/lib/*-functions.ts` as TanStack Start **serv
 |---|---|
 | `user-functions.ts` | `fetchUserData`, `provisionUser`, `changePassword`, `fetchUserRoles` |
 | `employee-functions.ts` | `fetchEmployees`, `updateEmployee`, `deleteEmployee` |
-| `dtr-functions.ts` | `fetchDTREntries`, `saveDTR`, `submitCutoff`, `approveCutoff` |
-| `leave-functions.ts` | `fetchLeaves`, `createLeaveRequest`, `approveLeave`, `rejectLeave` |
+| `dtr-functions.ts` | `getTodayDTR`, `clockInDTR`, `clockOutDTR`, `getActivityLogDTRs` — `clockInDTR` enforces the office-network allowlist |
+| `leave-functions.ts` | `fileLeaveRequest`, `fileLeaveOnBehalf`, `approveLeaveStep`, `rejectLeaveStep`, `fetchAllLeaves`, `fetchProfilesForLeaveFiling` |
 | `ot-functions.ts` | `fetchOTRequests`, `createOTBudgetRequest`, `fileActualOTHours`, `approveOT`, `rejectOT` |
 | `org-functions.ts` | `fetchOrgNodes`, `saveOrgNodes` |
+| `office-network-functions.ts` | `listOfficeNetworks`, `addOfficeNetwork`, `setOfficeNetworkActive`, `deleteOfficeNetwork`, `getMyCurrentIp`; `assertOnOfficeNetwork`/`resolveClientIp` helpers |
 | `kpi-functions.ts` | `fetchKPITemplates`, `saveKPITemplate`, `deleteKPITemplate` |
 | `performance-functions.ts` | `fetchEvaluations`, `submitSelfAssessment`, `scoreEvaluation`, `approveEvaluation` |
 
@@ -290,6 +297,23 @@ export const fetchEmployees = createServerFn({ method: "GET" })
 ```
 
 There is no ORM — all queries are hand-written SQL.
+
+### Business Rules
+
+- **Clock-in geofencing.** `clockInDTR` resolves the caller's public IP from the
+  rightmost `X-Forwarded-For` entry (the value the Cloud Run front end appends;
+  leftmost entries are client-spoofable) and rejects the clock-in with
+  `OFF_NETWORK` unless it falls within an active `office_networks` CIDR. The check
+  **fails open** when no networks are active, so the restriction is opt-in: it
+  only takes effect once an admin adds at least one network on the Office
+  Networks admin page.
+- **Clock-in audience.** The dashboard clock-in/out card and recent-attendance
+  table are shown to **every** signed-in user, including HR and admins, so
+  elevated users track their own attendance too.
+- **Leave on behalf.** HR/admins can file a leave for another employee via
+  `fileLeaveOnBehalf`. A per-request flag either approves it immediately or routes
+  it through that employee's normal supervisor chain (`resolveChain`). On-behalf
+  filings are annotated in `review_notes` for audit.
 
 ---
 
@@ -313,6 +337,7 @@ TanStack Router with file-based route generation. Routes under `_authenticated/`
 | `/kpi-builder` | (Admin) KPI template CRUD |
 | `/performance-admin` | (Admin) Evaluation period management and scoring |
 | `/activity-log` | (Admin) System audit log |
+| `/office-networks` | (Admin) Office IP/CIDR allowlist that gates clock-in |
 
 ### Data Fetching
 
@@ -405,8 +430,31 @@ git push                # triggers auto-deploy
 git checkout main
 git merge staging
 git push
-gcloud builds submit --config=cloudbuild.yaml   # or set up a main-branch trigger
+# COMMIT_SHA is a trigger-only substitution, so it must be passed explicitly when
+# submitting a manual build from local source — otherwise the image tag is invalid.
+gcloud builds submit --config=cloudbuild.yaml --region=us-central1 \
+  --substitutions=COMMIT_SHA=$(git rev-parse HEAD) .
 ```
+
+### Database Migrations
+
+Migrations in `supabase/migrations/*.sql` are **not** applied automatically by the
+build pipeline — they must be run against each database manually. `psql` is not
+required; use the bundled runner (uses the `pg` driver, reads connection details
+from `.env`, takes the target database name as an argument):
+
+```bash
+# Staging first
+node scripts/apply-migration.mjs supabase/migrations/<file>.sql wave_hris_staging
+# Then production
+node scripts/apply-migration.mjs supabase/migrations/<file>.sql wave_hris
+```
+
+> ⚠️ **Ordering:** when a deploy adds code that reads a new table/column, apply
+> the migration to that environment's database **before** deploying the code, or
+> the new code will error against the missing object. The runner wraps each file
+> in a transaction and rolls back on failure. Your machine's IP must be in the
+> Cloud SQL instance's Authorized Networks for the direct connection to work.
 
 ### Docker Build
 
@@ -474,6 +522,7 @@ npm run dev
 | `VITE_FIREBASE_PROJECT_ID` | Build-time | Baked into client bundle for Firebase web SDK |
 | `APP_ENV` | Cloud Run | `staging` or omitted for production |
 | `PORT` | Cloud Run | Injected by Cloud Run (8080) |
+| `OFFICE_IP_XFF_DEPTH` | Cloud Run (optional) | Entries to skip from the right of `X-Forwarded-For` when resolving the client IP for clock-in geofencing. Default `1` (direct Cloud Run). Increase if an external HTTPS load balancer is added in front. |
 
 ### GCP Resources Reference
 
