@@ -2,13 +2,20 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware, assertUser } from "@/lib/auth-middleware";
 
 type OTRow = {
-  id: string; dtr_id: string | null; employee_id: string;
-  requested_hours: number; work_date: string | null;
-  request_type: "pre_approved" | "actual"; pre_approved_id: string | null;
+  id: string;
+  dtr_id: string | null;
+  employee_id: string;
+  requested_hours: number;
+  work_date: string | null;
+  request_type: "pre_approved" | "actual";
+  pre_approved_id: string | null;
   target_month: string | null;
-  status: "pending" | "approved" | "rejected";
-  approver_chain: string[]; current_approver_index: number;
-  reviewed_at: string | null; review_notes: string | null; created_at: string;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  approver_chain: string[];
+  current_approver_index: number;
+  reviewed_at: string | null;
+  review_notes: string | null;
+  created_at: string;
 };
 
 export const getMyOTBudgets = createServerFn({ method: "POST" })
@@ -85,10 +92,9 @@ export const getFiledOTForDashboard = createServerFn({ method: "POST" })
 // filing → auto-approved (chain empty). employeeId comes from the verified token.
 export const fileOTBudgetRequest = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: {
-    targetMonth: string;
-    requestedHours: number; notes: string | null;
-  }) => data)
+  .inputValidator(
+    (data: { targetMonth: string; requestedHours: number; notes: string | null }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -105,8 +111,15 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
           work_date, status, approver_chain, current_approver_index,
           review_notes, reviewed_at)
        VALUES ($1, 'pre_approved', $2, $3, $2, $4, $5, 0, $6, $7)`,
-      [context.user.dbUserId, data.targetMonth + "-01", data.requestedHours,
-       status, chain, data.notes, reviewedAt],
+      [
+        context.user.dbUserId,
+        data.targetMonth + "-01",
+        data.requestedHours,
+        status,
+        chain,
+        data.notes,
+        reviewedAt,
+      ],
     );
   });
 
@@ -115,17 +128,16 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
 // Group Head filing auto-approves (empty chain).
 export const fileActualOTHours = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: {
-    preApprovedId: string;
-    workDate: string; hours: number;
-  }) => data)
+  .inputValidator((data: { preApprovedId: string; workDate: string; hours: number }) => data)
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { resolveChain } = await import("@/lib/chain.server");
 
     // Guard: the budget must belong to the caller and be approved.
-    const { rows: [budget] } = await pool.query<{ employee_id: string; status: string; requested_hours: number }>(
+    const {
+      rows: [budget],
+    } = await pool.query<{ employee_id: string; status: string; requested_hours: number }>(
       `SELECT employee_id, status, requested_hours FROM ot_approval_requests WHERE id = $1`,
       [data.preApprovedId],
     );
@@ -137,7 +149,9 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
     // Pending hours don't reduce displayed "remaining" in the UI, but they
     // count here so a user can't queue up multiple filings that would
     // collectively exceed the budget if all eventually get approved.
-    const { rows: [committedRow] } = await pool.query<{ committed: number }>(
+    const {
+      rows: [committedRow],
+    } = await pool.query<{ committed: number }>(
       `SELECT COALESCE(SUM(requested_hours), 0) AS committed
          FROM ot_approval_requests
         WHERE pre_approved_id = $1
@@ -159,8 +173,15 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
          (employee_id, request_type, pre_approved_id, work_date,
           requested_hours, status, approver_chain, current_approver_index, reviewed_at)
        VALUES ($1, 'actual', $2, $3, $4, $5, $6, 0, $7)`,
-      [context.user.dbUserId, data.preApprovedId, data.workDate, data.hours,
-       status, chain, reviewedAt],
+      [
+        context.user.dbUserId,
+        data.preApprovedId,
+        data.workDate,
+        data.hours,
+        status,
+        chain,
+        reviewedAt,
+      ],
     );
   });
 
@@ -182,13 +203,17 @@ export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
       [context.user.dbUserId],
     );
     return rows as {
-      id: string; employee_id: string;
+      id: string;
+      employee_id: string;
       request_type: "pre_approved" | "actual";
       requested_hours: number;
-      target_month: string | null; work_date: string | null;
+      target_month: string | null;
+      work_date: string | null;
       approver_chain: string[];
-      current_approver_index: number; review_notes: string | null;
-      created_at: string; employee_full_name: string | null;
+      current_approver_index: number;
+      review_notes: string | null;
+      created_at: string;
+      employee_full_name: string | null;
     }[];
   });
 
@@ -202,8 +227,12 @@ export const approveOTStep = createServerFn({ method: "POST" })
     try {
       await client.query("BEGIN");
 
-      const { rows: [req] } = await client.query<{
-        approver_chain: string[]; current_approver_index: number; status: string;
+      const {
+        rows: [req],
+      } = await client.query<{
+        approver_chain: string[];
+        current_approver_index: number;
+        status: string;
       }>(
         `SELECT approver_chain, current_approver_index, status
          FROM ot_approval_requests WHERE id = $1 FOR UPDATE`,
@@ -250,8 +279,12 @@ export const rejectOTStep = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
-    const { rows: [req] } = await pool.query<{
-      approver_chain: string[]; current_approver_index: number; status: string;
+    const {
+      rows: [req],
+    } = await pool.query<{
+      approver_chain: string[];
+      current_approver_index: number;
+      status: string;
     }>(
       `SELECT approver_chain, current_approver_index, status
        FROM ot_approval_requests WHERE id = $1`,
@@ -270,5 +303,33 @@ export const rejectOTStep = createServerFn({ method: "POST" })
               review_notes = COALESCE($2, review_notes)
         WHERE id = $3`,
       [new Date().toISOString(), data.notes ?? null, data.id],
+    );
+  });
+
+// Soft-cancel an OT request: owner can cancel their own pending request,
+// HR/admin can cancel any pending one. Sets status to 'cancelled' (kept for
+// history). A cancelled actual filing no longer counts against its budget.
+export const cancelOTRequest = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { id: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const {
+      rows: [req],
+    } = await pool.query<{ employee_id: string; status: string }>(
+      `SELECT employee_id, status FROM ot_approval_requests WHERE id = $1`,
+      [data.id],
+    );
+    if (!req) throw new Error("NOT_FOUND");
+    const isOwner = req.employee_id === context.user.dbUserId;
+    if (!isOwner && !context.user.isHR) throw new Error("FORBIDDEN");
+    if (req.status !== "pending") throw new Error("NOT_PENDING");
+    await pool.query(
+      `UPDATE ot_approval_requests
+          SET status = 'cancelled',
+              review_notes = COALESCE(review_notes, $2)
+        WHERE id = $1`,
+      [data.id, isOwner ? "Cancelled by employee" : "Cancelled by HR"],
     );
   });

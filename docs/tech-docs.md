@@ -337,6 +337,11 @@ There is no ORM — all queries are hand-written SQL.
 - **Employee leaves view.** The leaves page loads `fetchAllLeaves` for HR and
   `fetchMyLeaves` (own rows only) for employees, so a regular employee can view
   and cancel their own pending requests there.
+- **OT request cancellation.** Employees (or HR) can soft-cancel their own
+  *pending* OT budget or actual-hours requests via `cancelOTRequest` (status →
+  `cancelled`, kept for history). A cancelled actual filing no longer counts
+  against its budget's committed total. `ot_approval_requests.requested_hours`
+  is `NUMERIC(6,2)` (max 9999.99) and the status CHECK allows `cancelled`.
 
 ---
 
