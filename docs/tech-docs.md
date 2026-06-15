@@ -430,7 +430,10 @@ git push                # triggers auto-deploy
 git checkout main
 git merge staging
 git push
-gcloud builds submit --config=cloudbuild.yaml   # or set up a main-branch trigger
+# COMMIT_SHA is a trigger-only substitution, so it must be passed explicitly when
+# submitting a manual build from local source — otherwise the image tag is invalid.
+gcloud builds submit --config=cloudbuild.yaml --region=us-central1 \
+  --substitutions=COMMIT_SHA=$(git rev-parse HEAD) .
 ```
 
 ### Database Migrations
