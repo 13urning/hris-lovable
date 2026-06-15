@@ -11,8 +11,10 @@ export const fetchMyProfile = createServerFn({ method: "POST" })
       [context.user.dbUserId],
     );
     return (rows[0] ?? null) as {
-      vl_credits: number | null; sl_credits: number | null;
-      vl_remaining: number | null; sl_remaining: number | null;
+      vl_credits: number | null;
+      sl_credits: number | null;
+      vl_remaining: number | null;
+      sl_remaining: number | null;
     } | null;
   });
 
@@ -26,7 +28,13 @@ export const fetchMyLeaves = createServerFn({ method: "POST" })
        WHERE employee_id = $1 ORDER BY start_date DESC`,
       [context.user.dbUserId],
     );
-    return rows as { id: string; leave_type: string; start_date: string; end_date: string; status: string }[];
+    return rows as {
+      id: string;
+      leave_type: string;
+      start_date: string;
+      end_date: string;
+      status: string;
+    }[];
   });
 
 // HR/admin view of all leaves. Regular users see only their own via fetchMyLeaves.
@@ -42,10 +50,16 @@ export const fetchAllLeaves = createServerFn({ method: "POST" })
        ORDER BY start_date DESC`,
     );
     return rows as {
-      id: string; employee_id: string; leave_type: string;
-      start_date: string; end_date: string; reason: string | null;
+      id: string;
+      employee_id: string;
+      leave_type: string;
+      start_date: string;
+      end_date: string;
+      reason: string | null;
       status: "pending" | "approved" | "rejected" | "cancelled";
-      reviewed_at: string | null; review_notes: string | null; created_at: string;
+      reviewed_at: string | null;
+      review_notes: string | null;
+      created_at: string;
     }[];
   });
 
@@ -68,10 +82,10 @@ export const fetchProfilesByIds = createServerFn({ method: "POST" })
 // user cannot file on behalf of someone else.
 export const fileLeaveRequest = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: {
-    leaveType: string;
-    startDate: string; endDate: string; reason: string | null;
-  }) => data)
+  .inputValidator(
+    (data: { leaveType: string; startDate: string; endDate: string; reason: string | null }) =>
+      data,
+  )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -89,8 +103,87 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
          (employee_id, leave_type, start_date, end_date, reason,
           status, approver_chain, current_approver_index, reviewed_by, reviewed_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9)`,
-      [context.user.dbUserId, data.leaveType, data.startDate, data.endDate, data.reason,
-       status, chain, reviewedBy, reviewedAt],
+      [
+        context.user.dbUserId,
+        data.leaveType,
+        data.startDate,
+        data.endDate,
+        data.reason,
+        status,
+        chain,
+        reviewedBy,
+        reviewedAt,
+      ],
+    );
+  });
+
+// Lightweight employee list for the admin "file on behalf" picker. HR/admin only.
+export const fetchProfilesForLeaveFiling = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertHR(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const { rows } = await pool.query(
+      `SELECT id, full_name, department FROM profiles ORDER BY full_name`,
+    );
+    return rows as { id: string; full_name: string; department: string | null }[];
+  });
+
+// HR/admin files a leave on an employee's behalf (e.g. the employee was absent
+// and never filed). The employee_id is the TARGET, not the caller. The caller
+// chooses whether to approve immediately or route through the employee's normal
+// supervisor chain via `autoApprove`.
+export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator(
+    (data: {
+      employeeId: string;
+      leaveType: string;
+      startDate: string;
+      endDate: string;
+      reason: string | null;
+      autoApprove: boolean;
+    }) => data,
+  )
+  .handler(async ({ data, context }) => {
+    assertHR(context.user);
+    if (!data.employeeId) throw new Error("EMPLOYEE_REQUIRED");
+    const { pool } = await import("@/lib/db.server");
+    const { resolveChain } = await import("@/lib/chain.server");
+
+    // Resolve the TARGET employee's chain. If they aren't in the org tree we
+    // can't route for approval — only an immediate approval can proceed.
+    let chain: string[] = [];
+    try {
+      chain = await resolveChain(pool, data.employeeId);
+    } catch {
+      if (!data.autoApprove) throw new Error("NO_ORG_NODE");
+    }
+
+    // Auto-approve when asked, or when the employee sits atop the tree (no chain).
+    const autoApprove = data.autoApprove || chain.length === 0;
+    const status = autoApprove ? "approved" : "pending";
+    const reviewedAt = autoApprove ? new Date().toISOString() : null;
+    const reviewedBy = autoApprove ? context.user.dbUserId : null;
+    const note = `Filed on behalf by ${context.user.email ?? "an administrator"}`;
+
+    await pool.query(
+      `INSERT INTO leave_requests
+         (employee_id, leave_type, start_date, end_date, reason,
+          status, approver_chain, current_approver_index, reviewed_by, reviewed_at, review_notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)`,
+      [
+        data.employeeId,
+        data.leaveType,
+        data.startDate,
+        data.endDate,
+        data.reason,
+        status,
+        chain,
+        reviewedBy,
+        reviewedAt,
+        autoApprove ? note : null,
+      ],
     );
   });
 
@@ -106,8 +199,12 @@ export const approveLeaveStep = createServerFn({ method: "POST" })
     try {
       await client.query("BEGIN");
 
-      const { rows: [req] } = await client.query<{
-        approver_chain: string[]; current_approver_index: number; status: string;
+      const {
+        rows: [req],
+      } = await client.query<{
+        approver_chain: string[];
+        current_approver_index: number;
+        status: string;
       }>(
         `SELECT approver_chain, current_approver_index, status
          FROM leave_requests WHERE id = $1 FOR UPDATE`,
@@ -134,10 +231,10 @@ export const approveLeaveStep = createServerFn({ method: "POST" })
           [nextIndex, context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
         );
       } else {
-        await client.query(
-          `UPDATE leave_requests SET current_approver_index = $1 WHERE id = $2`,
-          [nextIndex, data.id],
-        );
+        await client.query(`UPDATE leave_requests SET current_approver_index = $1 WHERE id = $2`, [
+          nextIndex,
+          data.id,
+        ]);
       }
 
       await client.query("COMMIT");
@@ -156,12 +253,15 @@ export const rejectLeaveStep = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
-    const { rows: [req] } = await pool.query<{
-      approver_chain: string[]; current_approver_index: number; status: string;
-    }>(
-      `SELECT approver_chain, current_approver_index, status FROM leave_requests WHERE id = $1`,
-      [data.id],
-    );
+    const {
+      rows: [req],
+    } = await pool.query<{
+      approver_chain: string[];
+      current_approver_index: number;
+      status: string;
+    }>(`SELECT approver_chain, current_approver_index, status FROM leave_requests WHERE id = $1`, [
+      data.id,
+    ]);
     if (!req) throw new Error("NOT_FOUND");
     if (req.status !== "pending") throw new Error("NOT_PENDING");
     if (req.approver_chain[req.current_approver_index] !== context.user.dbUserId) {
@@ -198,10 +298,17 @@ export const fetchMyPendingLeaveApprovals = createServerFn({ method: "POST" })
       [context.user.dbUserId],
     );
     return rows as {
-      id: string; employee_id: string; leave_type: string;
-      start_date: string; end_date: string; reason: string | null;
-      current_approver_index: number; approver_chain: string[]; created_at: string;
-      employee_full_name: string | null; employee_department: string | null;
+      id: string;
+      employee_id: string;
+      leave_type: string;
+      start_date: string;
+      end_date: string;
+      reason: string | null;
+      current_approver_index: number;
+      approver_chain: string[];
+      created_at: string;
+      employee_full_name: string | null;
+      employee_department: string | null;
     }[];
   });
 
@@ -213,7 +320,9 @@ export const deleteLeaveRequest = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
-    const { rows: [req] } = await pool.query<{ employee_id: string; status: string }>(
+    const {
+      rows: [req],
+    } = await pool.query<{ employee_id: string; status: string }>(
       `SELECT employee_id, status FROM leave_requests WHERE id = $1`,
       [data.id],
     );

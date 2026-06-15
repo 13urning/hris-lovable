@@ -60,14 +60,14 @@ function Dashboard() {
   const { data: todayEntry, refetch: refetchToday } = useQuery({
     queryKey: ["dtr-today", user?.id, today],
     queryFn: () => getTodayDTR({ data: { date: today } }),
-    enabled: !!user && !isHR,
+    enabled: !!user, // every user (incl. HR/admin) tracks their own attendance
   });
 
   // ── Recent DTRs (current month) ────────────────────────────────────────
   const { data: recentDtrs } = useQuery({
     queryKey: ["recent-dtrs", user?.id],
     queryFn: () => getRecentDTRs(),
-    enabled: !!user && !isHR,
+    enabled: !!user, // every user (incl. HR/admin) sees their own recent attendance
   });
 
   const [showShiftPicker, setShowShiftPicker] = useState(false);
@@ -88,14 +88,16 @@ function Dashboard() {
   const clockOut = useMutation({
     mutationFn: async () => {
       const timeOut = new Date().toTimeString().slice(0, 5);
-      const [ih, im] = (todayEntry!.time_in!).split(":").map(Number);
+      const [ih, im] = todayEntry!.time_in!.split(":").map(Number);
       const [oh, om] = timeOut.split(":").map(Number);
       const totalMins = oh * 60 + om - (ih * 60 + im);
       const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
       const STANDARD = 9;
       const isUndertime = hoursWorked < STANDARD;
       const undertimeMins = isUndertime ? Math.round(STANDARD * 60 - totalMins) : 0;
-      await clockOutDTR({ data: { dtrId: todayEntry!.id, timeOut, hoursWorked, isUndertime, undertimeMins } });
+      await clockOutDTR({
+        data: { dtrId: todayEntry!.id, timeOut, hoursWorked, isUndertime, undertimeMins },
+      });
       return { hoursWorked, isUndertime, undertimeMins };
     },
     onSuccess: (result) => {
@@ -114,8 +116,14 @@ function Dashboard() {
   const leavesAll = myLeaves ?? [];
   const leavesApproved = leavesAll.filter((l) => l.status === "approved");
   const leavesPending = leavesAll.filter((l) => l.status === "pending");
-  const totalApprovedDays = leavesApproved.reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
-  const totalPendingDays = leavesPending.reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
+  const totalApprovedDays = leavesApproved.reduce(
+    (s, l) => s + leaveDays(l.start_date, l.end_date),
+    0,
+  );
+  const totalPendingDays = leavesPending.reduce(
+    (s, l) => s + leaveDays(l.start_date, l.end_date),
+    0,
+  );
   const upcomingLeaves = leavesAll
     .filter((l) => (l.status === "approved" || l.status === "pending") && l.end_date >= today)
     .sort((a, b) => a.start_date.localeCompare(b.start_date))
@@ -130,7 +138,12 @@ function Dashboard() {
   const inCurrentYear = (iso: string) => new Date(iso).getFullYear() === currentYear;
   const usedDaysByType = (type: "VL" | "SL") =>
     leavesAll
-      .filter((l) => l.leave_type === type && (l.status === "approved" || l.status === "pending") && inCurrentYear(l.start_date))
+      .filter(
+        (l) =>
+          l.leave_type === type &&
+          (l.status === "approved" || l.status === "pending") &&
+          inCurrentYear(l.start_date),
+      )
       .reduce((s, l) => s + leaveDays(l.start_date, l.end_date), 0);
   const vlUsed = usedDaysByType("VL");
   const slUsed = usedDaysByType("SL");
@@ -152,83 +165,124 @@ function Dashboard() {
         </p>
       </div>
 
-      {/* ── Employee-only sections ──────────────────────────────────────── */}
+      {/* Clock in / out card — every user tracks their own attendance */}
+      <Card className="border-primary/20 bg-gradient-to-br from-card to-secondary/30">
+        <CardContent className="flex flex-col items-center gap-4 py-8">
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            Today's Attendance
+          </p>
+
+          {!clockedIn && (
+            <Button
+              size="lg"
+              className="h-16 w-48 text-lg font-semibold"
+              onClick={() => setShowShiftPicker(true)}
+              disabled={clockIn.isPending}
+            >
+              <Clock3 className="mr-2 h-5 w-5" /> Clock In
+            </Button>
+          )}
+
+          {clockedIn && !clockedOut && (
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-sm text-muted-foreground">
+                In at <span className="font-semibold text-foreground">{todayEntry!.time_in}</span>
+                {" · "}
+                {todayEntry!.shift_label} shift
+              </p>
+              <Button
+                size="lg"
+                variant="destructive"
+                className="h-16 w-48 text-lg font-semibold"
+                onClick={() => clockOut.mutate()}
+                disabled={clockOut.isPending}
+              >
+                <Clock3 className="mr-2 h-5 w-5" /> Clock Out
+              </Button>
+            </div>
+          )}
+
+          {clockedIn && clockedOut && (
+            <div className="flex flex-col items-center gap-2 text-center">
+              <p className="text-sm font-medium">
+                {todayEntry!.time_in} → {todayEntry!.time_out}
+                {" · "}
+                <span className="font-semibold">
+                  {Number(todayEntry!.hours_worked).toFixed(2)} hrs
+                </span>
+                {" · "}
+                {todayEntry!.shift_label} shift
+              </p>
+              {todayEntry!.is_undertime && (
+                <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning-foreground">
+                  <AlertCircle className="h-4 w-4" />
+                  Undertime — {todayEntry!.undertime_minutes} min short
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Employee-only sections (OT + leave summary) ──────────────────── */}
       {!isHR && (
         <>
-          {/* Clock in / out card */}
-          <Card className="border-primary/20 bg-gradient-to-br from-card to-secondary/30">
-            <CardContent className="flex flex-col items-center gap-4 py-8">
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Today's Attendance</p>
-
-              {!clockedIn && (
-                <Button size="lg" className="h-16 w-48 text-lg font-semibold"
-                  onClick={() => setShowShiftPicker(true)}
-                  disabled={clockIn.isPending}>
-                  <Clock3 className="mr-2 h-5 w-5" /> Clock In
-                </Button>
-              )}
-
-              {clockedIn && !clockedOut && (
-                <div className="flex flex-col items-center gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    In at <span className="font-semibold text-foreground">{todayEntry!.time_in}</span>
-                    {" · "}{todayEntry!.shift_label} shift
-                  </p>
-                  <Button size="lg" variant="destructive" className="h-16 w-48 text-lg font-semibold"
-                    onClick={() => clockOut.mutate()} disabled={clockOut.isPending}>
-                    <Clock3 className="mr-2 h-5 w-5" /> Clock Out
-                  </Button>
-                </div>
-              )}
-
-              {clockedIn && clockedOut && (
-                <div className="flex flex-col items-center gap-2 text-center">
-                  <p className="text-sm font-medium">
-                    {todayEntry!.time_in} → {todayEntry!.time_out}
-                    {" · "}<span className="font-semibold">{Number(todayEntry!.hours_worked).toFixed(2)} hrs</span>
-                    {" · "}{todayEntry!.shift_label} shift
-                  </p>
-                  {todayEntry!.is_undertime && (
-                    <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-3 py-1.5 text-sm text-warning-foreground">
-                      <AlertCircle className="h-4 w-4" />
-                      Undertime — {todayEntry!.undertime_minutes} min short
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           {/* OT budget card */}
           {totalApprovedOT > 0 ? (
             <Card className="border-accent/20">
               <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="font-display text-lg flex items-center gap-2">
-                  <Clock3 className="h-4 w-4 text-accent" /> OT Budget — {new Date(firstOfMonth + "T00:00:00").toLocaleString("default", { month: "long", year: "numeric" })}
+                  <Clock3 className="h-4 w-4 text-accent" /> OT Budget —{" "}
+                  {new Date(firstOfMonth + "T00:00:00").toLocaleString("default", {
+                    month: "long",
+                    year: "numeric",
+                  })}
                 </CardTitle>
-                <Link to="/ot-approvals" className="text-xs text-accent underline underline-offset-2">View all →</Link>
+                <Link
+                  to="/ot-approvals"
+                  className="text-xs text-accent underline underline-offset-2"
+                >
+                  View all →
+                </Link>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="rounded-md border bg-background/60 p-3 text-center">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Approved</p>
-                    <p className="mt-1 font-display text-2xl">{totalApprovedOT.toFixed(1)}<span className="text-sm text-muted-foreground"> hrs</span></p>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Approved
+                    </p>
+                    <p className="mt-1 font-display text-2xl">
+                      {totalApprovedOT.toFixed(1)}
+                      <span className="text-sm text-muted-foreground"> hrs</span>
+                    </p>
                   </div>
                   <div className="rounded-md border bg-background/60 p-3 text-center">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Used</p>
-                    <p className="mt-1 font-display text-2xl">{totalFiledOT.toFixed(1)}<span className="text-sm text-muted-foreground"> hrs</span></p>
+                    <p className="mt-1 font-display text-2xl">
+                      {totalFiledOT.toFixed(1)}
+                      <span className="text-sm text-muted-foreground"> hrs</span>
+                    </p>
                   </div>
-                  <div className={`rounded-md border p-3 text-center ${remainingOT <= 0 ? "border-destructive/30 bg-destructive/5" : "border-success/30 bg-success/5"}`}>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Remaining</p>
-                    <p className={`mt-1 font-display text-2xl ${remainingOT <= 0 ? "text-destructive" : "text-success"}`}>
-                      {remainingOT.toFixed(1)}<span className="text-sm text-muted-foreground"> hrs</span>
+                  <div
+                    className={`rounded-md border p-3 text-center ${remainingOT <= 0 ? "border-destructive/30 bg-destructive/5" : "border-success/30 bg-success/5"}`}
+                  >
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Remaining
+                    </p>
+                    <p
+                      className={`mt-1 font-display text-2xl ${remainingOT <= 0 ? "text-destructive" : "text-success"}`}
+                    >
+                      {remainingOT.toFixed(1)}
+                      <span className="text-sm text-muted-foreground"> hrs</span>
                     </p>
                   </div>
                 </div>
                 <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-secondary">
                   <div
                     className="h-full rounded-full bg-accent transition-all"
-                    style={{ width: `${Math.min(100, totalApprovedOT > 0 ? (totalFiledOT / totalApprovedOT) * 100 : 0)}%` }}
+                    style={{
+                      width: `${Math.min(100, totalApprovedOT > 0 ? (totalFiledOT / totalApprovedOT) * 100 : 0)}%`,
+                    }}
                   />
                 </div>
               </CardContent>
@@ -236,7 +290,9 @@ function Dashboard() {
           ) : (
             <div className="flex items-center justify-between rounded-md border border-border/50 bg-secondary/30 px-4 py-2.5 text-sm text-muted-foreground">
               <span>No approved OT budget for this month.</span>
-              <Link to="/ot-approvals" className="text-xs text-accent underline underline-offset-2">Request OT →</Link>
+              <Link to="/ot-approvals" className="text-xs text-accent underline underline-offset-2">
+                Request OT →
+              </Link>
             </div>
           )}
 
@@ -244,32 +300,71 @@ function Dashboard() {
           <Card className="border-accent/15">
             <CardHeader className="flex flex-row items-start justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">My leaves</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  My leaves
+                </p>
                 <CardTitle className="mt-1 font-display text-2xl flex items-center gap-2">
                   <Plane className="h-5 w-5 text-accent" /> Leave summary
                 </CardTitle>
               </div>
-              <Button asChild variant="ghost" size="sm"><Link to="/leaves">View all →</Link></Button>
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/leaves">View all →</Link>
+              </Button>
             </CardHeader>
             <CardContent>
               <div className="mb-5 grid gap-3 sm:grid-cols-2">
-                <LeaveBalance label="Vacation Leave" code="VL" used={vlUsed} total={VL_ENTITLEMENT} remaining={vlRemaining} year={currentYear} />
-                <LeaveBalance label="Sick Leave" code="SL" used={slUsed} total={SL_ENTITLEMENT} remaining={slRemaining} year={currentYear} />
+                <LeaveBalance
+                  label="Vacation Leave"
+                  code="VL"
+                  used={vlUsed}
+                  total={VL_ENTITLEMENT}
+                  remaining={vlRemaining}
+                  year={currentYear}
+                />
+                <LeaveBalance
+                  label="Sick Leave"
+                  code="SL"
+                  used={slUsed}
+                  total={SL_ENTITLEMENT}
+                  remaining={slRemaining}
+                  year={currentYear}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <Stat icon={<CalendarCheck className="h-4 w-4" />} label="Approved days" value={totalApprovedDays} />
-                <Stat icon={<Clock3 className="h-4 w-4" />} label="Pending days" value={totalPendingDays} tone={totalPendingDays > 0 ? "warn" : undefined} />
-                <Stat icon={<Plane className="h-4 w-4" />} label="Approved requests" value={leavesApproved.length} />
-                <Stat icon={<AlertCircle className="h-4 w-4" />} label="Total filed" value={leavesAll.length} />
+                <Stat
+                  icon={<CalendarCheck className="h-4 w-4" />}
+                  label="Approved days"
+                  value={totalApprovedDays}
+                />
+                <Stat
+                  icon={<Clock3 className="h-4 w-4" />}
+                  label="Pending days"
+                  value={totalPendingDays}
+                  tone={totalPendingDays > 0 ? "warn" : undefined}
+                />
+                <Stat
+                  icon={<Plane className="h-4 w-4" />}
+                  label="Approved requests"
+                  value={leavesApproved.length}
+                />
+                <Stat
+                  icon={<AlertCircle className="h-4 w-4" />}
+                  label="Total filed"
+                  value={leavesAll.length}
+                />
               </div>
               {upcomingLeaves.length > 0 && (
                 <div className="mt-5 space-y-1.5 border-t pt-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Upcoming / ongoing</p>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Upcoming / ongoing
+                  </p>
                   {upcomingLeaves.map((l) => (
                     <div key={l.id} className="flex items-center justify-between text-sm">
                       <span className="font-medium">
                         {l.leave_type}
-                        <span className="ml-2 text-xs uppercase tracking-wide text-muted-foreground">{l.status}</span>
+                        <span className="ml-2 text-xs uppercase tracking-wide text-muted-foreground">
+                          {l.status}
+                        </span>
                       </span>
                       <span className="text-muted-foreground">
                         {formatDate(l.start_date)} → {formatDate(l.end_date)}
@@ -280,66 +375,89 @@ function Dashboard() {
               )}
             </CardContent>
           </Card>
-
-          {/* Recent attendance */}
-          <div>
-            <h2 className="font-display text-2xl">Recent attendance</h2>
-            <div className="mt-4 overflow-hidden rounded-lg border bg-card">
-              {recentDtrs?.length ? (
-                <table className="w-full text-sm">
-                  <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Date</th>
-                      <th className="px-4 py-2 text-left">Time in</th>
-                      <th className="px-4 py-2 text-left">Time out</th>
-                      <th className="px-4 py-2 text-right">Hours</th>
-                      <th className="px-4 py-2 text-right">Late (min)</th>
-                      <th className="px-4 py-2 text-right">OT</th>
-                      <th className="px-4 py-2 text-left">Flag</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentDtrs.map((d) => (
-                      <tr key={d.id} className="border-t">
-                        <td className="px-4 py-2">{formatDate(d.work_date)}</td>
-                        <td className="px-4 py-2">{d.time_in ?? "—"}</td>
-                        <td className="px-4 py-2">{d.time_out ?? "—"}</td>
-                        <td className="px-4 py-2 text-right">{Number(d.hours_worked).toFixed(2)}</td>
-                        <td className="px-4 py-2 text-right">{d.late_minutes}</td>
-                        <td className="px-4 py-2 text-right">{Number(d.overtime_hours).toFixed(2)}</td>
-                        <td className="px-4 py-2">
-                          {d.is_absent ? <span className="text-destructive">Absent</span>
-                            : d.is_leave ? <span className="text-accent">Leave</span>
-                            : (d as { is_undertime?: boolean }).is_undertime ? <span className="text-warning-foreground">Undertime</span>
-                            : <span className="text-muted-foreground">Present</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="px-6 py-10 text-center text-sm text-muted-foreground">
-                  No attendance records in the last 14 days. <Link to="/dtr" className="text-accent underline">View full history →</Link>
-                </div>
-              )}
-            </div>
-          </div>
         </>
       )}
+
+      {/* Recent attendance — every user sees their own */}
+      <div>
+        <h2 className="font-display text-2xl">Recent attendance</h2>
+        <div className="mt-4 overflow-hidden rounded-lg border bg-card">
+          {recentDtrs?.length ? (
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-left">Time in</th>
+                  <th className="px-4 py-2 text-left">Time out</th>
+                  <th className="px-4 py-2 text-right">Hours</th>
+                  <th className="px-4 py-2 text-right">Late (min)</th>
+                  <th className="px-4 py-2 text-right">OT</th>
+                  <th className="px-4 py-2 text-left">Flag</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentDtrs.map((d) => (
+                  <tr key={d.id} className="border-t">
+                    <td className="px-4 py-2">{formatDate(d.work_date)}</td>
+                    <td className="px-4 py-2">{d.time_in ?? "—"}</td>
+                    <td className="px-4 py-2">{d.time_out ?? "—"}</td>
+                    <td className="px-4 py-2 text-right">{Number(d.hours_worked).toFixed(2)}</td>
+                    <td className="px-4 py-2 text-right">{d.late_minutes}</td>
+                    <td className="px-4 py-2 text-right">{Number(d.overtime_hours).toFixed(2)}</td>
+                    <td className="px-4 py-2">
+                      {d.is_absent ? (
+                        <span className="text-destructive">Absent</span>
+                      ) : d.is_leave ? (
+                        <span className="text-accent">Leave</span>
+                      ) : (d as { is_undertime?: boolean }).is_undertime ? (
+                        <span className="text-warning-foreground">Undertime</span>
+                      ) : (
+                        <span className="text-muted-foreground">Present</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="px-6 py-10 text-center text-sm text-muted-foreground">
+              No attendance records in the last 14 days.{" "}
+              <Link to="/dtr" className="text-accent underline">
+                View full history →
+              </Link>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* ── HR / Admin landing ──────────────────────────────────────────── */}
       {isHR && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[
-            { to: "/employees", label: "Employees", desc: "Manage profiles, roles, and leave credits" },
+            {
+              to: "/employees",
+              label: "Employees",
+              desc: "Manage profiles, roles, and leave credits",
+            },
             { to: "/org-chart", label: "Org Chart", desc: "Visualise the reporting hierarchy" },
-            { to: "/ot-approvals", label: "OT Approvals", desc: "Review pre-approved OT budget requests" },
+            {
+              to: "/ot-approvals",
+              label: "OT Approvals",
+              desc: "Review pre-approved OT budget requests",
+            },
             { to: "/leaves", label: "Leave Requests", desc: "Review and approve employee leave" },
             { to: "/kpi-builder", label: "KPI Builder", desc: "Build and manage KPI templates" },
-            { to: "/performance-admin", label: "Performance", desc: "Review team performance evaluations" },
+            {
+              to: "/performance-admin",
+              label: "Performance",
+              desc: "Review team performance evaluations",
+            },
           ].map(({ to, label, desc }) => (
-            <Link key={to} to={to as never}
-              className="rounded-lg border bg-card p-5 transition-colors hover:bg-secondary/40">
+            <Link
+              key={to}
+              to={to as never}
+              className="rounded-lg border bg-card p-5 transition-colors hover:bg-secondary/40"
+            >
               <p className="font-semibold">{label}</p>
               <p className="mt-1 text-sm text-muted-foreground">{desc}</p>
             </Link>
@@ -355,9 +473,21 @@ function Dashboard() {
           </DialogHeader>
           <div className="grid gap-3 py-4">
             {(["7-4", "8-5", "9-6"] as const).map((s) => (
-              <Button key={s} variant="outline" size="lg" className="h-14 text-base"
-                onClick={() => { setShowShiftPicker(false); clockIn.mutate(s); }}>
-                {s === "7-4" ? "7:00 AM – 4:00 PM" : s === "8-5" ? "8:00 AM – 5:00 PM" : "9:00 AM – 6:00 PM"}
+              <Button
+                key={s}
+                variant="outline"
+                size="lg"
+                className="h-14 text-base"
+                onClick={() => {
+                  setShowShiftPicker(false);
+                  clockIn.mutate(s);
+                }}
+              >
+                {s === "7-4"
+                  ? "7:00 AM – 4:00 PM"
+                  : s === "8-5"
+                    ? "8:00 AM – 5:00 PM"
+                    : "9:00 AM – 6:00 PM"}
               </Button>
             ))}
           </div>
@@ -367,23 +497,46 @@ function Dashboard() {
   );
 }
 
-function Stat({ icon, label, value, tone }: {
-  icon: React.ReactNode; label: string; value: React.ReactNode; tone?: "warn";
+function Stat({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  tone?: "warn";
 }) {
   return (
     <div className="rounded-md border bg-background/60 p-3">
       <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
-        {icon}{label}
+        {icon}
+        {label}
       </div>
-      <div className={`mt-1 font-display text-2xl capitalize ${tone === "warn" ? "text-warning-foreground" : ""}`}>
+      <div
+        className={`mt-1 font-display text-2xl capitalize ${tone === "warn" ? "text-warning-foreground" : ""}`}
+      >
         {value}
       </div>
     </div>
   );
 }
 
-function LeaveBalance({ label, code, used, total, remaining, year }: {
-  label: string; code: string; used: number; total: number; remaining: number; year: number;
+function LeaveBalance({
+  label,
+  code,
+  used,
+  total,
+  remaining,
+  year,
+}: {
+  label: string;
+  code: string;
+  used: number;
+  total: number;
+  remaining: number;
+  year: number;
 }) {
   const pct = Math.min(100, Math.round((used / total) * 100));
   const depleted = remaining <= 0;
