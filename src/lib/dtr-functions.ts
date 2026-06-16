@@ -33,6 +33,14 @@ function phDateOf(isoTimestamp: string): string {
   return new Date(new Date(isoTimestamp).getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+// Absence tracking went live on this date; days before it are never flagged
+// absent (no retroactive absences from before the system tracked attendance).
+const ABSENCE_TRACKING_START = "2026-06-16";
+
+// System/service accounts excluded from attendance & absence monitoring. Matched
+// by email (the row id differs across environments).
+const MONITORING_EXCLUDED_EMAIL = "localadmin@hris.local";
+
 type LeaveSpan = { start_date: string; end_date: string };
 
 // A synthesized "absent" record, shaped like a daily_time_reports row so report
@@ -73,7 +81,11 @@ function computeAbsentDays(
   holidays: Set<string>,
 ): Record<string, unknown>[] {
   const today = phTodayIso();
-  const from = startDate < notBefore ? notBefore : startDate;
+  // Floor the scan at the later of: range start, the employee's hire date, and
+  // the global absence-tracking start date.
+  let from = startDate;
+  if (from < notBefore) from = notBefore;
+  if (from < ABSENCE_TRACKING_START) from = ABSENCE_TRACKING_START;
   const out: Record<string, unknown>[] = [];
   const cur = new Date(from + "T00:00:00");
   for (;;) {
@@ -133,20 +145,18 @@ export const getRecentDTRsQuery = createServerFn({ method: "POST" })
          WHERE employee_id = $1 AND status IN ('approved', 'pending') AND end_date >= $2`,
         [empId, startDate],
       ),
-      pool.query<{ created_at: string }>(`SELECT created_at FROM profiles WHERE id = $1`, [empId]),
+      pool.query<{ created_at: string; email: string | null }>(
+        `SELECT created_at, email FROM profiles WHERE id = $1`,
+        [empId],
+      ),
       fetchActiveHolidayDates(pool, startDate, today),
     ]);
     const joinDate = prof[0] ? phDateOf(prof[0].created_at) : startDate;
+    const excluded = prof[0]?.email === MONITORING_EXCLUDED_EMAIL;
     const dtrDates = new Set(rows.map((r) => r.work_date as string));
-    const absents = computeAbsentDays(
-      empId,
-      startDate,
-      today,
-      dtrDates,
-      leaves,
-      joinDate,
-      holidays,
-    );
+    const absents = excluded
+      ? []
+      : computeAbsentDays(empId, startDate, today, dtrDates, leaves, joinDate, holidays);
     return [...rows, ...absents].sort((a, b) =>
       (b.work_date as string).localeCompare(a.work_date as string),
     );
@@ -177,20 +187,18 @@ export const getDTRsForMonth = createServerFn({ method: "POST" })
            AND start_date <= $3 AND end_date >= $2`,
         [empId, startDate, endDate],
       ),
-      pool.query<{ created_at: string }>(`SELECT created_at FROM profiles WHERE id = $1`, [empId]),
+      pool.query<{ created_at: string; email: string | null }>(
+        `SELECT created_at, email FROM profiles WHERE id = $1`,
+        [empId],
+      ),
       fetchActiveHolidayDates(pool, startDate, endDate),
     ]);
     const joinDate = prof[0] ? phDateOf(prof[0].created_at) : startDate;
+    const excluded = prof[0]?.email === MONITORING_EXCLUDED_EMAIL;
     const dtrDates = new Set(rows.map((r) => r.work_date as string));
-    const absents = computeAbsentDays(
-      empId,
-      startDate,
-      endDate,
-      dtrDates,
-      leaves,
-      joinDate,
-      holidays,
-    );
+    const absents = excluded
+      ? []
+      : computeAbsentDays(empId, startDate, endDate, dtrDates, leaves, joinDate, holidays);
     return [...rows, ...absents].sort((a, b) =>
       (a.work_date as string).localeCompare(b.work_date as string),
     );
@@ -279,10 +287,16 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
                   p.full_name, p.employee_code, p.department
            FROM daily_time_reports d
            LEFT JOIN profiles p ON p.id = d.employee_id
+           WHERE p.email IS DISTINCT FROM $1
            ORDER BY d.work_date DESC, d.time_in DESC
            LIMIT 1000`,
+          [MONITORING_EXCLUDED_EMAIL],
         ),
-        pool.query(`SELECT id, full_name, employee_code, department, created_at FROM profiles`),
+        pool.query(
+          `SELECT id, full_name, employee_code, department, created_at FROM profiles
+            WHERE email IS DISTINCT FROM $1`,
+          [MONITORING_EXCLUDED_EMAIL],
+        ),
         pool.query<{ employee_id: string; work_date: string }>(
           `SELECT employee_id, work_date FROM daily_time_reports
            WHERE work_date >= $1 AND work_date < $2`,
@@ -408,7 +422,9 @@ export const getTodayRoster = createServerFn({ method: "POST" })
     const [{ rows: profiles }, { rows: dtrs }, { rows: leaves }, holidays, { rows: hol }] =
       await Promise.all([
         pool.query(
-          `SELECT id, full_name, employee_code, department, created_at FROM profiles ORDER BY full_name`,
+          `SELECT id, full_name, employee_code, department, created_at FROM profiles
+            WHERE email IS DISTINCT FROM $1 ORDER BY full_name`,
+          [MONITORING_EXCLUDED_EMAIL],
         ),
         pool.query<{
           employee_id: string;
