@@ -1,12 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getActivityLogDTRs } from "@/lib/dtr-functions";
+import { getActivityLogDTRs, getTodayRoster } from "@/lib/dtr-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock3, FileDown, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
+import {
+  Clock3,
+  FileDown,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  CalendarClock,
+  UserX,
+} from "lucide-react";
 import { exportRowsToCSV } from "@/lib/csv-export";
 
 export const Route = createFileRoute("/_authenticated/_admin/activity-log")({
@@ -120,6 +128,11 @@ function ActivityLogPage() {
   const { data: logs, isLoading } = useQuery({
     queryKey: ["activity-log"],
     queryFn: () => getActivityLogDTRs() as Promise<LogEntry[]>,
+  });
+
+  const { data: roster } = useQuery({
+    queryKey: ["today-roster"],
+    queryFn: () => getTodayRoster(),
   });
 
   const filtered = (logs ?? []).filter((entry) => {
@@ -255,6 +268,76 @@ function ActivityLogPage() {
         <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">People</p>
         <h1 className="mt-1 font-display text-4xl">Clock-In Activity Log</h1>
       </div>
+
+      {/* Today's live roster — who is in, on leave, or not yet clocked in */}
+      {roster && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <CalendarClock className="h-4 w-4" /> Today — {formatDate(roster.date)}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {roster.holidayName ? (
+              <p className="rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm">
+                🎉 Holiday — <span className="font-medium">{roster.holidayName}</span>. No
+                attendance expected today.
+              </p>
+            ) : roster.isWeekend ? (
+              <p className="rounded-md border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">
+                Rest day (weekend). No attendance expected today.
+              </p>
+            ) : (
+              (() => {
+                const emps = roster.employees;
+                const present = emps.filter((e) => e.status === "present").length;
+                const onLeave = emps.filter((e) => e.status === "leave").length;
+                const pending = emps.filter((e) => e.status === "pending");
+                const stat = (label: string, value: number, tone?: "ok" | "warn") => (
+                  <div className="rounded-md border bg-background/60 p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+                    <p
+                      className={`mt-1 font-display text-2xl ${tone === "warn" ? "text-amber-600" : tone === "ok" ? "text-green-600" : ""}`}
+                    >
+                      {value}
+                    </p>
+                  </div>
+                );
+                return (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-3 gap-3">
+                      {stat("Clocked in", present, "ok")}
+                      {stat("On leave", onLeave)}
+                      {stat("Not yet in", pending.length, pending.length ? "warn" : undefined)}
+                    </div>
+                    {pending.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Everyone is accounted for. ✅</p>
+                    ) : (
+                      <div>
+                        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                          <UserX className="h-4 w-4 text-amber-600" />
+                          Not yet clocked in ({pending.length}) — counts as absent at end of day
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {pending.map((e) => (
+                            <span
+                              key={e.id}
+                              className="rounded-md border bg-amber-50 px-2 py-1 text-xs"
+                            >
+                              {e.full_name}
+                              {e.department ? ` · ${e.department}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

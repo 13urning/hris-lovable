@@ -4,8 +4,19 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
-  LogOut, Clock3, LayoutDashboard, Users,
-  Plane, BarChart3, Target, Menu, GitBranch, Timer, Activity, ShieldCheck,
+  LogOut,
+  Clock3,
+  LayoutDashboard,
+  Users,
+  Plane,
+  BarChart3,
+  Target,
+  Menu,
+  GitBranch,
+  Timer,
+  Activity,
+  ShieldCheck,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import tidalLogo from "@/assets/tidal-logo.png";
@@ -71,6 +82,7 @@ export function AppShell() {
 
       {sectionLabel("Attendance")}
       {drawerItem("/dtr", "Attendance", Clock3)}
+      {isHR && drawerItem("/holidays", "Holidays", CalendarDays)}
 
       {sectionLabel("People")}
       {isHR && drawerItem("/employees", "Employees", Users)}
@@ -137,7 +149,13 @@ export function AppShell() {
           {/* Right: email + sign out */}
           <div className="flex items-center gap-3">
             <span className="hidden text-xs text-muted-foreground sm:inline">{user?.email}</span>
-            <Button variant="ghost" size="sm" onClick={() => { signOut(); }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                signOut();
+              }}
+            >
               <LogOut className="mr-1.5 h-4 w-4" /> Sign out
             </Button>
           </div>

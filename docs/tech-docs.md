@@ -248,6 +248,7 @@ Custom type parsers in `db.server.ts` ensure:
 | `evaluation_kpi_scores` | Individual KPI scores within an evaluation |
 | `evaluation_behavioral_scores` | Behavioral ratings within an evaluation |
 | `office_networks` | Allowlisted office IP/CIDR ranges that gate clock-in |
+| `holidays` | PH holiday calendar; excluded from absence, shown on dashboard |
 
 ### Key Stored Functions & Triggers
 
@@ -334,10 +335,19 @@ There is no ORM — all queries are hand-written SQL.
   before PH-today) with no clock-in and no approved/pending leave is flagged
   `Absent`. It is synthesized at read time by `computeAbsentDays` in
   `dtr-functions.ts` — no `is_absent` rows are written — and floored at each
-  employee's `profiles.created_at` so pre-employment days aren't counted. Surfaced
-  in the employee dashboard, attendance history (`/dtr`), and the HR clock-in
-  activity log (trailing 30 days). Holidays are not modeled, so a company holiday
-  with no leave filed will currently show as absent.
+  employee's `profiles.created_at` so pre-employment days aren't counted. Active
+  `holidays` are also excluded. Surfaced in the employee dashboard, attendance
+  history (`/dtr`), and the HR clock-in activity log (trailing 30 days).
+- **Today roster (HR).** `getTodayRoster` powers a live card at the top of the
+  clock-in activity log: per-employee status for today — Clocked in / On leave /
+  Not yet in. "Not yet in" is an absence-in-progress (confirmed at end of day).
+  Weekends and holidays are framed as no-attendance-expected.
+- **Holidays calendar.** The `holidays` table (`holiday-functions.ts`, `/holidays`
+  admin page, HR-gated) drives holiday exclusion from absence and the dashboard's
+  "Upcoming Holidays This Month" card. `syncPhilippineHolidays` pulls PH national
+  holidays from the free **Nager.Date** API (`date.nager.at`, no key); admins can
+  also add proclaimed/movable ones (e.g. Eid) manually. Existing rows are never
+  clobbered on re-sync. 2026 is seeded by migration.
 - **Business date is local, not UTC.** Clock times (`time_in`/`time_out`) and the
   `work_date` are both derived from the browser's local time via `todayIso()`.
   This must not use `toISOString()` (UTC): a clock-in before UTC midnight (before
@@ -385,6 +395,7 @@ TanStack Router with file-based route generation. Routes under `_authenticated/`
 | `/performance` | Self-assessment for active evaluation periods |
 | `/employees` | (Admin) Employee directory with inline editing |
 | `/org-chart` | (Admin) Interactive org chart (React Flow) |
+| `/holidays` | (HR) PH holiday calendar — sync from API, add/remove |
 | `/kpi-builder` | (Admin) KPI template CRUD |
 | `/performance-admin` | (Admin) Evaluation period management and scoring |
 | `/activity-log` | (Admin) System audit log |
