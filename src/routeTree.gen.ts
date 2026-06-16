@@ -22,6 +22,7 @@ import { Route as AuthenticatedAdminPerformanceAdminRouteImport } from './routes
 import { Route as AuthenticatedAdminOrgChartRouteImport } from './routes/_authenticated/_admin/org-chart'
 import { Route as AuthenticatedAdminOfficeNetworksRouteImport } from './routes/_authenticated/_admin/office-networks'
 import { Route as AuthenticatedAdminKpiBuilderRouteImport } from './routes/_authenticated/_admin/kpi-builder'
+import { Route as AuthenticatedAdminHolidaysRouteImport } from './routes/_authenticated/_admin/holidays'
 import { Route as AuthenticatedAdminEmployeesRouteImport } from './routes/_authenticated/_admin/employees'
 import { Route as AuthenticatedAdminActivityLogRouteImport } from './routes/_authenticated/_admin/activity-log'
 
@@ -94,6 +95,12 @@ const AuthenticatedAdminKpiBuilderRoute =
     path: '/kpi-builder',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
+const AuthenticatedAdminHolidaysRoute =
+  AuthenticatedAdminHolidaysRouteImport.update({
+    id: '/holidays',
+    path: '/holidays',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 const AuthenticatedAdminEmployeesRoute =
   AuthenticatedAdminEmployeesRouteImport.update({
     id: '/employees',
@@ -117,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/performance': typeof AuthenticatedPerformanceRoute
   '/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
+  '/holidays': typeof AuthenticatedAdminHolidaysRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
   '/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
@@ -132,6 +140,7 @@ export interface FileRoutesByTo {
   '/performance': typeof AuthenticatedPerformanceRoute
   '/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
+  '/holidays': typeof AuthenticatedAdminHolidaysRoute
   '/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
   '/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
@@ -150,6 +159,7 @@ export interface FileRoutesById {
   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
   '/_authenticated/_admin/activity-log': typeof AuthenticatedAdminActivityLogRoute
   '/_authenticated/_admin/employees': typeof AuthenticatedAdminEmployeesRoute
+  '/_authenticated/_admin/holidays': typeof AuthenticatedAdminHolidaysRoute
   '/_authenticated/_admin/kpi-builder': typeof AuthenticatedAdminKpiBuilderRoute
   '/_authenticated/_admin/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/_authenticated/_admin/org-chart': typeof AuthenticatedAdminOrgChartRoute
@@ -167,6 +177,7 @@ export interface FileRouteTypes {
     | '/performance'
     | '/activity-log'
     | '/employees'
+    | '/holidays'
     | '/kpi-builder'
     | '/office-networks'
     | '/org-chart'
@@ -182,6 +193,7 @@ export interface FileRouteTypes {
     | '/performance'
     | '/activity-log'
     | '/employees'
+    | '/holidays'
     | '/kpi-builder'
     | '/office-networks'
     | '/org-chart'
@@ -199,6 +211,7 @@ export interface FileRouteTypes {
     | '/_authenticated/performance'
     | '/_authenticated/_admin/activity-log'
     | '/_authenticated/_admin/employees'
+    | '/_authenticated/_admin/holidays'
     | '/_authenticated/_admin/kpi-builder'
     | '/_authenticated/_admin/office-networks'
     | '/_authenticated/_admin/org-chart'
@@ -304,6 +317,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminKpiBuilderRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
+    '/_authenticated/_admin/holidays': {
+      id: '/_authenticated/_admin/holidays'
+      path: '/holidays'
+      fullPath: '/holidays'
+      preLoaderRoute: typeof AuthenticatedAdminHolidaysRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
     '/_authenticated/_admin/employees': {
       id: '/_authenticated/_admin/employees'
       path: '/employees'
@@ -324,6 +344,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedAdminRouteChildren {
   AuthenticatedAdminActivityLogRoute: typeof AuthenticatedAdminActivityLogRoute
   AuthenticatedAdminEmployeesRoute: typeof AuthenticatedAdminEmployeesRoute
+  AuthenticatedAdminHolidaysRoute: typeof AuthenticatedAdminHolidaysRoute
   AuthenticatedAdminKpiBuilderRoute: typeof AuthenticatedAdminKpiBuilderRoute
   AuthenticatedAdminOfficeNetworksRoute: typeof AuthenticatedAdminOfficeNetworksRoute
   AuthenticatedAdminOrgChartRoute: typeof AuthenticatedAdminOrgChartRoute
@@ -333,6 +354,7 @@ interface AuthenticatedAdminRouteChildren {
 const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
   AuthenticatedAdminActivityLogRoute: AuthenticatedAdminActivityLogRoute,
   AuthenticatedAdminEmployeesRoute: AuthenticatedAdminEmployeesRoute,
+  AuthenticatedAdminHolidaysRoute: AuthenticatedAdminHolidaysRoute,
   AuthenticatedAdminKpiBuilderRoute: AuthenticatedAdminKpiBuilderRoute,
   AuthenticatedAdminOfficeNetworksRoute: AuthenticatedAdminOfficeNetworksRoute,
   AuthenticatedAdminOrgChartRoute: AuthenticatedAdminOrgChartRoute,

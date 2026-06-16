@@ -6,12 +6,13 @@ import { getRecentDTRs } from "@/lib/queries";
 import { getTodayDTR, clockInDTR, clockOutDTR } from "@/lib/dtr-functions";
 import { getOTBudgetsForDashboard, getFiledOTForDashboard } from "@/lib/ot-functions";
 import { fetchMyProfile, fetchMyLeaves } from "@/lib/leave-functions";
+import { getUpcomingHolidaysThisMonth } from "@/lib/holiday-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatDate, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
-import { Clock3, AlertCircle, CalendarCheck, Plane } from "lucide-react";
+import { Clock3, AlertCircle, CalendarCheck, Plane, PartyPopper } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({ component: Dashboard });
@@ -68,6 +69,13 @@ function Dashboard() {
     queryKey: ["recent-dtrs", user?.id],
     queryFn: () => getRecentDTRs(),
     enabled: !!user, // every user (incl. HR/admin) sees their own recent attendance
+  });
+
+  // Upcoming PH holidays for the rest of this month — shown to everyone.
+  const { data: upcomingHolidays } = useQuery({
+    queryKey: ["upcoming-holidays", user?.id],
+    queryFn: () => getUpcomingHolidaysThisMonth(),
+    enabled: !!user,
   });
 
   const [showShiftPicker, setShowShiftPicker] = useState(false);
@@ -237,6 +245,38 @@ function Dashboard() {
           )}
         </CardContent>
       </Card>
+
+      {/* Upcoming holidays this month — visible to everyone */}
+      {upcomingHolidays && upcomingHolidays.length > 0 && (
+        <Card className="border-accent/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="font-display text-lg flex items-center gap-2">
+              <PartyPopper className="h-4 w-4 text-accent" /> Upcoming Holidays This Month
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y">
+              {upcomingHolidays.map((h) => (
+                <li key={h.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="font-medium">{h.name}</p>
+                    {h.local_name && h.local_name !== h.name && (
+                      <p className="text-xs text-muted-foreground">{h.local_name}</p>
+                    )}
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    {new Date(h.holiday_date + "T00:00:00").toLocaleDateString("en-PH", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Employee-only sections (OT + leave summary) ──────────────────── */}
       {!isHR && (

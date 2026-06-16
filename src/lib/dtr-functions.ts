@@ -70,6 +70,7 @@ function computeAbsentDays(
   dtrDates: Set<string>,
   leaves: LeaveSpan[],
   notBefore: string,
+  holidays: Set<string>,
 ): Record<string, unknown>[] {
   const today = phTodayIso();
   const from = startDate < notBefore ? notBefore : startDate;
@@ -79,7 +80,7 @@ function computeAbsentDays(
     const iso = isoDateFrom(cur);
     if (iso > endDate || iso >= today) break; // past the range or not yet over
     const dow = cur.getDay(); // 0 Sun … 6 Sat
-    if (dow !== 0 && dow !== 6) {
+    if (dow !== 0 && dow !== 6 && !holidays.has(iso)) {
       const onLeave = leaves.some((l) => l.start_date <= iso && iso <= l.end_date);
       if (!dtrDates.has(iso) && !onLeave) out.push(makeAbsentRow(employeeId, iso));
     }
@@ -119,7 +120,8 @@ export const getRecentDTRsQuery = createServerFn({ method: "POST" })
     const empId = context.user.dbUserId;
     const today = phTodayIso();
     const startDate = today.slice(0, 7) + "-01"; // first of current PH month
-    const [{ rows }, { rows: leaves }, { rows: prof }] = await Promise.all([
+    const { fetchActiveHolidayDates } = await import("@/lib/holiday-functions");
+    const [{ rows }, { rows: leaves }, { rows: prof }, holidays] = await Promise.all([
       pool.query(
         `SELECT * FROM daily_time_reports
          WHERE employee_id = $1 AND work_date >= $2
@@ -132,10 +134,19 @@ export const getRecentDTRsQuery = createServerFn({ method: "POST" })
         [empId, startDate],
       ),
       pool.query<{ created_at: string }>(`SELECT created_at FROM profiles WHERE id = $1`, [empId]),
+      fetchActiveHolidayDates(pool, startDate, today),
     ]);
     const joinDate = prof[0] ? phDateOf(prof[0].created_at) : startDate;
     const dtrDates = new Set(rows.map((r) => r.work_date as string));
-    const absents = computeAbsentDays(empId, startDate, today, dtrDates, leaves, joinDate);
+    const absents = computeAbsentDays(
+      empId,
+      startDate,
+      today,
+      dtrDates,
+      leaves,
+      joinDate,
+      holidays,
+    );
     return [...rows, ...absents].sort((a, b) =>
       (b.work_date as string).localeCompare(a.work_date as string),
     );
@@ -152,7 +163,8 @@ export const getDTRsForMonth = createServerFn({ method: "POST" })
     const startDate = `${data.yearMonth}-01`;
     const lastDay = new Date(y, m, 0).getDate();
     const endDate = `${data.yearMonth}-${String(lastDay).padStart(2, "0")}`;
-    const [{ rows }, { rows: leaves }, { rows: prof }] = await Promise.all([
+    const { fetchActiveHolidayDates } = await import("@/lib/holiday-functions");
+    const [{ rows }, { rows: leaves }, { rows: prof }, holidays] = await Promise.all([
       pool.query(
         `SELECT * FROM daily_time_reports
          WHERE employee_id = $1 AND work_date >= $2 AND work_date <= $3
@@ -166,10 +178,19 @@ export const getDTRsForMonth = createServerFn({ method: "POST" })
         [empId, startDate, endDate],
       ),
       pool.query<{ created_at: string }>(`SELECT created_at FROM profiles WHERE id = $1`, [empId]),
+      fetchActiveHolidayDates(pool, startDate, endDate),
     ]);
     const joinDate = prof[0] ? phDateOf(prof[0].created_at) : startDate;
     const dtrDates = new Set(rows.map((r) => r.work_date as string));
-    const absents = computeAbsentDays(empId, startDate, endDate, dtrDates, leaves, joinDate);
+    const absents = computeAbsentDays(
+      empId,
+      startDate,
+      endDate,
+      dtrDates,
+      leaves,
+      joinDate,
+      holidays,
+    );
     return [...rows, ...absents].sort((a, b) =>
       (a.work_date as string).localeCompare(b.work_date as string),
     );
@@ -247,9 +268,10 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
     // Absence is computed live for the trailing 30 days (a bounded window keeps
     // the cross-employee expansion cheap). Fetch real DTRs, the employee roster,
     // and any leave overlapping the window in parallel.
+    const { fetchActiveHolidayDates } = await import("@/lib/holiday-functions");
     const today = phTodayIso();
     const windowStart = isoDaysBefore(today, 30);
-    const [{ rows }, { rows: profiles }, { rows: winDtrs }, { rows: winLeaves }] =
+    const [{ rows }, { rows: profiles }, { rows: winDtrs }, { rows: winLeaves }, holidays] =
       await Promise.all([
         pool.query(
           `SELECT d.id, d.employee_id, d.work_date, d.time_in, d.time_out,
@@ -271,6 +293,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
            WHERE status IN ('approved', 'pending') AND end_date >= $1 AND start_date < $2`,
           [windowStart, today],
         ),
+        fetchActiveHolidayDates(pool, windowStart, today),
       ]);
 
     type Entry = {
@@ -339,6 +362,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
         dtrByEmp.get(empId) ?? new Set(),
         leavesByEmp.get(empId) ?? [],
         joinDate,
+        holidays,
       );
       for (const a of absents) {
         entries.push({
@@ -364,4 +388,79 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
     }
 
     return entries;
+  });
+
+// Real-time roster for TODAY: every employee's current status. "pending" =
+// not yet clocked in and not on leave — i.e. an absence-in-progress that will be
+// confirmed at end of day. On a weekend or holiday nobody is expected, so the UI
+// frames those days differently (no pending = absent).
+export const getTodayRoster = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertHR(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const { fetchActiveHolidayDates } = await import("@/lib/holiday-functions");
+
+    const today = phTodayIso();
+    const dow = new Date(today + "T00:00:00").getDay();
+    const isWeekend = dow === 0 || dow === 6;
+
+    const [{ rows: profiles }, { rows: dtrs }, { rows: leaves }, holidays, { rows: hol }] =
+      await Promise.all([
+        pool.query(
+          `SELECT id, full_name, employee_code, department, created_at FROM profiles ORDER BY full_name`,
+        ),
+        pool.query<{
+          employee_id: string;
+          time_in: string | null;
+          time_out: string | null;
+          late_minutes: number | null;
+          shift_label: string | null;
+        }>(
+          `SELECT employee_id, time_in, time_out, late_minutes, shift_label
+           FROM daily_time_reports WHERE work_date = $1`,
+          [today],
+        ),
+        pool.query<{ employee_id: string; leave_type: string }>(
+          `SELECT employee_id, leave_type FROM leave_requests
+           WHERE status IN ('approved', 'pending') AND start_date <= $1 AND end_date >= $1`,
+          [today],
+        ),
+        fetchActiveHolidayDates(pool, today, today),
+        pool.query<{ name: string }>(
+          `SELECT name FROM holidays WHERE is_active = true AND holiday_date = $1 LIMIT 1`,
+          [today],
+        ),
+      ]);
+
+    const dtrByEmp = new Map(dtrs.map((d) => [d.employee_id, d]));
+    const leaveByEmp = new Map(leaves.map((l) => [l.employee_id, l.leave_type]));
+    const holidayName = holidays.has(today) ? (hol[0]?.name ?? "Holiday") : null;
+
+    const employees = profiles
+      .filter((p) => phDateOf(p.created_at as string) <= today)
+      .map((p) => {
+        const empId = p.id as string;
+        const dtr = dtrByEmp.get(empId);
+        const leaveType = leaveByEmp.get(empId);
+        const status: "present" | "leave" | "pending" = dtr?.time_in
+          ? "present"
+          : leaveType
+            ? "leave"
+            : "pending";
+        return {
+          id: empId,
+          full_name: p.full_name as string,
+          employee_code: p.employee_code as string | null,
+          department: p.department as string | null,
+          status,
+          time_in: dtr?.time_in ?? null,
+          time_out: dtr?.time_out ?? null,
+          late_minutes: dtr?.late_minutes ?? null,
+          shift_label: dtr?.shift_label ?? null,
+          leave_type: leaveType ?? null,
+        };
+      });
+
+    return { date: today, isWeekend, holidayName, employees };
   });
