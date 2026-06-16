@@ -88,17 +88,8 @@ function Dashboard() {
   const clockOut = useMutation({
     mutationFn: async () => {
       const timeOut = new Date().toTimeString().slice(0, 5);
-      const [ih, im] = todayEntry!.time_in!.split(":").map(Number);
-      const [oh, om] = timeOut.split(":").map(Number);
-      const totalMins = oh * 60 + om - (ih * 60 + im);
-      const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
-      const STANDARD = 9;
-      const isUndertime = hoursWorked < STANDARD;
-      const undertimeMins = isUndertime ? Math.round(STANDARD * 60 - totalMins) : 0;
-      await clockOutDTR({
-        data: { dtrId: todayEntry!.id, timeOut, hoursWorked, isUndertime, undertimeMins },
-      });
-      return { hoursWorked, isUndertime, undertimeMins };
+      // Hours/undertime are computed and returned by the server (authoritative).
+      return await clockOutDTR({ data: { dtrId: todayEntry!.id, timeOut } });
     },
     onSuccess: (result) => {
       toast.success("Clocked out!");
