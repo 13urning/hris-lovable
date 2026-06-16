@@ -135,6 +135,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    const { clearSession } = await import("@/lib/session");
+    clearSession();
     await fbSignOut(auth);
   };
 

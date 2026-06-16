@@ -5,6 +5,7 @@ import { updatePassword } from "firebase/auth";
 import { useAuth } from "@/hooks/use-auth";
 import { getProfileFlags, clearPasswordChangeFlag } from "@/lib/user-functions";
 import { AppShell } from "@/components/AppShell";
+import { SessionGuard } from "@/components/SessionGuard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,9 +69,7 @@ function ForcePasswordChange({ onDone }: { onDone: () => void }) {
               required
               minLength={8}
             />
-            {tooShort && (
-              <p className="text-xs text-destructive">Must be at least 8 characters</p>
-            )}
+            {tooShort && <p className="text-xs text-destructive">Must be at least 8 characters</p>}
           </div>
 
           <div className="space-y-1.5">
@@ -83,9 +82,7 @@ function ForcePasswordChange({ onDone }: { onDone: () => void }) {
               onChange={(e) => setConfirm(e.target.value)}
               required
             />
-            {mismatch && (
-              <p className="text-xs text-destructive">Passwords do not match</p>
-            )}
+            {mismatch && <p className="text-xs text-destructive">Passwords do not match</p>}
           </div>
 
           <Button type="submit" className="w-full" disabled={!canSubmit}>
@@ -131,11 +128,19 @@ function Gate() {
 
   if (profileFlags?.must_change_password) {
     return (
-      <ForcePasswordChange
-        onDone={() => qc.invalidateQueries({ queryKey: ["profile-flags", user!.uid] })}
-      />
+      <>
+        <SessionGuard />
+        <ForcePasswordChange
+          onDone={() => qc.invalidateQueries({ queryKey: ["profile-flags", user!.uid] })}
+        />
+      </>
     );
   }
 
-  return <AppShell />;
+  return (
+    <>
+      <SessionGuard />
+      <AppShell />
+    </>
+  );
 }
