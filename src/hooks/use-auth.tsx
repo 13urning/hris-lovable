@@ -8,6 +8,7 @@ import {
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { fetchUserData, provisionUser } from "@/lib/user-functions";
+import { clearSession } from "@/lib/session";
 
 type AppRole = "employee" | "hr" | "admin" | "group_head";
 
@@ -51,6 +52,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
+        // Signed out by ANY path (explicit, token revoked, password change,
+        // account disabled). Clear the session clock so a later login starts
+        // fresh and never inherits stale expiry timestamps.
+        clearSession();
         setUser(null);
         setRoles([]);
         setLoading(false);
@@ -135,7 +140,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    const { clearSession } = await import("@/lib/session");
     clearSession();
     await fbSignOut(auth);
   };

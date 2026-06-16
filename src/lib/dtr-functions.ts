@@ -87,35 +87,42 @@ export const clockInDTR = createServerFn({ method: "POST" })
     );
   });
 
+// Hours worked / undertime are computed SERVER-SIDE from the stored time_in and
+// the submitted time_out — never trusted from the client — so an employee can't
+// inflate their hours (which feed the payroll cutoff aggregation).
 export const clockOutDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator(
-    (data: {
-      dtrId: string;
-      timeOut: string;
-      hoursWorked: number;
-      isUndertime: boolean;
-      undertimeMins: number;
-    }) => data,
-  )
+  .inputValidator((data: { dtrId: string; timeOut: string }) => data)
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
-    // Ownership guard: the dtrId must belong to the caller.
-    const { rowCount } = await pool.query(
+
+    // Load the caller's own record to get the authoritative time_in.
+    const {
+      rows: [row],
+    } = await pool.query<{ time_in: string | null }>(
+      `SELECT time_in FROM daily_time_reports WHERE id = $1 AND employee_id = $2`,
+      [data.dtrId, context.user.dbUserId],
+    );
+    if (!row) throw new Error("NOT_FOUND");
+    if (!row.time_in) throw new Error("NOT_CLOCKED_IN");
+
+    const [ih, im] = row.time_in.split(":").map(Number);
+    const [oh, om] = data.timeOut.split(":").map(Number);
+    const totalMins = oh * 60 + om - (ih * 60 + im);
+    const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
+    const STANDARD = 9;
+    const isUndertime = hoursWorked < STANDARD;
+    const undertimeMins = isUndertime ? Math.max(0, Math.round(STANDARD * 60 - totalMins)) : 0;
+
+    await pool.query(
       `UPDATE daily_time_reports
          SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4
        WHERE id = $5 AND employee_id = $6`,
-      [
-        data.timeOut,
-        data.hoursWorked,
-        data.isUndertime,
-        data.undertimeMins,
-        data.dtrId,
-        context.user.dbUserId,
-      ],
+      [data.timeOut, hoursWorked, isUndertime, undertimeMins, data.dtrId, context.user.dbUserId],
     );
-    if (!rowCount) throw new Error("NOT_FOUND");
+
+    return { hoursWorked, isUndertime, undertimeMins };
   });
 
 export const getActivityLogDTRs = createServerFn({ method: "POST" })
