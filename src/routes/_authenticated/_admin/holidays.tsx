@@ -15,6 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { TablePagination } from "@/components/TablePagination";
+import { usePagination } from "@/hooks/use-pagination";
 import { CalendarDays, Trash2, RefreshCw, Plus } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/_admin/holidays")({
@@ -40,6 +42,8 @@ function HolidaysPage() {
     queryKey: ["holidays"],
     queryFn: () => listHolidays() as Promise<Holiday[]>,
   });
+
+  const pg = usePagination(holidays ?? [], 25);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["holidays"] });
@@ -180,7 +184,7 @@ function HolidaysPage() {
               </tr>
             </thead>
             <tbody>
-              {(holidays ?? []).map((h) => (
+              {pg.pageItems.map((h) => (
                 <tr key={h.id} className={`border-t ${h.is_active ? "" : "opacity-50"}`}>
                   <td className="whitespace-nowrap px-4 py-2">{formatDate(h.holiday_date)}</td>
                   <td className="px-4 py-2 font-medium">{h.name}</td>
@@ -213,6 +217,16 @@ function HolidaysPage() {
               No holidays yet. Use “Sync” to pull this year's PH holidays.
             </div>
           )}
+          <TablePagination
+            page={pg.page}
+            pageCount={pg.pageCount}
+            pageSize={pg.pageSize}
+            total={pg.total}
+            start={pg.start}
+            pageItemsCount={pg.pageItems.length}
+            onPageChange={pg.setPage}
+            onPageSizeChange={pg.setPageSize}
+          />
         </CardContent>
       </Card>
     </div>

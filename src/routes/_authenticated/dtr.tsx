@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/dtr";
 import { exportRowsToCSV } from "@/lib/csv-export";
+import { TablePagination } from "@/components/TablePagination";
+import { usePagination } from "@/hooks/use-pagination";
 import { Clock3, AlertTriangle, FileDown } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dtr")({ component: AttendancePage });
@@ -69,6 +71,8 @@ function AttendancePage() {
     (d) => (d as { is_undertime?: boolean }).is_undertime,
   ).length;
   const totalOt = sortedDtrs.reduce((s, d) => s + Number(d.overtime_hours ?? 0), 0);
+
+  const pg = usePagination(sortedDtrs, 25);
 
   const displayMonth = new Date(selectedMonth + "-01T00:00:00").toLocaleString("default", {
     month: "long",
@@ -180,7 +184,7 @@ function AttendancePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedDtrs.map((d) => {
+                  {pg.pageItems.map((d) => {
                     const row = d as typeof d & {
                       shift_label?: string | null;
                       is_undertime?: boolean;
@@ -271,6 +275,16 @@ function AttendancePage() {
               </table>
             </div>
           )}
+          <TablePagination
+            page={pg.page}
+            pageCount={pg.pageCount}
+            pageSize={pg.pageSize}
+            total={pg.total}
+            start={pg.start}
+            pageItemsCount={pg.pageItems.length}
+            onPageChange={pg.setPage}
+            onPageSizeChange={pg.setPageSize}
+          />
         </CardContent>
       </Card>
     </div>

@@ -14,6 +14,8 @@ import {
   cancelOTRequest,
 } from "@/lib/ot-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TablePagination } from "@/components/TablePagination";
+import { usePagination } from "@/hooks/use-pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -212,6 +214,10 @@ function OTApprovalsPage() {
   });
 
   const hasPendingQueue = (pendingForMe?.length ?? 0) > 0;
+
+  const budgetsPg = usePagination(myBudgets ?? [], 25);
+  const actualsPg = usePagination(myActuals ?? [], 25);
+  const pendingPg = usePagination(pendingForMe ?? [], 25);
 
   const handleExportPending = () => {
     exportRowsToCSV(
@@ -514,7 +520,7 @@ function OTApprovalsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {myBudgets.map((r) => {
+                  {budgetsPg.pageItems.map((r) => {
                     const used = r.status === "approved" ? (approvedHoursById[r.id] ?? 0) : null;
                     const pending = r.status === "approved" ? (pendingHoursById[r.id] ?? 0) : null;
                     const remaining = used !== null ? Math.max(0, r.requested_hours - used) : null;
@@ -576,6 +582,16 @@ function OTApprovalsPage() {
                 No OT budget requests yet. Click "Request OT Budget" to get started.
               </div>
             )}
+            <TablePagination
+              page={budgetsPg.page}
+              pageCount={budgetsPg.pageCount}
+              pageSize={budgetsPg.pageSize}
+              total={budgetsPg.total}
+              start={budgetsPg.start}
+              pageItemsCount={budgetsPg.pageItems.length}
+              onPageChange={budgetsPg.setPage}
+              onPageSizeChange={budgetsPg.setPageSize}
+            />
           </CardContent>
         </Card>
       )}
@@ -618,7 +634,7 @@ function OTApprovalsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {myActuals.map((r) => {
+                  {actualsPg.pageItems.map((r) => {
                     const budget = myBudgets?.find((b) => b.id === r.pre_approved_id);
                     return (
                       <tr key={r.id} className="border-t">
@@ -658,6 +674,16 @@ function OTApprovalsPage() {
                   : 'Click "File OT Hours" to log hours against an approved budget.'}
               </div>
             )}
+            <TablePagination
+              page={actualsPg.page}
+              pageCount={actualsPg.pageCount}
+              pageSize={actualsPg.pageSize}
+              total={actualsPg.total}
+              start={actualsPg.start}
+              pageItemsCount={actualsPg.pageItems.length}
+              onPageChange={actualsPg.setPage}
+              onPageSizeChange={actualsPg.setPageSize}
+            />
           </CardContent>
         </Card>
       )}
@@ -698,7 +724,7 @@ function OTApprovalsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pendingForMe?.map((r) => {
+                  {pendingPg.pageItems.map((r) => {
                     const approveKey = `${r.id}-approve`;
                     const rejectKey = `${r.id}-reject`;
                     const expandingApprove = decidingId === approveKey;
@@ -820,6 +846,16 @@ function OTApprovalsPage() {
                 </tbody>
               </table>
             )}
+            <TablePagination
+              page={pendingPg.page}
+              pageCount={pendingPg.pageCount}
+              pageSize={pendingPg.pageSize}
+              total={pendingPg.total}
+              start={pendingPg.start}
+              pageItemsCount={pendingPg.pageItems.length}
+              onPageChange={pendingPg.setPage}
+              onPageSizeChange={pendingPg.setPageSize}
+            />
           </CardContent>
         </Card>
       )}
