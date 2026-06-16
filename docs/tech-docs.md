@@ -325,6 +325,19 @@ There is no ORM — all queries are hand-written SQL.
   clock-in; `late_minutes > 0` means late. Late and undertime are tagged
   independently in the dashboard, attendance history, and clock-in activity log
   (a record can be both).
+- **Shift options.** Clock-in offers `6-3`, `7-4`, `8-5`, `9-6`, and `OB`
+  (Official Business Trip), defined once in `SHIFT_OPTIONS` (`lib/dtr.ts`) and
+  enforced by the `daily_time_reports.shift_label` CHECK constraint. **`OB`** is
+  for off-site work: `clockInDTR` skips the office-network geofence and never
+  late-flags it, but clock in/out and hours are otherwise tracked normally.
+- **Absence (computed live, never stored).** A past weekday (Mon–Fri, strictly
+  before PH-today) with no clock-in and no approved/pending leave is flagged
+  `Absent`. It is synthesized at read time by `computeAbsentDays` in
+  `dtr-functions.ts` — no `is_absent` rows are written — and floored at each
+  employee's `profiles.created_at` so pre-employment days aren't counted. Surfaced
+  in the employee dashboard, attendance history (`/dtr`), and the HR clock-in
+  activity log (trailing 30 days). Holidays are not modeled, so a company holiday
+  with no leave filed will currently show as absent.
 - **Business date is local, not UTC.** Clock times (`time_in`/`time_out`) and the
   `work_date` are both derived from the browser's local time via `todayIso()`.
   This must not use `toISOString()` (UTC): a clock-in before UTC midnight (before

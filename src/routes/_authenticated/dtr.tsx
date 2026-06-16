@@ -60,7 +60,10 @@ function AttendancePage() {
   });
 
   const sortedDtrs = dtrs ?? [];
-  const totalDays = sortedDtrs.length;
+  // The list now includes live-computed "absent" rows (no clock-in, no leave on a
+  // past workday), so count present days by actual clock-ins, not row count.
+  const presentDays = sortedDtrs.filter((d) => d.time_in).length;
+  const absentDays = sortedDtrs.filter((d) => d.is_absent).length;
   const totalHours = sortedDtrs.reduce((s, d) => s + Number(d.hours_worked ?? 0), 0);
   const undertimeDays = sortedDtrs.filter(
     (d) => (d as { is_undertime?: boolean }).is_undertime,
@@ -131,9 +134,10 @@ function AttendancePage() {
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Days logged" value={totalDays} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Stat label="Days logged" value={presentDays} />
         <Stat label="Hours worked" value={totalHours.toFixed(1)} tone="accent" />
+        <Stat label="Absent days" value={absentDays} tone={absentDays > 0 ? "warn" : undefined} />
         <Stat
           label="Undertime days"
           value={undertimeDays}
