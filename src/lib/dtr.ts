@@ -1,7 +1,12 @@
 export const APPROVAL_STATUSES = [
-  "draft", "submitted", "pending_approval", "approved", "rejected", "needs_correction",
+  "draft",
+  "submitted",
+  "pending_approval",
+  "approved",
+  "rejected",
+  "needs_correction",
 ] as const;
-export type ApprovalStatus = typeof APPROVAL_STATUSES[number];
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
 
 export const STATUS_LABEL: Record<ApprovalStatus, string> = {
   draft: "Draft",
@@ -21,17 +26,42 @@ export const STATUS_TONE: Record<ApprovalStatus, string> = {
   needs_correction: "bg-warning/20 text-warning-foreground",
 };
 
+// Shift schedule options offered at clock-in. "OB" = Official Business Trip
+// (off-site work): the clock-in geofence is skipped and the day is not late-flagged.
+export const SHIFT_OPTIONS = [
+  { value: "6-3", label: "6:00 AM – 3:00 PM" },
+  { value: "7-4", label: "7:00 AM – 4:00 PM" },
+  { value: "8-5", label: "8:00 AM – 5:00 PM" },
+  { value: "9-6", label: "9:00 AM – 6:00 PM" },
+  { value: "OB", label: "Official Business Trip" },
+] as const;
+
+export type ShiftValue = (typeof SHIFT_OPTIONS)[number]["value"];
+
+// Friendly label for a stored shift code (e.g. "8-5" → "8:00 AM – 5:00 PM",
+// "OB" → "Official Business Trip"). Falls back to the raw code if unknown.
+export function shiftDisplay(label: string | null | undefined): string {
+  if (!label) return "—";
+  return SHIFT_OPTIONS.find((s) => s.value === label)?.label ?? label;
+}
+
 export function formatDate(iso: string | null | undefined) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString(undefined, {
-    month: "short", day: "numeric", year: "numeric",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   });
 }
 
 export function formatDateTime(iso: string | null | undefined) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(undefined, {
-    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
 }
 
@@ -59,7 +89,10 @@ export function downloadCsv(filename: string, csv: string) {
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); a.remove();
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
   URL.revokeObjectURL(url);
 }

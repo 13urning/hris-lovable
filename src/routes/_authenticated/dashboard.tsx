@@ -9,7 +9,7 @@ import { fetchMyProfile, fetchMyLeaves } from "@/lib/leave-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { formatDate, todayIso } from "@/lib/dtr";
+import { formatDate, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane } from "lucide-react";
 import { toast } from "sonner";
@@ -73,7 +73,7 @@ function Dashboard() {
   const [showShiftPicker, setShowShiftPicker] = useState(false);
 
   const clockIn = useMutation({
-    mutationFn: async (shiftLabel: "7-4" | "8-5" | "9-6") => {
+    mutationFn: async (shiftLabel: ShiftValue) => {
       const timeIn = new Date().toTimeString().slice(0, 5);
       await clockInDTR({ data: { workDate: today, timeIn, shiftLabel } });
     },
@@ -184,7 +184,9 @@ function Dashboard() {
               <p className="text-sm text-muted-foreground">
                 In at <span className="font-semibold text-foreground">{todayEntry!.time_in}</span>
                 {" · "}
-                {todayEntry!.shift_label} shift
+                {todayEntry!.shift_label === "OB"
+                  ? "Official Business"
+                  : `${todayEntry!.shift_label} shift`}
               </p>
               {(todayEntry!.late_minutes ?? 0) > 0 && (
                 <div className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700">
@@ -213,7 +215,9 @@ function Dashboard() {
                   {Number(todayEntry!.hours_worked).toFixed(2)} hrs
                 </span>
                 {" · "}
-                {todayEntry!.shift_label} shift
+                {todayEntry!.shift_label === "OB"
+                  ? "Official Business"
+                  : `${todayEntry!.shift_label} shift`}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 {(todayEntry!.late_minutes ?? 0) > 0 && (
@@ -495,22 +499,18 @@ function Dashboard() {
             <DialogTitle>Select your shift for today</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3 py-4">
-            {(["7-4", "8-5", "9-6"] as const).map((s) => (
+            {SHIFT_OPTIONS.map((s) => (
               <Button
-                key={s}
+                key={s.value}
                 variant="outline"
                 size="lg"
                 className="h-14 text-base"
                 onClick={() => {
                   setShowShiftPicker(false);
-                  clockIn.mutate(s);
+                  clockIn.mutate(s.value);
                 }}
               >
-                {s === "7-4"
-                  ? "7:00 AM – 4:00 PM"
-                  : s === "8-5"
-                    ? "8:00 AM – 5:00 PM"
-                    : "9:00 AM – 6:00 PM"}
+                {s.label}
               </Button>
             ))}
           </div>

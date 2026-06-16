@@ -19,6 +19,7 @@ type SortState = { key: SortKey; dir: "asc" | "desc" };
 // Flag severity for sorting by Status: Late+Undertime (3) > Late (2) >
 // Undertime (1) > on-time / in-progress / no-record (0).
 function flagScore(e: LogEntry): number {
+  if (e.is_absent) return 4; // absences sort to the top of the Status column
   if (!e.time_in) return 0;
   return ((e.late_minutes ?? 0) > 0 ? 2 : 0) + (e.is_undertime ? 1 : 0);
 }
@@ -35,6 +36,7 @@ type LogEntry = {
   undertime_minutes: number | null;
   late_minutes: number | null;
   created_at: string | null;
+  is_absent?: boolean | null;
   profile: {
     full_name: string;
     employee_code: string | null;
@@ -163,6 +165,7 @@ function ActivityLogPage() {
   });
 
   const statusText = (entry: LogEntry) => {
+    if (entry.is_absent) return "Absent";
     if (!entry.time_in) return "No record";
     const tags: string[] = [];
     if ((entry.late_minutes ?? 0) > 0) tags.push("Late");
@@ -197,6 +200,12 @@ function ActivityLogPage() {
   };
 
   const statusBadges = (entry: LogEntry) => {
+    if (entry.is_absent)
+      return (
+        <Badge className="bg-red-100 text-red-800 border border-red-200 hover:bg-red-100">
+          Absent
+        </Badge>
+      );
     if (!entry.time_in)
       return (
         <Badge variant="outline" className="text-muted-foreground">
@@ -317,7 +326,7 @@ function ActivityLogPage() {
                 return (
                   <tr
                     key={entry.id}
-                    className={`border-t align-top ${late ? "bg-red-50/30" : entry.is_undertime ? "bg-amber-50/30" : ""}`}
+                    className={`border-t align-top ${entry.is_absent ? "bg-red-50/50" : late ? "bg-red-50/30" : entry.is_undertime ? "bg-amber-50/30" : ""}`}
                   >
                     {/* Employee — name over code so long names don't wrap awkwardly */}
                     <td className="px-3 py-3">
