@@ -300,6 +300,16 @@ There is no ORM — all queries are hand-written SQL.
 
 ### Business Rules
 
+- **Login session expiry.** Firebase keeps users signed in indefinitely, so the
+  app enforces its own session lifetime client-side (`lib/session.ts` +
+  `components/SessionGuard.tsx`): a **1-hour idle timeout** and a **12-hour
+  absolute cap** from login, whichever comes first. Activity (mouse/keyboard/
+  scroll/touch) resets the idle clock; timestamps are kept in `localStorage` so
+  the policy survives reloads and is shared across tabs. A warning dialog appears
+  ~1 minute before expiry with a "Stay signed in" option; on expiry the user is
+  signed out and the auth gate redirects them to `/login`. Adjust the durations
+  via `SESSION_IDLE_MS` / `SESSION_ABSOLUTE_MS`.
+
 - **Clock-in geofencing.** `clockInDTR` resolves the caller's public IP from the
   rightmost `X-Forwarded-For` entry (the value the Cloud Run front end appends;
   leftmost entries are client-spoofable) and rejects the clock-in with
