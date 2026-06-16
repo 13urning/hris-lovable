@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getActivityLogDTRs, getTodayRoster } from "@/lib/dtr-functions";
+import { TablePagination } from "@/components/TablePagination";
+import { usePagination } from "@/hooks/use-pagination";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -148,34 +150,53 @@ function ActivityLogPage() {
     return true;
   });
 
-  const sorted = [...filtered].sort((a, b) => {
-    let cmp = 0;
-    switch (sort.key) {
-      case "employee":
-        cmp = (a.profile?.full_name ?? "").localeCompare(b.profile?.full_name ?? "");
-        break;
-      case "hours":
-        cmp = (a.hours_worked ?? 0) - (b.hours_worked ?? 0);
-        break;
-      case "late":
-        cmp = (a.late_minutes ?? 0) - (b.late_minutes ?? 0);
-        break;
-      case "status":
-        cmp = flagScore(a) - flagScore(b);
-        break;
-      case "date":
-      default:
-        cmp =
+  // Clock-in records and absences are shown in two separate tables.
+  const clockIns = useMemo(() => {
+    const cmp = (a: LogEntry, b: LogEntry) => {
+      let c = 0;
+      switch (sort.key) {
+        case "employee":
+          c = (a.profile?.full_name ?? "").localeCompare(b.profile?.full_name ?? "");
+          break;
+        case "hours":
+          c = (a.hours_worked ?? 0) - (b.hours_worked ?? 0);
+          break;
+        case "late":
+          c = (a.late_minutes ?? 0) - (b.late_minutes ?? 0);
+          break;
+        case "status":
+          c = flagScore(a) - flagScore(b);
+          break;
+        case "date":
+        default:
+          c =
+            a.work_date.localeCompare(b.work_date) ||
+            (a.time_in ?? "").localeCompare(b.time_in ?? "");
+          break;
+      }
+      if (c === 0)
+        c =
           a.work_date.localeCompare(b.work_date) ||
           (a.time_in ?? "").localeCompare(b.time_in ?? "");
-        break;
-    }
-    // Stable tiebreaker so equal keys keep a predictable (most-recent-first) order.
-    if (cmp === 0)
-      cmp =
-        a.work_date.localeCompare(b.work_date) || (a.time_in ?? "").localeCompare(b.time_in ?? "");
-    return sort.dir === "asc" ? cmp : -cmp;
-  });
+      return sort.dir === "asc" ? c : -c;
+    };
+    return filtered.filter((e) => !e.is_absent).sort(cmp);
+  }, [filtered, sort]);
+
+  const absences = useMemo(
+    () =>
+      filtered
+        .filter((e) => e.is_absent)
+        .sort(
+          (a, b) =>
+            b.work_date.localeCompare(a.work_date) ||
+            (a.profile?.full_name ?? "").localeCompare(b.profile?.full_name ?? ""),
+        ),
+    [filtered],
+  );
+
+  const clockInPg = usePagination(clockIns, 25);
+  const absencePg = usePagination(absences, 25);
 
   const statusText = (entry: LogEntry) => {
     if (entry.is_absent) return "Absent";
@@ -344,7 +365,7 @@ function ActivityLogPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-2">
               <Clock3 className="h-4 w-4" />
-              {isLoading ? "Loading…" : `${filtered.length} entries`}
+              {isLoading ? "Loading…" : `Clock-In Records · ${clockIns.length}`}
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -404,7 +425,7 @@ function ActivityLogPage() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((entry) => {
+              {clockInPg.pageItems.map((entry) => {
                 const late = (entry.late_minutes ?? 0) > 0;
                 return (
                   <tr
@@ -482,10 +503,10 @@ function ActivityLogPage() {
             </tbody>
           </table>
 
-          {!isLoading && filtered.length === 0 && (
+          {!isLoading && clockIns.length === 0 && (
             <div className="px-6 py-10 text-center text-sm text-muted-foreground">
               {search || dateFrom || dateTo
-                ? "No entries match your filters."
+                ? "No clock-in records match your filters."
                 : "No clock-in activity recorded yet."}
             </div>
           )}
@@ -494,6 +515,82 @@ function ActivityLogPage() {
               Loading activity…
             </div>
           )}
+          <TablePagination
+            page={clockInPg.page}
+            pageCount={clockInPg.pageCount}
+            pageSize={clockInPg.pageSize}
+            total={clockInPg.total}
+            start={clockInPg.start}
+            pageItemsCount={clockInPg.pageItems.length}
+            onPageChange={clockInPg.setPage}
+            onPageSizeChange={clockInPg.setPageSize}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Absences — past workdays with no clock-in and no leave (last 30 days) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UserX className="h-4 w-4 text-red-600" />
+            {isLoading ? "Loading…" : `Absences · ${absences.length}`}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          <table className="w-full min-w-[480px] text-sm">
+            <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Employee</th>
+                <th className="px-3 py-2 text-left font-medium">Department</th>
+                <th className="px-3 py-2 text-left font-medium">Date</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {absencePg.pageItems.map((entry) => (
+                <tr key={entry.id} className="border-t bg-red-50/40 align-top">
+                  <td className="px-3 py-3">
+                    <div className="font-medium leading-tight">
+                      {entry.profile?.full_name ?? "Unknown"}
+                    </div>
+                    {entry.profile?.employee_code && (
+                      <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                        {entry.profile.employee_code}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-muted-foreground">
+                    {entry.profile?.department ?? "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-xs">
+                    {formatDate(entry.work_date)}
+                  </td>
+                  <td className="px-3 py-3">
+                    <Badge className="bg-red-100 text-red-800 border border-red-200 hover:bg-red-100">
+                      Absent
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!isLoading && absences.length === 0 && (
+            <div className="px-6 py-10 text-center text-sm text-muted-foreground">
+              {search || dateFrom || dateTo
+                ? "No absences match your filters."
+                : "No absences in the last 30 days. 🎉"}
+            </div>
+          )}
+          <TablePagination
+            page={absencePg.page}
+            pageCount={absencePg.pageCount}
+            pageSize={absencePg.pageSize}
+            total={absencePg.total}
+            start={absencePg.start}
+            pageItemsCount={absencePg.pageItems.length}
+            onPageChange={absencePg.setPage}
+            onPageSizeChange={absencePg.setPageSize}
+          />
         </CardContent>
       </Card>
     </div>

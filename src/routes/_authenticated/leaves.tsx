@@ -17,6 +17,8 @@ import {
   fetchProfilesForLeaveFiling,
 } from "@/lib/leave-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TablePagination } from "@/components/TablePagination";
+import { usePagination } from "@/hooks/use-pagination";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
@@ -309,6 +311,9 @@ function LeavesPage() {
     queryFn: () => fetchMyPendingLeaveApprovals(),
   });
 
+  const pendingPg = usePagination(pendingForMe ?? [], 25);
+  const historyPg = usePagination(filtered, 25);
+
   // Employee picker for on-behalf filing (HR/admin only).
   const { data: filingProfiles } = useQuery({
     queryKey: ["leave-filing-profiles"],
@@ -556,7 +561,7 @@ function LeavesPage() {
                 </tr>
               </thead>
               <tbody>
-                {pendingForMe.map((l) => {
+                {pendingPg.pageItems.map((l) => {
                   const typeLabel =
                     LEAVE_TYPES.find((t) => t.value === l.leave_type)?.label ?? l.leave_type;
                   const tone = LEAVE_TONE[l.leave_type] ?? LEAVE_TONE.Other;
@@ -626,6 +631,16 @@ function LeavesPage() {
                 })}
               </tbody>
             </table>
+            <TablePagination
+              page={pendingPg.page}
+              pageCount={pendingPg.pageCount}
+              pageSize={pendingPg.pageSize}
+              total={pendingPg.total}
+              start={pendingPg.start}
+              pageItemsCount={pendingPg.pageItems.length}
+              onPageChange={pendingPg.setPage}
+              onPageSizeChange={pendingPg.setPageSize}
+            />
           </CardContent>
         </Card>
       )}
@@ -896,7 +911,7 @@ function LeavesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((l) => {
+                {historyPg.pageItems.map((l) => {
                   const p = profilesMap?.[l.employee_id];
                   const isMine = l.employee_id === user?.id;
                   const typeLabel =
@@ -992,6 +1007,16 @@ function LeavesPage() {
               No leaves to show.
             </div>
           )}
+          <TablePagination
+            page={historyPg.page}
+            pageCount={historyPg.pageCount}
+            pageSize={historyPg.pageSize}
+            total={historyPg.total}
+            start={historyPg.start}
+            pageItemsCount={historyPg.pageItems.length}
+            onPageChange={historyPg.setPage}
+            onPageSizeChange={historyPg.setPageSize}
+          />
         </CardContent>
       </Card>
     </div>

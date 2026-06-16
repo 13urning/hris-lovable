@@ -341,7 +341,12 @@ There is no ORM — all queries are hand-written SQL.
 - **Today roster (HR).** `getTodayRoster` powers a live card at the top of the
   clock-in activity log: per-employee status for today — Clocked in / On leave /
   Not yet in. "Not yet in" is an absence-in-progress (confirmed at end of day).
-  Weekends and holidays are framed as no-attendance-expected.
+  Weekends and holidays are framed as no-attendance-expected. Below it, clock-in
+  records and absences are shown in two **separate** paginated tables.
+- **Table pagination.** Large list tables use the shared `usePagination`
+  (`hooks/use-pagination.ts`) hook + `TablePagination` controls (rows-per-page
+  selector + range + prev/next), applied to the activity log (clock-ins +
+  absences), attendance history, employees, leaves, OT approvals, and holidays.
 - **Holidays calendar.** The `holidays` table (`holiday-functions.ts`, `/holidays`
   admin page, HR-gated) drives holiday exclusion from absence and the dashboard's
   "Upcoming Holidays This Month" card. `syncPhilippineHolidays` pulls PH national
