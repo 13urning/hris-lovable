@@ -1,17 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { getMyDTRsByMonth } from "@/lib/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/dtr";
+import { Badge } from "@/components/ui/badge";
+import { formatDate, shiftDisplay } from "@/lib/dtr";
 import { exportRowsToCSV } from "@/lib/csv-export";
 import { TablePagination } from "@/components/TablePagination";
 import { usePagination } from "@/hooks/use-pagination";
-import { Clock3, AlertTriangle, FileDown } from "lucide-react";
+import { DisputeAttendanceDialog } from "@/components/DisputeAttendanceDialog";
+import {
+  fetchMyDisputes,
+  fetchMyPendingDisputeApprovals,
+  approveDisputeStep,
+  rejectDisputeStep,
+  cancelDispute,
+  type DisputeRow,
+} from "@/lib/attendance-dispute-functions";
+import { toast } from "sonner";
+import { Clock3, AlertTriangle, FileDown, Scale, Check, X, Ban } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dtr")({ component: AttendancePage });
 
@@ -49,8 +60,72 @@ function OtBadge({ status }: { status: string | null | undefined }) {
   );
 }
 
+const DISPUTE_TONE: Record<DisputeRow["status"], string> = {
+  pending: "bg-warning/20 text-warning-foreground",
+  approved: "bg-success/15 text-success",
+  rejected: "bg-destructive/15 text-destructive",
+  cancelled: "bg-muted text-muted-foreground",
+};
+
+// Compact "in → out (shift)" summary of a dispute's requested values.
+function disputeTimes(d: {
+  requested_time_in: string | null;
+  requested_time_out: string | null;
+  requested_shift_label: string | null;
+}) {
+  const inOut = `${d.requested_time_in ?? "—"} → ${d.requested_time_out ?? "—"}`;
+  return d.requested_shift_label ? `${inOut} · ${shiftDisplay(d.requested_shift_label)}` : inOut;
+}
+
 function AttendancePage() {
   const { user } = useAuth();
+  const qc = useQueryClient();
+  const [disputeOpen, setDisputeOpen] = useState(false);
+
+  const { data: myDisputes } = useQuery({
+    queryKey: ["my-disputes", user?.id],
+    enabled: !!user,
+    queryFn: () => fetchMyDisputes(),
+  });
+
+  const { data: pendingDisputes } = useQuery({
+    queryKey: ["disputes-pending-for-me", user?.id],
+    enabled: !!user,
+    queryFn: () => fetchMyPendingDisputeApprovals(),
+  });
+
+  const invalidateDisputes = () => {
+    qc.invalidateQueries({ queryKey: ["my-disputes"] });
+    qc.invalidateQueries({ queryKey: ["disputes-pending-for-me"] });
+    qc.invalidateQueries({ queryKey: ["dtrs-month"] });
+  };
+
+  const approveDispute = useMutation({
+    mutationFn: (id: string) => approveDisputeStep({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Dispute approved");
+      invalidateDisputes();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rejectDispute = useMutation({
+    mutationFn: (id: string) => rejectDisputeStep({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Dispute rejected");
+      invalidateDisputes();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const cancelMyDispute = useMutation({
+    mutationFn: (id: string) => cancelDispute({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Dispute cancelled");
+      invalidateDisputes();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const todayYearMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
   const [selectedMonth, setSelectedMonth] = useState(todayYearMonth);
@@ -134,8 +209,87 @@ function AttendancePage() {
           <Button variant="outline" onClick={handleExport} disabled={sortedDtrs.length === 0}>
             <FileDown className="mr-2 h-4 w-4" /> Export CSV
           </Button>
+          <Button onClick={() => setDisputeOpen(true)}>
+            <Scale className="mr-2 h-4 w-4" /> Dispute attendance
+          </Button>
         </div>
       </div>
+
+      <DisputeAttendanceDialog open={disputeOpen} onOpenChange={setDisputeOpen} />
+
+      {/* Disputes awaiting this user's approval (they're a supervisor in someone's chain) */}
+      {pendingDisputes && pendingDisputes.length > 0 && (
+        <Card className="border-warning/30 bg-warning/5">
+          <CardHeader>
+            <CardTitle className="font-display text-2xl flex items-center gap-2">
+              <Scale className="h-5 w-5 text-warning-foreground" /> Disputes pending my approval
+              <Badge variant="secondary" className="ml-1">
+                {pendingDisputes.length}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left">Employee</th>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-left">Current</th>
+                  <th className="px-4 py-2 text-left">Requested</th>
+                  <th className="px-4 py-2 text-left">Reason</th>
+                  <th className="px-4 py-2 text-left">Step</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingDisputes.map((d) => (
+                  <tr key={d.id} className="border-t align-top">
+                    <td className="px-4 py-2">
+                      <div className="font-medium">{d.employee_full_name ?? "—"}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {d.employee_department ?? ""}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatDate(d.work_date)}</td>
+                    <td className="px-4 py-2 tabular-nums text-muted-foreground">
+                      {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
+                    </td>
+                    <td className="px-4 py-2 tabular-nums font-medium">{disputeTimes(d)}</td>
+                    <td className="px-4 py-2 text-muted-foreground max-w-[220px]">
+                      {d.reason ?? ""}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                      {d.current_approver_index + 1} of {d.approver_chain.length}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Approve"
+                          onClick={() => approveDispute.mutate(d.id)}
+                          disabled={approveDispute.isPending || rejectDispute.isPending}
+                        >
+                          <Check className="h-4 w-4 text-success" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Reject"
+                          onClick={() => rejectDispute.mutate(d.id)}
+                          disabled={approveDispute.isPending || rejectDispute.isPending}
+                        >
+                          <X className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -287,6 +441,71 @@ function AttendancePage() {
           />
         </CardContent>
       </Card>
+
+      {/* My attendance disputes */}
+      {myDisputes && myDisputes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="font-display text-2xl flex items-center gap-2">
+              <Scale className="h-5 w-5" /> My disputes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-left">Was</th>
+                  <th className="px-4 py-2 text-left">Requested</th>
+                  <th className="px-4 py-2 text-left">Reason</th>
+                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {myDisputes.map((d) => (
+                  <tr key={d.id} className="border-t align-top">
+                    <td className="px-4 py-2 whitespace-nowrap">{formatDate(d.work_date)}</td>
+                    <td className="px-4 py-2 tabular-nums text-muted-foreground">
+                      {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
+                    </td>
+                    <td className="px-4 py-2 tabular-nums">{disputeTimes(d)}</td>
+                    <td className="px-4 py-2 text-muted-foreground max-w-[220px]">
+                      {d.reason ?? ""}
+                      {d.review_notes && (
+                        <span className="block text-[11px] italic">"{d.review_notes}"</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2">
+                      <Badge className={DISPUTE_TONE[d.status]} variant="secondary">
+                        {d.status}
+                      </Badge>
+                      {d.status === "pending" && (
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">
+                          step {d.current_approver_index + 1} of {d.approver_chain.length}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {d.status === "pending" && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          title="Cancel dispute"
+                          onClick={() => cancelMyDispute.mutate(d.id)}
+                          disabled={cancelMyDispute.isPending}
+                        >
+                          <Ban className="h-4 w-4 text-warning-foreground" />
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
