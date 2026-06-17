@@ -37,8 +37,9 @@ function phDateOf(isoTimestamp: string): string {
 // absent (no retroactive absences from before the system tracked attendance).
 const ABSENCE_TRACKING_START = "2026-06-16";
 
-// System/service accounts excluded from attendance & absence monitoring. Matched
-// by email (the row id differs across environments).
+// System/service account always excluded from attendance & absence monitoring,
+// matched by email (the row id differs across environments). Individual
+// employees can additionally opt out via profiles.exclude_from_attendance.
 const MONITORING_EXCLUDED_EMAIL = "localadmin@hris.local";
 
 type LeaveSpan = { start_date: string; end_date: string };
@@ -145,14 +146,15 @@ export const getRecentDTRsQuery = createServerFn({ method: "POST" })
          WHERE employee_id = $1 AND status IN ('approved', 'pending') AND end_date >= $2`,
         [empId, startDate],
       ),
-      pool.query<{ created_at: string; email: string | null }>(
-        `SELECT created_at, email FROM profiles WHERE id = $1`,
+      pool.query<{ created_at: string; email: string | null; exclude_from_attendance: boolean }>(
+        `SELECT created_at, email, exclude_from_attendance FROM profiles WHERE id = $1`,
         [empId],
       ),
       fetchActiveHolidayDates(pool, startDate, today),
     ]);
     const joinDate = prof[0] ? phDateOf(prof[0].created_at) : startDate;
-    const excluded = prof[0]?.email === MONITORING_EXCLUDED_EMAIL;
+    const excluded =
+      prof[0]?.email === MONITORING_EXCLUDED_EMAIL || prof[0]?.exclude_from_attendance === true;
     const dtrDates = new Set(rows.map((r) => r.work_date as string));
     const absents = excluded
       ? []
@@ -187,14 +189,15 @@ export const getDTRsForMonth = createServerFn({ method: "POST" })
            AND start_date <= $3 AND end_date >= $2`,
         [empId, startDate, endDate],
       ),
-      pool.query<{ created_at: string; email: string | null }>(
-        `SELECT created_at, email FROM profiles WHERE id = $1`,
+      pool.query<{ created_at: string; email: string | null; exclude_from_attendance: boolean }>(
+        `SELECT created_at, email, exclude_from_attendance FROM profiles WHERE id = $1`,
         [empId],
       ),
       fetchActiveHolidayDates(pool, startDate, endDate),
     ]);
     const joinDate = prof[0] ? phDateOf(prof[0].created_at) : startDate;
-    const excluded = prof[0]?.email === MONITORING_EXCLUDED_EMAIL;
+    const excluded =
+      prof[0]?.email === MONITORING_EXCLUDED_EMAIL || prof[0]?.exclude_from_attendance === true;
     const dtrDates = new Set(rows.map((r) => r.work_date as string));
     const absents = excluded
       ? []
@@ -287,14 +290,14 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
                   p.full_name, p.employee_code, p.department
            FROM daily_time_reports d
            LEFT JOIN profiles p ON p.id = d.employee_id
-           WHERE p.email IS DISTINCT FROM $1
+           WHERE p.email IS DISTINCT FROM $1 AND p.exclude_from_attendance IS NOT TRUE
            ORDER BY d.work_date DESC, d.time_in DESC
            LIMIT 1000`,
           [MONITORING_EXCLUDED_EMAIL],
         ),
         pool.query(
           `SELECT id, full_name, employee_code, department, created_at FROM profiles
-            WHERE email IS DISTINCT FROM $1`,
+            WHERE email IS DISTINCT FROM $1 AND exclude_from_attendance IS NOT TRUE`,
           [MONITORING_EXCLUDED_EMAIL],
         ),
         pool.query<{ employee_id: string; work_date: string }>(
@@ -423,7 +426,8 @@ export const getTodayRoster = createServerFn({ method: "POST" })
       await Promise.all([
         pool.query(
           `SELECT id, full_name, employee_code, department, created_at FROM profiles
-            WHERE email IS DISTINCT FROM $1 ORDER BY full_name`,
+            WHERE email IS DISTINCT FROM $1 AND exclude_from_attendance IS NOT TRUE
+            ORDER BY full_name`,
           [MONITORING_EXCLUDED_EMAIL],
         ),
         pool.query<{

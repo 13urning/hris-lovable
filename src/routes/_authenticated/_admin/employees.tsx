@@ -6,6 +6,7 @@ import {
   fetchAllEmployees,
   updateEmployeeProfile,
   setEmployeeRole,
+  setAttendanceTracking,
   bulkCreateEmployees,
   deleteEmployee,
 } from "@/lib/employee-functions";
@@ -13,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -63,6 +65,7 @@ type Row = {
   pl_remaining: number | null;
   bl_credits: number | null;
   bl_remaining: number | null;
+  exclude_from_attendance: boolean;
   roles: ("employee" | "hr" | "admin")[];
   vl_used: number;
   sl_used: number;
@@ -498,6 +501,17 @@ function EmployeesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const setTracking = useMutation({
+    mutationFn: async ({ id, excluded }: { id: string; excluded: boolean }) => {
+      await setAttendanceTracking({ data: { id, excluded } });
+    },
+    onSuccess: (_d, vars) => {
+      toast.success(vars.excluded ? "Attendance tracking off" : "Attendance tracking on");
+      qc.invalidateQueries({ queryKey: ["employees"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   // Keep editForm in sync if the underlying row refetches while editing
   useEffect(() => {
     if (!editingRow) return;
@@ -643,6 +657,7 @@ function EmployeesPage() {
                   <th className="px-4 py-3 text-left font-medium">Department</th>
                   <th className="px-4 py-3 text-left font-medium">Position</th>
                   <th className="px-4 py-3 text-left font-medium">Role</th>
+                  <th className="px-4 py-3 text-center font-medium">Tracked</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -699,6 +714,24 @@ function EmployeesPage() {
                             <SelectItem value="admin">Admin</SelectItem>
                           </SelectContent>
                         </Select>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div
+                          className="flex items-center justify-center"
+                          title={
+                            r.exclude_from_attendance
+                              ? "Attendance tracking off — excluded from absence monitoring"
+                              : "Attendance tracking on"
+                          }
+                        >
+                          <Switch
+                            checked={!r.exclude_from_attendance}
+                            disabled={setTracking.isPending}
+                            onCheckedChange={(checked) =>
+                              setTracking.mutate({ id: r.id, excluded: !checked })
+                            }
+                          />
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
