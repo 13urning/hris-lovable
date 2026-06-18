@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate, shiftDisplay } from "@/lib/dtr";
 import { exportRowsToCSV } from "@/lib/csv-export";
 import { TablePagination } from "@/components/TablePagination";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { usePagination } from "@/hooks/use-pagination";
 import { DisputeAttendanceDialog } from "@/components/DisputeAttendanceDialog";
 import {
@@ -313,9 +314,7 @@ function AttendancePage() {
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="px-6 py-10 text-center text-sm text-muted-foreground">
-              Loading records…
-            </div>
+            <TableSkeleton rows={8} cols={10} />
           ) : sortedDtrs.length === 0 ? (
             <div className="px-6 py-10 text-center text-sm text-muted-foreground">
               No attendance records for {displayMonth}.
