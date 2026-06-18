@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Download, Upload, Check, X, Copy, Users, Pencil, FileDown, Trash2 } from "lucide-react";
 import { TablePagination } from "@/components/TablePagination";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { usePagination } from "@/hooks/use-pagination";
 import { toast } from "sonner";
 
@@ -434,7 +435,7 @@ function EmployeesPage() {
 
   // ── Queries & mutations ────────────────────────────────────────────────────
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["employees"],
     queryFn: () => fetchAllEmployees() as Promise<Row[]>,
   });
@@ -647,127 +648,136 @@ function EmployeesPage() {
           />
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">Name</th>
-                  <th className="px-4 py-3 text-left font-medium">Email</th>
-                  <th className="px-4 py-3 text-left font-medium">Code</th>
-                  <th className="px-4 py-3 text-left font-medium">Department</th>
-                  <th className="px-4 py-3 text-left font-medium">Position</th>
-                  <th className="px-4 py-3 text-left font-medium">Role</th>
-                  <th className="px-4 py-3 text-center font-medium">Tracked</th>
-                  <th className="px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {pg.pageItems.map((r) => {
-                  const role: "employee" | "hr" | "admin" = r.roles.includes("admin")
-                    ? "admin"
-                    : r.roles.includes("hr")
-                      ? "hr"
-                      : "employee";
-                  return (
-                    <tr key={r.id} className="border-t hover:bg-secondary/30">
-                      <td className="px-4 py-3 min-w-[220px]">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-                            {initials(r.first_name, r.last_name, r.full_name)}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-medium truncate">{displayName(r)}</div>
-                            {r.company && (
-                              <div className="text-[11px] text-muted-foreground truncate">
-                                {r.company}
+          {isLoading ? (
+            <TableSkeleton rows={8} cols={7} />
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium">Name</th>
+                      <th className="px-4 py-3 text-left font-medium">Email</th>
+                      <th className="px-4 py-3 text-left font-medium">Code</th>
+                      <th className="px-4 py-3 text-left font-medium">Department</th>
+                      <th className="px-4 py-3 text-left font-medium">Position</th>
+                      <th className="px-4 py-3 text-left font-medium">Role</th>
+                      <th className="px-4 py-3 text-center font-medium">Tracked</th>
+                      <th className="px-4 py-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pg.pageItems.map((r) => {
+                      const role: "employee" | "hr" | "admin" = r.roles.includes("admin")
+                        ? "admin"
+                        : r.roles.includes("hr")
+                          ? "hr"
+                          : "employee";
+                      return (
+                        <tr key={r.id} className="border-t hover:bg-secondary/30">
+                          <td className="px-4 py-3 min-w-[220px]">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                                {initials(r.first_name, r.last_name, r.full_name)}
                               </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        <div className="truncate max-w-[260px]" title={r.email ?? ""}>
-                          {r.email ?? "—"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-mono bg-secondary/60 px-1.5 py-0.5 rounded">
-                          {r.employee_code ?? "—"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">{r.department}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{r.position ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        <Select
-                          value={role}
-                          disabled={!isAdmin}
-                          onValueChange={(v) =>
-                            setRole.mutate({ userId: r.id, role: v as "employee" | "hr" | "admin" })
-                          }
-                        >
-                          <SelectTrigger className="w-28 h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="employee">Employee</SelectItem>
-                            <SelectItem value="hr">HR</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div
-                          className="flex items-center justify-center"
-                          title={
-                            r.exclude_from_attendance
-                              ? "Attendance tracking off — excluded from absence monitoring"
-                              : "Attendance tracking on"
-                          }
-                        >
-                          <Switch
-                            checked={!r.exclude_from_attendance}
-                            disabled={setTracking.isPending}
-                            onCheckedChange={(checked) =>
-                              setTracking.mutate({ id: r.id, excluded: !checked })
-                            }
-                          />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
-                            <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
-                          </Button>
-                          {isAdmin && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-destructive hover:bg-destructive/10"
-                              onClick={() => setDeleteTarget(r)}
-                              disabled={r.id === user?.id}
-                              title={
-                                r.id === user?.id
-                                  ? "You can't delete your own account"
-                                  : "Delete employee"
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{displayName(r)}</div>
+                                {r.company && (
+                                  <div className="text-[11px] text-muted-foreground truncate">
+                                    {r.company}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            <div className="truncate max-w-[260px]" title={r.email ?? ""}>
+                              {r.email ?? "—"}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs font-mono bg-secondary/60 px-1.5 py-0.5 rounded">
+                              {r.employee_code ?? "—"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">{r.department}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{r.position ?? "—"}</td>
+                          <td className="px-4 py-3">
+                            <Select
+                              value={role}
+                              disabled={!isAdmin}
+                              onValueChange={(v) =>
+                                setRole.mutate({
+                                  userId: r.id,
+                                  role: v as "employee" | "hr" | "admin",
+                                })
                               }
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {filtered.length === 0 && (
-            <div className="px-6 py-10 text-center text-sm text-muted-foreground">
-              {search
-                ? "No employees match your search."
-                : "No employees yet. Use Import Employees to add them."}
-            </div>
+                              <SelectTrigger className="w-28 h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="employee">Employee</SelectItem>
+                                <SelectItem value="hr">HR</SelectItem>
+                                <SelectItem value="admin">Admin</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div
+                              className="flex items-center justify-center"
+                              title={
+                                r.exclude_from_attendance
+                                  ? "Attendance tracking off — excluded from absence monitoring"
+                                  : "Attendance tracking on"
+                              }
+                            >
+                              <Switch
+                                checked={!r.exclude_from_attendance}
+                                disabled={setTracking.isPending}
+                                onCheckedChange={(checked) =>
+                                  setTracking.mutate({ id: r.id, excluded: !checked })
+                                }
+                              />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
+                                <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
+                              </Button>
+                              {isAdmin && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-destructive hover:bg-destructive/10"
+                                  onClick={() => setDeleteTarget(r)}
+                                  disabled={r.id === user?.id}
+                                  title={
+                                    r.id === user?.id
+                                      ? "You can't delete your own account"
+                                      : "Delete employee"
+                                  }
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {filtered.length === 0 && (
+                <div className="px-6 py-10 text-center text-sm text-muted-foreground">
+                  {search
+                    ? "No employees match your search."
+                    : "No employees yet. Use Import Employees to add them."}
+                </div>
+              )}
+            </>
           )}
           <TablePagination
             page={pg.page}

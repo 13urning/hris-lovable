@@ -10,6 +10,8 @@ import { getUpcomingHolidaysThisMonth } from "@/lib/holiday-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TableSkeleton } from "@/components/TableSkeleton";
 import { formatDate, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane, PartyPopper } from "lucide-react";
@@ -58,14 +60,18 @@ function Dashboard() {
   });
 
   // ── Today's attendance ─────────────────────────────────────────────────
-  const { data: todayEntry, refetch: refetchToday } = useQuery({
+  const {
+    data: todayEntry,
+    refetch: refetchToday,
+    isLoading: todayLoading,
+  } = useQuery({
     queryKey: ["dtr-today", user?.id, today],
     queryFn: () => getTodayDTR({ data: { date: today } }),
     enabled: !!user, // every user (incl. HR/admin) tracks their own attendance
   });
 
   // ── Recent DTRs (current month) ────────────────────────────────────────
-  const { data: recentDtrs } = useQuery({
+  const { data: recentDtrs, isLoading: recentLoading } = useQuery({
     queryKey: ["recent-dtrs", user?.id],
     queryFn: () => getRecentDTRs(),
     enabled: !!user, // every user (incl. HR/admin) sees their own recent attendance
@@ -176,7 +182,9 @@ function Dashboard() {
             Today's Attendance
           </p>
 
-          {!clockedIn && (
+          {todayLoading && <Skeleton className="h-16 w-48" />}
+
+          {!todayLoading && !clockedIn && (
             <Button
               size="lg"
               className="h-16 w-48 text-lg font-semibold"
@@ -436,7 +444,9 @@ function Dashboard() {
       <div>
         <h2 className="font-display text-2xl">Recent attendance</h2>
         <div className="mt-4 overflow-hidden rounded-lg border bg-card">
-          {recentDtrs?.length ? (
+          {recentLoading ? (
+            <TableSkeleton rows={5} cols={7} />
+          ) : recentDtrs?.length ? (
             <table className="w-full text-sm">
               <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
