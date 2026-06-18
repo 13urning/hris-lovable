@@ -22,8 +22,14 @@ function LoginPage() {
     e.preventDefault();
     setBusy(true);
     const { error } = await signIn(email, password);
-    setBusy(false);
-    if (error) toast.error(error);
+    if (error) {
+      // Only release the button on failure. On success we keep it in the
+      // "Signing in…" state until auth state resolves and the <Navigate>
+      // redirect below unmounts this page — otherwise the button briefly
+      // flips back to "Sign in" during the post-login user-data fetch.
+      setBusy(false);
+      toast.error(error);
+    }
   };
 
   return (
@@ -129,8 +135,7 @@ function LoginPage() {
 
         {/* Footnote */}
         <p className="mx-auto mt-8 max-w-sm text-center text-sm text-white/70">
-          Employee? Sign in with the email &amp; password your HR team set up for
-          you.
+          Employee? Sign in with the email &amp; password your HR team set up for you.
         </p>
       </div>
     </div>
