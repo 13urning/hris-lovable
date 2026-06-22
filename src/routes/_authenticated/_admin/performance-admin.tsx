@@ -885,9 +885,9 @@ function EvalScorePreview({ evalId }: { evalId: string }) {
   return (
     <div className="border-t px-4 pb-3 pt-2 space-y-3">
       {scores.length > 0 && (
-        <div>
+        <div className="overflow-x-auto">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Part I · KPIs</p>
-          <table className="w-full text-xs">
+          <table className="w-full min-w-[420px] text-xs">
             <thead className="text-muted-foreground">
               <tr>
                 <th className="text-left py-1">KPI</th>
@@ -912,9 +912,9 @@ function EvalScorePreview({ evalId }: { evalId: string }) {
         </div>
       )}
       {bScores.length > 0 && (
-        <div>
+        <div className="overflow-x-auto">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Part II · Behavioral</p>
-          <table className="w-full text-xs">
+          <table className="w-full min-w-[360px] text-xs">
             <thead className="text-muted-foreground">
               <tr>
                 <th className="text-left py-1">Competency</th>
