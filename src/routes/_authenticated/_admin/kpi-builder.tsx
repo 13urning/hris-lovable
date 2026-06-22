@@ -203,11 +203,11 @@ function KpiBuilderPage() {
                   </p>
                 </div>
               </CardHeader>
-              <CardContent className="p-0">
+              <CardContent className="p-0 overflow-x-auto">
                 {teamKpis.length === 0 ? (
                   <p className="px-6 py-4 text-sm text-muted-foreground">No KPIs yet.</p>
                 ) : (
-                  <table className="w-full text-sm">
+                  <table className="w-full min-w-[820px] text-sm">
                     <thead className="bg-secondary/50 text-xs uppercase tracking-wide text-muted-foreground">
                       <tr>
                         <th className="px-4 py-2 text-left">KPI</th>

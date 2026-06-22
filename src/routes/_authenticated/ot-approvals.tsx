@@ -502,11 +502,11 @@ function OTApprovalsPage() {
               <Send className="mr-2 h-4 w-4" /> Request OT Budget
             </Button>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="p-0 overflow-x-auto">
             {myBudgetsLoading ? (
               <div className="px-6 py-10 text-center text-sm text-muted-foreground">Loading…</div>
             ) : myBudgets?.length ? (
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[820px] text-sm">
                 <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 text-left">Month</th>
@@ -619,11 +619,11 @@ function OTApprovalsPage() {
               <Send className="mr-2 h-4 w-4" /> File OT Hours
             </Button>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="p-0 overflow-x-auto">
             {myActualsLoading ? (
               <div className="px-6 py-10 text-center text-sm text-muted-foreground">Loading…</div>
             ) : myActuals?.length ? (
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 text-left">Date</th>
@@ -706,11 +706,11 @@ function OTApprovalsPage() {
               <FileDown className="mr-2 h-4 w-4" /> Export CSV
             </Button>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="p-0 overflow-x-auto">
             {pendingLoading ? (
               <div className="px-6 py-10 text-center text-sm text-muted-foreground">Loading…</div>
             ) : (
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[840px] text-sm">
                 <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 text-left">Employee</th>

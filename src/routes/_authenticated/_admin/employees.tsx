@@ -715,7 +715,7 @@ function EmployeesPage() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[980px] text-sm">
                   <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="sticky left-0 z-20 w-[220px] min-w-[220px] bg-secondary px-4 py-3 text-left font-medium">

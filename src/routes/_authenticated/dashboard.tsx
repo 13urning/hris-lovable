@@ -443,11 +443,11 @@ function Dashboard() {
       {/* Recent attendance — every user sees their own */}
       <div>
         <h2 className="font-display text-2xl">Recent attendance</h2>
-        <div className="mt-4 overflow-hidden rounded-lg border bg-card">
+        <div className="mt-4 overflow-x-auto rounded-lg border bg-card">
           {recentLoading ? (
             <TableSkeleton rows={5} cols={7} />
           ) : recentDtrs?.length ? (
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 text-left">Date</th>
