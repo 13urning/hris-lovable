@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -434,10 +434,10 @@ function EmployeesPage() {
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Employee Leaves modal state
-  const [leavesRow, setLeavesRow] = useState<Row | null>(null);
-  const [leavesForm, setLeavesForm] = useState<EditForm | null>(null);
-  const [savingLeaves, setSavingLeaves] = useState(false);
+  // Employee Leaves bulk-editor state. Keyed by employee id → editable leave form.
+  const [leavesOpen, setLeavesOpen] = useState(false);
+  const [leaveDraft, setLeaveDraft] = useState<Record<string, EditForm>>({});
+  const [leaveSearch, setLeaveSearch] = useState("");
 
   // Delete confirm dialog state
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
@@ -557,29 +557,48 @@ function EmployeesPage() {
     saveEdit.mutate({ row: editingRow, patches }, { onSettled: () => setSavingEdit(false) });
   }
 
-  function openLeaves(row: Row) {
-    setLeavesRow(row);
-    setLeavesForm(rowToForm(row));
+  function openLeaves() {
+    const draft: Record<string, EditForm> = {};
+    for (const r of data ?? []) draft[r.id] = rowToForm(r);
+    setLeaveDraft(draft);
+    setLeaveSearch("");
+    setLeavesOpen(true);
   }
 
-  function closeLeaves() {
-    setLeavesRow(null);
-    setLeavesForm(null);
+  function setLeaveCell(id: string, field: keyof EditForm, value: string) {
+    setLeaveDraft((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
   }
 
-  function handleSaveLeaves() {
-    if (!leavesRow || !leavesForm) return;
-    const patches = diffPatches(leavesRow, leavesForm);
-    if (Object.keys(patches).length === 0) {
-      toast.info("No changes");
-      return;
-    }
-    setSavingLeaves(true);
-    saveEdit.mutate(
-      { row: leavesRow, patches },
-      { onSuccess: closeLeaves, onSettled: () => setSavingLeaves(false) },
-    );
-  }
+  // Bulk-save every row whose leave values changed. Identity fields stay equal to
+  // the source row, so diffPatches only ever yields leave-credit patches here.
+  const saveLeaves = useMutation({
+    mutationFn: async () => {
+      const updates: Promise<unknown>[] = [];
+      for (const r of data ?? []) {
+        const form = leaveDraft[r.id];
+        if (!form) continue;
+        const patches = diffPatches(r, form);
+        if (Object.keys(patches).length === 0) continue;
+        updates.push(
+          updateEmployeeProfile({
+            data: { id: r.id, patches: patches as Record<string, string | number> },
+          }),
+        );
+      }
+      await Promise.all(updates);
+      return updates.length;
+    },
+    onSuccess: (count) => {
+      if (count === 0) {
+        toast.info("No changes");
+        return;
+      }
+      toast.success(`Saved leaves for ${count} employee${count !== 1 ? "s" : ""}`);
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      setLeavesOpen(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   // ── Import handlers ────────────────────────────────────────────────────────
 
@@ -663,6 +682,9 @@ function EmployeesPage() {
             disabled={filtered.length === 0}
           >
             <FileDown className="mr-2 h-4 w-4" /> Export CSV
+          </Button>
+          <Button variant="outline" onClick={openLeaves} disabled={(data ?? []).length === 0}>
+            <CalendarDays className="mr-2 h-4 w-4" /> Employee Leaves
           </Button>
           <Button
             onClick={() => {
@@ -787,9 +809,6 @@ function EmployeesPage() {
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-1">
-                              <Button size="sm" variant="ghost" onClick={() => openLeaves(r)}>
-                                <CalendarDays className="mr-1.5 h-3.5 w-3.5" /> Leaves
-                              </Button>
                               <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
                                 <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
                               </Button>
@@ -1002,83 +1021,158 @@ function EmployeesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Employee Leaves Dialog ──────────────────────────────────────── */}
+      {/* ── Employee Leaves Bulk Editor ─────────────────────────────────── */}
       <Dialog
-        open={!!leavesRow}
+        open={leavesOpen}
         onOpenChange={(o) => {
-          if (!o) closeLeaves();
+          if (saveLeaves.isPending) return;
+          setLeavesOpen(o);
         }}
       >
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] max-w-[95vw] max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle className="font-display text-2xl">
-              {leavesRow ? `${displayName(leavesRow)} — Leaves` : "Employee Leaves"}
-            </DialogTitle>
+            <DialogTitle className="font-display text-2xl">Employee Leaves</DialogTitle>
           </DialogHeader>
 
-          {leavesRow && leavesForm && (
-            <div className="space-y-4 py-2">
-              <div className="rounded-md border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-secondary/40 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-muted-foreground">
+              Edit each employee&rsquo;s leave totals and remaining balances, then save all changes
+              at once.
+            </p>
+            <Input
+              className="max-w-xs"
+              placeholder="Search name or code…"
+              value={leaveSearch}
+              onChange={(e) => setLeaveSearch(e.target.value)}
+            />
+          </div>
+
+          {(() => {
+            const q = leaveSearch.trim().toLowerCase();
+            const rows = (data ?? []).filter(
+              (r) =>
+                !q ||
+                r.full_name.toLowerCase().includes(q) ||
+                displayName(r).toLowerCase().includes(q) ||
+                (r.employee_code ?? "").toLowerCase().includes(q),
+            );
+            return (
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border">
+                <table className="text-sm border-separate border-spacing-0">
+                  <thead className="text-[10px] uppercase tracking-wide text-muted-foreground">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium w-1/2">Leave type</th>
-                      <th className="px-3 py-2 text-right font-medium">Total</th>
-                      <th className="px-3 py-2 text-right font-medium">Remaining</th>
+                      <th
+                        rowSpan={2}
+                        className="sticky left-0 top-0 z-30 w-[200px] min-w-[200px] border-b border-r bg-secondary px-3 py-2 text-left font-medium align-bottom"
+                      >
+                        Name
+                      </th>
+                      <th
+                        rowSpan={2}
+                        className="sticky left-[200px] top-0 z-30 w-[120px] min-w-[120px] border-b border-r bg-secondary px-3 py-2 text-left font-medium align-bottom"
+                      >
+                        Emp. No.
+                      </th>
+                      {LEAVE_TYPES.map((lt) => (
+                        <th
+                          key={lt.key}
+                          colSpan={2}
+                          className="sticky top-0 z-20 border-b border-r bg-secondary px-3 py-2 text-center font-medium"
+                        >
+                          {lt.label}
+                        </th>
+                      ))}
+                    </tr>
+                    <tr>
+                      {LEAVE_TYPES.map((lt) => (
+                        <Fragment key={lt.key}>
+                          <th className="sticky top-[33px] z-20 border-b bg-secondary px-2 py-1.5 text-right font-medium">
+                            Total
+                          </th>
+                          <th className="sticky top-[33px] z-20 border-b border-r bg-secondary px-2 py-1.5 text-right font-medium">
+                            Left
+                          </th>
+                        </Fragment>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {LEAVE_TYPES.map((lt) => {
-                      const totalKey = `${lt.key}_credits` as keyof EditForm;
-                      const remainingKey = `${lt.key}_remaining` as keyof EditForm;
+                    {rows.map((r) => {
+                      const form = leaveDraft[r.id];
+                      if (!form) return null;
                       return (
-                        <tr key={lt.key} className="border-t">
-                          <td className="px-3 py-2 font-medium">{lt.label}</td>
-                          <td className="px-3 py-2 text-right">
-                            <input
-                              type="number"
-                              min={0}
-                              max={365}
-                              placeholder="—"
-                              className="w-20 rounded border bg-background px-2 py-1 text-right text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                              value={leavesForm[totalKey]}
-                              onChange={(e) =>
-                                setLeavesForm({ ...leavesForm, [totalKey]: e.target.value })
-                              }
-                            />
+                        <tr key={r.id} className="group">
+                          <td className="sticky left-0 z-10 w-[200px] min-w-[200px] border-b border-r bg-background px-3 py-2 group-hover:bg-secondary/40">
+                            <div className="font-medium truncate max-w-[180px]" title={r.full_name}>
+                              {displayName(r)}
+                            </div>
                           </td>
-                          <td className="px-3 py-2 text-right">
-                            <input
-                              type="number"
-                              min={-100}
-                              max={365}
-                              placeholder="—"
-                              className="w-20 rounded border bg-background px-2 py-1 text-right text-sm font-medium text-accent focus:outline-none focus:ring-1 focus:ring-ring"
-                              value={leavesForm[remainingKey]}
-                              onChange={(e) =>
-                                setLeavesForm({ ...leavesForm, [remainingKey]: e.target.value })
-                              }
-                            />
+                          <td className="sticky left-[200px] z-10 w-[120px] min-w-[120px] border-b border-r bg-background px-3 py-2 group-hover:bg-secondary/40">
+                            <span className="text-xs font-mono bg-secondary/60 px-1.5 py-0.5 rounded">
+                              {r.employee_code ?? "—"}
+                            </span>
                           </td>
+                          {LEAVE_TYPES.map((lt) => {
+                            const totalKey = `${lt.key}_credits` as keyof EditForm;
+                            const remainingKey = `${lt.key}_remaining` as keyof EditForm;
+                            return (
+                              <Fragment key={lt.key}>
+                                <td className="border-b px-2 py-1.5 text-right">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={365}
+                                    placeholder="—"
+                                    className="w-16 rounded border bg-background px-2 py-1 text-right text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                                    value={form[totalKey]}
+                                    onChange={(e) => setLeaveCell(r.id, totalKey, e.target.value)}
+                                  />
+                                </td>
+                                <td className="border-b border-r px-2 py-1.5 text-right">
+                                  <input
+                                    type="number"
+                                    min={-100}
+                                    max={365}
+                                    placeholder="—"
+                                    className="w-16 rounded border bg-background px-2 py-1 text-right text-sm font-medium text-accent focus:outline-none focus:ring-1 focus:ring-ring"
+                                    value={form[remainingKey]}
+                                    onChange={(e) =>
+                                      setLeaveCell(r.id, remainingKey, e.target.value)
+                                    }
+                                  />
+                                </td>
+                              </Fragment>
+                            );
+                          })}
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                {rows.length === 0 && (
+                  <div className="px-6 py-10 text-center text-sm text-muted-foreground">
+                    No employees match your search.
+                  </div>
+                )}
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                Leave blank to keep a type unset. Negative remaining values are allowed for
-                adjustments.
-              </p>
-            </div>
-          )}
+            );
+          })()}
+
+          <p className="text-[11px] text-muted-foreground">
+            Leave a cell blank to keep that type unset. Negative remaining values are allowed for
+            adjustments.
+          </p>
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={closeLeaves}>
+            <Button
+              variant="outline"
+              onClick={() => setLeavesOpen(false)}
+              disabled={saveLeaves.isPending}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSaveLeaves} disabled={savingLeaves}>
-              {savingLeaves ? "Saving…" : "Save Changes"}
+            <Button onClick={() => saveLeaves.mutate()} disabled={saveLeaves.isPending}>
+              {saveLeaves.isPending ? "Saving…" : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
