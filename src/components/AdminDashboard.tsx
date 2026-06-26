@@ -29,9 +29,9 @@ import {
   ArrowRight,
 } from "lucide-react";
 
-type RosterCategory = "present" | "onLeave" | "notClockedIn" | "late";
+export type RosterCategory = "present" | "onLeave" | "notClockedIn" | "late";
 
-function MetricCard({
+export function MetricCard({
   icon,
   label,
   value,
@@ -82,7 +82,7 @@ function MetricCard({
 
 // Pending-approval tile: links to the relevant queue and highlights when the
 // count is non-zero so an admin can see at a glance what needs attention.
-function ApprovalTile({
+export function ApprovalTile({
   to,
   label,
   count,
@@ -398,7 +398,7 @@ function EntryDetail({ category, e }: { category: RosterCategory; e: RosterEntry
   );
 }
 
-function RosterDialog({
+export function RosterDialog({
   category,
   onClose,
   roster,

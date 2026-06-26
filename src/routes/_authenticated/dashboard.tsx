@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { AdminDashboard } from "@/components/AdminDashboard";
+import { TeamDashboard } from "@/components/TeamDashboard";
 import { formatDate, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane, PartyPopper } from "lucide-react";
@@ -289,6 +290,9 @@ function Dashboard() {
 
       {/* ── Admin / HR org-wide overview ─────────────────────────────────── */}
       {isHR && <AdminDashboard />}
+
+      {/* ── Team-lead overview for non-HR approvers (scoped to their reports) ── */}
+      {!isHR && <TeamDashboard />}
 
       {/* ── Employee-only sections (OT + leave summary) ──────────────────── */}
       {!isHR && (

@@ -27,3 +27,31 @@ export async function resolveChain(pool: Pool, employeeId: string): Promise<stri
 
   return rows.map((r) => r.employee_id);
 }
+
+// Walks DOWN org_nodes from `employeeId` and returns every descendant's
+// employee_id (direct + indirect reports), excluding the user themselves.
+// Returns [] if the user isn't in the tree or has no reports.
+export async function resolveSubordinates(pool: Pool, employeeId: string): Promise<string[]> {
+  const {
+    rows: [myRow],
+  } = await pool.query<{ id: string }>(
+    `SELECT id FROM org_nodes WHERE employee_id = $1 LIMIT 1`,
+    [employeeId],
+  );
+  if (!myRow) return [];
+
+  const { rows } = await pool.query<{ employee_id: string }>(
+    `WITH RECURSIVE subtree AS (
+       SELECT id, employee_id, 0 AS depth FROM org_nodes WHERE id = $1
+       UNION ALL
+       SELECT n.id, n.employee_id, subtree.depth + 1
+       FROM org_nodes n
+       JOIN subtree ON n.parent_id = subtree.id
+       WHERE subtree.depth < 20
+     )
+     SELECT employee_id FROM subtree WHERE id <> $1`,
+    [myRow.id],
+  );
+
+  return rows.map((r) => r.employee_id);
+}

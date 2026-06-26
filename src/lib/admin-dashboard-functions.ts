@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { authMiddleware, assertHR } from "@/lib/auth-middleware";
+import { authMiddleware, assertHR, assertUser } from "@/lib/auth-middleware";
 
 export type AdminDashboardStats = {
   totalEmployees: number;
@@ -189,6 +189,207 @@ export const getAdminAttendanceRoster = createServerFn({ method: "POST" })
       halfDayPeriod: null,
       leaveEnd: null,
     } as const;
+
+    return {
+      present: present.rows.map((r) => ({
+        ...blank,
+        id: r.id,
+        name: r.full_name,
+        department: r.department,
+        timeIn: r.time_in,
+        timeOut: r.time_out,
+        shift: r.shift_label,
+        lateMinutes: Number(r.late_minutes ?? 0),
+      })),
+      onLeave: onLeave.rows
+        .map((r) => ({
+          ...blank,
+          id: r.id,
+          name: r.full_name,
+          department: r.department,
+          leaveType: r.leave_type,
+          halfDay: r.half_day,
+          halfDayPeriod: r.half_day_period,
+          leaveEnd: r.end_date,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      notClockedIn: notIn.rows.map((r) => ({
+        ...blank,
+        id: r.id,
+        name: r.full_name,
+        department: r.department,
+      })),
+    } satisfies AttendanceRoster;
+  });
+
+export type TeamDashboardStats = {
+  hasTeam: boolean;
+  teamSize: number;
+  presentToday: number;
+  stillClockedIn: number;
+  lateToday: number;
+  onLeaveToday: number;
+  notClockedIn: number;
+  // Pending approvals where the signed-in user is the current approver.
+  pendingLeaves: number;
+  pendingOT: number;
+  pendingDisputes: number;
+};
+
+// Team-lead dashboard for any approver (not just HR/admin): "today at a glance"
+// scoped to the user's subordinates, plus the count of requests waiting on them
+// across leaves / OT / disputes. Self-scoping comes from the org chart.
+export const getMyTeamDashboardStats = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { today: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const { resolveSubordinates } = await import("@/lib/chain.server");
+    const me = context.user.dbUserId;
+    const subs = await resolveSubordinates(pool, me);
+
+    // Requests where I'm the next approver in the chain (1-indexed arrays).
+    const pending = await pool.query<{ leaves: string; ot: string; disputes: string }>(
+      `SELECT
+         (SELECT count(*) FROM leave_requests
+           WHERE status = 'pending' AND approver_chain[current_approver_index + 1] = $1) AS leaves,
+         (SELECT count(*) FROM ot_approval_requests
+           WHERE status = 'pending' AND approver_chain[current_approver_index + 1] = $1) AS ot,
+         (SELECT count(*) FROM attendance_disputes
+           WHERE status = 'pending' AND approver_chain[current_approver_index + 1] = $1) AS disputes`,
+      [me],
+    );
+    const pendingLeaves = Number(pending.rows[0]?.leaves ?? 0);
+    const pendingOT = Number(pending.rows[0]?.ot ?? 0);
+    const pendingDisputes = Number(pending.rows[0]?.disputes ?? 0);
+
+    if (subs.length === 0) {
+      return {
+        hasTeam: false,
+        teamSize: 0,
+        presentToday: 0,
+        stillClockedIn: 0,
+        lateToday: 0,
+        onLeaveToday: 0,
+        notClockedIn: 0,
+        pendingLeaves,
+        pendingOT,
+        pendingDisputes,
+      } satisfies TeamDashboardStats;
+    }
+
+    const [today, leaveToday] = await Promise.all([
+      pool.query<{ present: string; still_in: string; late: string }>(
+        `SELECT count(*) FILTER (WHERE time_in IS NOT NULL) AS present,
+                count(*) FILTER (WHERE time_in IS NOT NULL AND time_out IS NULL) AS still_in,
+                count(*) FILTER (WHERE late_minutes > 0) AS late
+           FROM daily_time_reports
+          WHERE work_date = $1 AND employee_id = ANY($2::uuid[])`,
+        [data.today, subs],
+      ),
+      pool.query<{ on_leave: string }>(
+        `SELECT count(DISTINCT employee_id) AS on_leave
+           FROM leave_requests
+          WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1
+            AND employee_id = ANY($2::uuid[])`,
+        [data.today, subs],
+      ),
+    ]);
+
+    const presentToday = Number(today.rows[0]?.present ?? 0);
+    const onLeaveToday = Number(leaveToday.rows[0]?.on_leave ?? 0);
+
+    return {
+      hasTeam: true,
+      teamSize: subs.length,
+      presentToday,
+      stillClockedIn: Number(today.rows[0]?.still_in ?? 0),
+      lateToday: Number(today.rows[0]?.late ?? 0),
+      onLeaveToday,
+      notClockedIn: Math.max(0, subs.length - presentToday - onLeaveToday),
+      pendingLeaves,
+      pendingOT,
+      pendingDisputes,
+    } satisfies TeamDashboardStats;
+  });
+
+// Roster drill-down scoped to the signed-in user's subordinates (same shape as
+// getAdminAttendanceRoster). Powers the team dashboard's clickable cards.
+export const getMyTeamRoster = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { today: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const { resolveSubordinates } = await import("@/lib/chain.server");
+    const subs = await resolveSubordinates(pool, context.user.dbUserId);
+
+    const blank = {
+      timeIn: null,
+      timeOut: null,
+      shift: null,
+      lateMinutes: 0,
+      leaveType: null,
+      halfDay: false,
+      halfDayPeriod: null,
+      leaveEnd: null,
+    } as const;
+
+    if (subs.length === 0) {
+      return { present: [], onLeave: [], notClockedIn: [] } satisfies AttendanceRoster;
+    }
+
+    const [present, onLeave, notIn] = await Promise.all([
+      pool.query<{
+        id: string;
+        full_name: string;
+        department: string | null;
+        time_in: string | null;
+        time_out: string | null;
+        shift_label: string | null;
+        late_minutes: number;
+      }>(
+        `SELECT p.id, p.full_name, p.department,
+                d.time_in, d.time_out, d.shift_label, d.late_minutes
+           FROM daily_time_reports d
+           JOIN profiles p ON p.id = d.employee_id
+          WHERE d.work_date = $1 AND d.time_in IS NOT NULL AND d.employee_id = ANY($2::uuid[])
+          ORDER BY p.full_name ASC`,
+        [data.today, subs],
+      ),
+      pool.query<{
+        id: string;
+        full_name: string;
+        department: string | null;
+        leave_type: string;
+        half_day: boolean;
+        half_day_period: "AM" | "PM" | null;
+        end_date: string;
+      }>(
+        `SELECT DISTINCT ON (p.id) p.id, p.full_name, p.department,
+                lr.leave_type, lr.half_day, lr.half_day_period, lr.end_date
+           FROM leave_requests lr
+           JOIN profiles p ON p.id = lr.employee_id
+          WHERE lr.status = 'approved' AND lr.start_date <= $1 AND lr.end_date >= $1
+            AND lr.employee_id = ANY($2::uuid[])
+          ORDER BY p.id, lr.start_date ASC`,
+        [data.today, subs],
+      ),
+      pool.query<{ id: string; full_name: string; department: string | null }>(
+        `SELECT p.id, p.full_name, p.department
+           FROM profiles p
+          WHERE p.id = ANY($2::uuid[])
+            AND p.id NOT IN (
+                  SELECT employee_id FROM daily_time_reports
+                   WHERE work_date = $1 AND time_in IS NOT NULL)
+            AND p.id NOT IN (
+                  SELECT employee_id FROM leave_requests
+                   WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1)
+          ORDER BY p.full_name ASC`,
+        [data.today, subs],
+      ),
+    ]);
 
     return {
       present: present.rows.map((r) => ({
