@@ -1,6 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware, assertHR, assertUser } from "@/lib/auth-middleware";
 
+// System/service account always excluded from attendance monitoring, matched by
+// email (its row id differs across environments). Individual employees can also
+// opt out via profiles.exclude_from_attendance. Kept in sync with dtr-functions.
+const MONITORING_EXCLUDED_EMAIL = "localadmin@hris.local";
+
 export type AdminDashboardStats = {
   totalEmployees: number;
   // Today
@@ -37,22 +42,28 @@ export const getAdminDashboardStats = createServerFn({ method: "POST" })
       pool.query<{ department: string; count: string }>(
         `SELECT COALESCE(NULLIF(department, ''), 'Unassigned') AS department, count(*) AS count
            FROM profiles
+          WHERE email IS DISTINCT FROM $1 AND exclude_from_attendance IS NOT TRUE
           GROUP BY 1
           ORDER BY count(*) DESC, 1 ASC`,
+        [MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{ present: string; still_in: string; late: string }>(
-        `SELECT count(*) FILTER (WHERE time_in IS NOT NULL) AS present,
-                count(*) FILTER (WHERE time_in IS NOT NULL AND time_out IS NULL) AS still_in,
-                count(*) FILTER (WHERE late_minutes > 0) AS late
-           FROM daily_time_reports
-          WHERE work_date = $1`,
-        [data.today],
+        `SELECT count(*) FILTER (WHERE d.time_in IS NOT NULL) AS present,
+                count(*) FILTER (WHERE d.time_in IS NOT NULL AND d.time_out IS NULL) AS still_in,
+                count(*) FILTER (WHERE d.late_minutes > 0) AS late
+           FROM daily_time_reports d
+           JOIN profiles p ON p.id = d.employee_id
+          WHERE d.work_date = $1
+            AND p.email IS DISTINCT FROM $2 AND p.exclude_from_attendance IS NOT TRUE`,
+        [data.today, MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{ on_leave: string }>(
-        `SELECT count(DISTINCT employee_id) AS on_leave
-           FROM leave_requests
-          WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1`,
-        [data.today],
+        `SELECT count(DISTINCT lr.employee_id) AS on_leave
+           FROM leave_requests lr
+           JOIN profiles p ON p.id = lr.employee_id
+          WHERE lr.status = 'approved' AND lr.start_date <= $1 AND lr.end_date >= $1
+            AND p.email IS DISTINCT FROM $2 AND p.exclude_from_attendance IS NOT TRUE`,
+        [data.today, MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{ leaves: string; ot: string; disputes: string }>(
         `SELECT (SELECT count(*) FROM leave_requests WHERE status = 'pending') AS leaves,
@@ -65,13 +76,15 @@ export const getAdminDashboardStats = createServerFn({ method: "POST" })
         late_count: string;
         undertime_count: string;
       }>(
-        `SELECT COALESCE(SUM(hours_worked), 0) AS hours,
-                COALESCE(SUM(overtime_hours), 0) AS ot_hours,
-                count(*) FILTER (WHERE late_minutes > 0) AS late_count,
-                count(*) FILTER (WHERE is_undertime) AS undertime_count
-           FROM daily_time_reports
-          WHERE work_date >= $1 AND work_date <= $2`,
-        [data.monthStart, data.today],
+        `SELECT COALESCE(SUM(d.hours_worked), 0) AS hours,
+                COALESCE(SUM(d.overtime_hours), 0) AS ot_hours,
+                count(*) FILTER (WHERE d.late_minutes > 0) AS late_count,
+                count(*) FILTER (WHERE d.is_undertime) AS undertime_count
+           FROM daily_time_reports d
+           JOIN profiles p ON p.id = d.employee_id
+          WHERE d.work_date >= $1 AND d.work_date <= $2
+            AND p.email IS DISTINCT FROM $3 AND p.exclude_from_attendance IS NOT TRUE`,
+        [data.monthStart, data.today, MONITORING_EXCLUDED_EMAIL],
       ),
     ]);
 
@@ -145,8 +158,9 @@ export const getAdminAttendanceRoster = createServerFn({ method: "POST" })
            FROM daily_time_reports d
            JOIN profiles p ON p.id = d.employee_id
           WHERE d.work_date = $1 AND d.time_in IS NOT NULL
+            AND p.email IS DISTINCT FROM $2 AND p.exclude_from_attendance IS NOT TRUE
           ORDER BY p.full_name ASC`,
-        [data.today],
+        [data.today, MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{
         id: string;
@@ -162,20 +176,22 @@ export const getAdminAttendanceRoster = createServerFn({ method: "POST" })
            FROM leave_requests lr
            JOIN profiles p ON p.id = lr.employee_id
           WHERE lr.status = 'approved' AND lr.start_date <= $1 AND lr.end_date >= $1
+            AND p.email IS DISTINCT FROM $2 AND p.exclude_from_attendance IS NOT TRUE
           ORDER BY p.id, lr.start_date ASC`,
-        [data.today],
+        [data.today, MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{ id: string; full_name: string; department: string | null }>(
         `SELECT p.id, p.full_name, p.department
            FROM profiles p
-          WHERE p.id NOT IN (
+          WHERE p.email IS DISTINCT FROM $2 AND p.exclude_from_attendance IS NOT TRUE
+            AND p.id NOT IN (
                   SELECT employee_id FROM daily_time_reports
                    WHERE work_date = $1 AND time_in IS NOT NULL)
             AND p.id NOT IN (
                   SELECT employee_id FROM leave_requests
                    WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1)
           ORDER BY p.full_name ASC`,
-        [data.today],
+        [data.today, MONITORING_EXCLUDED_EMAIL],
       ),
     ]);
 
@@ -264,50 +280,64 @@ export const getMyTeamDashboardStats = createServerFn({ method: "POST" })
     const pendingOT = Number(pending.rows[0]?.ot ?? 0);
     const pendingDisputes = Number(pending.rows[0]?.disputes ?? 0);
 
-    if (subs.length === 0) {
-      return {
-        hasTeam: false,
-        teamSize: 0,
-        presentToday: 0,
-        stillClockedIn: 0,
-        lateToday: 0,
-        onLeaveToday: 0,
-        notClockedIn: 0,
-        pendingLeaves,
-        pendingOT,
-        pendingDisputes,
-      } satisfies TeamDashboardStats;
-    }
+    const emptyTeam = {
+      hasTeam: false as boolean,
+      teamSize: 0,
+      presentToday: 0,
+      stillClockedIn: 0,
+      lateToday: 0,
+      onLeaveToday: 0,
+      notClockedIn: 0,
+      pendingLeaves,
+      pendingOT,
+      pendingDisputes,
+    } satisfies TeamDashboardStats;
 
-    const [today, leaveToday] = await Promise.all([
+    if (subs.length === 0) return emptyTeam;
+
+    const [teamCount, today, leaveToday] = await Promise.all([
+      pool.query<{ count: string }>(
+        `SELECT count(*) AS count
+           FROM profiles
+          WHERE id = ANY($1::uuid[])
+            AND email IS DISTINCT FROM $2 AND exclude_from_attendance IS NOT TRUE`,
+        [subs, MONITORING_EXCLUDED_EMAIL],
+      ),
       pool.query<{ present: string; still_in: string; late: string }>(
-        `SELECT count(*) FILTER (WHERE time_in IS NOT NULL) AS present,
-                count(*) FILTER (WHERE time_in IS NOT NULL AND time_out IS NULL) AS still_in,
-                count(*) FILTER (WHERE late_minutes > 0) AS late
-           FROM daily_time_reports
-          WHERE work_date = $1 AND employee_id = ANY($2::uuid[])`,
-        [data.today, subs],
+        `SELECT count(*) FILTER (WHERE d.time_in IS NOT NULL) AS present,
+                count(*) FILTER (WHERE d.time_in IS NOT NULL AND d.time_out IS NULL) AS still_in,
+                count(*) FILTER (WHERE d.late_minutes > 0) AS late
+           FROM daily_time_reports d
+           JOIN profiles p ON p.id = d.employee_id
+          WHERE d.work_date = $1 AND d.employee_id = ANY($2::uuid[])
+            AND p.email IS DISTINCT FROM $3 AND p.exclude_from_attendance IS NOT TRUE`,
+        [data.today, subs, MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{ on_leave: string }>(
-        `SELECT count(DISTINCT employee_id) AS on_leave
-           FROM leave_requests
-          WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1
-            AND employee_id = ANY($2::uuid[])`,
-        [data.today, subs],
+        `SELECT count(DISTINCT lr.employee_id) AS on_leave
+           FROM leave_requests lr
+           JOIN profiles p ON p.id = lr.employee_id
+          WHERE lr.status = 'approved' AND lr.start_date <= $1 AND lr.end_date >= $1
+            AND lr.employee_id = ANY($2::uuid[])
+            AND p.email IS DISTINCT FROM $3 AND p.exclude_from_attendance IS NOT TRUE`,
+        [data.today, subs, MONITORING_EXCLUDED_EMAIL],
       ),
     ]);
+
+    const teamSize = Number(teamCount.rows[0]?.count ?? 0);
+    if (teamSize === 0) return emptyTeam;
 
     const presentToday = Number(today.rows[0]?.present ?? 0);
     const onLeaveToday = Number(leaveToday.rows[0]?.on_leave ?? 0);
 
     return {
       hasTeam: true,
-      teamSize: subs.length,
+      teamSize,
       presentToday,
       stillClockedIn: Number(today.rows[0]?.still_in ?? 0),
       lateToday: Number(today.rows[0]?.late ?? 0),
       onLeaveToday,
-      notClockedIn: Math.max(0, subs.length - presentToday - onLeaveToday),
+      notClockedIn: Math.max(0, teamSize - presentToday - onLeaveToday),
       pendingLeaves,
       pendingOT,
       pendingDisputes,
@@ -355,8 +385,9 @@ export const getMyTeamRoster = createServerFn({ method: "POST" })
            FROM daily_time_reports d
            JOIN profiles p ON p.id = d.employee_id
           WHERE d.work_date = $1 AND d.time_in IS NOT NULL AND d.employee_id = ANY($2::uuid[])
+            AND p.email IS DISTINCT FROM $3 AND p.exclude_from_attendance IS NOT TRUE
           ORDER BY p.full_name ASC`,
-        [data.today, subs],
+        [data.today, subs, MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{
         id: string;
@@ -373,13 +404,15 @@ export const getMyTeamRoster = createServerFn({ method: "POST" })
            JOIN profiles p ON p.id = lr.employee_id
           WHERE lr.status = 'approved' AND lr.start_date <= $1 AND lr.end_date >= $1
             AND lr.employee_id = ANY($2::uuid[])
+            AND p.email IS DISTINCT FROM $3 AND p.exclude_from_attendance IS NOT TRUE
           ORDER BY p.id, lr.start_date ASC`,
-        [data.today, subs],
+        [data.today, subs, MONITORING_EXCLUDED_EMAIL],
       ),
       pool.query<{ id: string; full_name: string; department: string | null }>(
         `SELECT p.id, p.full_name, p.department
            FROM profiles p
           WHERE p.id = ANY($2::uuid[])
+            AND p.email IS DISTINCT FROM $3 AND p.exclude_from_attendance IS NOT TRUE
             AND p.id NOT IN (
                   SELECT employee_id FROM daily_time_reports
                    WHERE work_date = $1 AND time_in IS NOT NULL)
@@ -387,7 +420,7 @@ export const getMyTeamRoster = createServerFn({ method: "POST" })
                   SELECT employee_id FROM leave_requests
                    WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1)
           ORDER BY p.full_name ASC`,
-        [data.today, subs],
+        [data.today, subs, MONITORING_EXCLUDED_EMAIL],
       ),
     ]);
 
