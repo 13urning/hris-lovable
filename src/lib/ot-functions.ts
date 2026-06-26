@@ -98,6 +98,8 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
+    const justification = data.justification?.trim() || null;
+    if (!justification) throw new Error("JUSTIFICATION_REQUIRED");
     const { pool } = await import("@/lib/db.server");
     const { resolveChain } = await import("@/lib/chain.server");
     const chain = await resolveChain(pool, context.user.dbUserId);
@@ -118,7 +120,7 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
         data.requestedHours,
         status,
         chain,
-        data.justification,
+        justification,
         reviewedAt,
       ],
     );
@@ -139,6 +141,8 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
+    const justification = data.justification?.trim() || null;
+    if (!justification) throw new Error("JUSTIFICATION_REQUIRED");
     const { pool } = await import("@/lib/db.server");
     const { resolveChain } = await import("@/lib/chain.server");
 
@@ -189,7 +193,7 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
         data.hours,
         status,
         chain,
-        data.justification,
+        justification,
         reviewedAt,
       ],
     );
