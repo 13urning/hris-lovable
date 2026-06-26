@@ -14,6 +14,7 @@ import { TablePagination } from "@/components/TablePagination";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { usePagination } from "@/hooks/use-pagination";
 import { DisputeAttendanceDialog } from "@/components/DisputeAttendanceDialog";
+import { RejectReasonDialog } from "@/components/RejectReasonDialog";
 import {
   fetchMyDisputes,
   fetchMyPendingDisputeApprovals,
@@ -84,6 +85,8 @@ function AttendancePage() {
   const { user, isAdmin } = useAuth();
   const qc = useQueryClient();
   const [disputeOpen, setDisputeOpen] = useState(false);
+  // Id of the dispute awaiting a rejection reason (drives the reject dialog).
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   const { data: myDisputes } = useQuery({
     queryKey: ["my-disputes", user?.id],
@@ -122,9 +125,11 @@ function AttendancePage() {
   });
 
   const rejectDispute = useMutation({
-    mutationFn: (id: string) => rejectDisputeStep({ data: { id } }),
+    mutationFn: ({ id, notes }: { id: string; notes?: string }) =>
+      rejectDisputeStep({ data: { id, notes } }),
     onSuccess: () => {
       toast.success("Dispute rejected");
+      setRejectingId(null);
       invalidateDisputes();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -238,6 +243,16 @@ function AttendancePage() {
 
       <DisputeAttendanceDialog open={disputeOpen} onOpenChange={setDisputeOpen} />
 
+      <RejectReasonDialog
+        open={rejectingId !== null}
+        onOpenChange={(o) => !o && setRejectingId(null)}
+        onConfirm={(reason) =>
+          rejectingId && rejectDispute.mutate({ id: rejectingId, notes: reason })
+        }
+        pending={rejectDispute.isPending}
+        title="Reject attendance dispute"
+      />
+
       {/* Disputes awaiting this user's approval (they're a supervisor in someone's chain) */}
       {pendingDisputes && pendingDisputes.length > 0 && (
         <Card className="border-warning/30 bg-warning/5">
@@ -297,7 +312,7 @@ function AttendancePage() {
                           size="icon"
                           variant="ghost"
                           title="Reject"
-                          onClick={() => rejectDispute.mutate(d.id)}
+                          onClick={() => setRejectingId(d.id)}
                           disabled={approveDispute.isPending || rejectDispute.isPending}
                         >
                           <X className="h-4 w-4 text-destructive" />

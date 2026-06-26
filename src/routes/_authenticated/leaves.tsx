@@ -24,6 +24,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { RejectReasonDialog } from "@/components/RejectReasonDialog";
 import {
   Select,
   SelectContent,
@@ -194,6 +195,8 @@ function LeavesPage() {
   const [filter, setFilter] = useState<"all" | "mine" | LeaveStatus>(isHR ? "all" : "mine");
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+  // Id of the leave request awaiting a rejection reason (drives the reject dialog).
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   // ── Admin: file a leave on an employee's behalf ──────────────────────────
   const [behalf, setBehalf] = useState(() => {
@@ -373,6 +376,7 @@ function LeavesPage() {
     },
     onSuccess: () => {
       toast.success("Rejected");
+      setRejectingId(null);
       qc.invalidateQueries({ queryKey: ["leaves"] });
       qc.invalidateQueries({ queryKey: ["leaves-pending-for-me"] });
     },
@@ -429,6 +433,13 @@ function LeavesPage() {
 
   return (
     <div className="space-y-8">
+      <RejectReasonDialog
+        open={rejectingId !== null}
+        onOpenChange={(o) => !o && setRejectingId(null)}
+        onConfirm={(reason) => rejectingId && rejectStep.mutate({ id: rejectingId, notes: reason })}
+        pending={rejectStep.isPending}
+        title="Reject leave request"
+      />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Team</p>
@@ -619,7 +630,7 @@ function LeavesPage() {
                             size="icon"
                             variant="ghost"
                             title="Reject"
-                            onClick={() => rejectStep.mutate({ id: l.id })}
+                            onClick={() => setRejectingId(l.id)}
                             disabled={approveStep.isPending || rejectStep.isPending}
                           >
                             <X className="h-4 w-4 text-destructive" />
@@ -970,6 +981,11 @@ function LeavesPage() {
                         <Badge className={STATUS_TONE[l.status]} variant="secondary">
                           {l.status}
                         </Badge>
+                        {l.review_notes && (
+                          <span className="mt-0.5 block max-w-[200px] text-[11px] italic text-muted-foreground">
+                            "{l.review_notes}"
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">
