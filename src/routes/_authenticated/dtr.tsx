@@ -17,13 +17,15 @@ import { DisputeAttendanceDialog } from "@/components/DisputeAttendanceDialog";
 import {
   fetchMyDisputes,
   fetchMyPendingDisputeApprovals,
+  fetchAllPendingDisputes,
   approveDisputeStep,
+  adminApproveDispute,
   rejectDisputeStep,
   cancelDispute,
   type DisputeRow,
 } from "@/lib/attendance-dispute-functions";
 import { toast } from "sonner";
-import { Clock3, AlertTriangle, FileDown, Scale, Check, X, Ban } from "lucide-react";
+import { Clock3, AlertTriangle, FileDown, Scale, Check, X, Ban, ShieldCheck } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/dtr")({ component: AttendancePage });
 
@@ -79,7 +81,7 @@ function disputeTimes(d: {
 }
 
 function AttendancePage() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const qc = useQueryClient();
   const [disputeOpen, setDisputeOpen] = useState(false);
 
@@ -95,9 +97,18 @@ function AttendancePage() {
     queryFn: () => fetchMyPendingDisputeApprovals(),
   });
 
+  // Admins see every pending dispute org-wide and can approve directly,
+  // bypassing the approver chain.
+  const { data: allPendingDisputes } = useQuery({
+    queryKey: ["disputes-pending-all", user?.id],
+    enabled: !!user && isAdmin,
+    queryFn: () => fetchAllPendingDisputes(),
+  });
+
   const invalidateDisputes = () => {
     qc.invalidateQueries({ queryKey: ["my-disputes"] });
     qc.invalidateQueries({ queryKey: ["disputes-pending-for-me"] });
+    qc.invalidateQueries({ queryKey: ["disputes-pending-all"] });
     qc.invalidateQueries({ queryKey: ["dtrs-month"] });
   };
 
@@ -114,6 +125,15 @@ function AttendancePage() {
     mutationFn: (id: string) => rejectDisputeStep({ data: { id } }),
     onSuccess: () => {
       toast.success("Dispute rejected");
+      invalidateDisputes();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const adminApprove = useMutation({
+    mutationFn: (id: string) => adminApproveDispute({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Dispute approved (admin override)");
       invalidateDisputes();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -283,6 +303,72 @@ function AttendancePage() {
                           <X className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Admin override: every pending dispute org-wide, approvable directly */}
+      {isAdmin && allPendingDisputes && allPendingDisputes.length > 0 && (
+        <Card className="border-accent/30 bg-accent/5">
+          <CardHeader>
+            <CardTitle className="font-display text-2xl flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-accent" /> All pending disputes (admin)
+              <Badge variant="secondary" className="ml-1">
+                {allPendingDisputes.length}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="bg-secondary/60 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 text-left">Employee</th>
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-left">Current</th>
+                  <th className="px-4 py-2 text-left">Requested</th>
+                  <th className="px-4 py-2 text-left">Reason</th>
+                  <th className="px-4 py-2 text-left">Awaiting</th>
+                  <th className="px-4 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {allPendingDisputes.map((d) => (
+                  <tr key={d.id} className="border-t align-top">
+                    <td className="px-4 py-2">
+                      <div className="font-medium">{d.employee_full_name ?? "—"}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {d.employee_department ?? ""}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatDate(d.work_date)}</td>
+                    <td className="px-4 py-2 tabular-nums text-muted-foreground">
+                      {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
+                    </td>
+                    <td className="px-4 py-2 tabular-nums font-medium">{disputeTimes(d)}</td>
+                    <td className="px-4 py-2 text-muted-foreground max-w-[220px]">
+                      {d.reason ?? ""}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                      {d.current_approver_name ?? "—"}
+                      <span className="block">
+                        step {d.current_approver_index + 1} of {d.approver_chain.length}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        title="Approve now, bypassing the approver chain"
+                        onClick={() => adminApprove.mutate(d.id)}
+                        disabled={adminApprove.isPending}
+                      >
+                        <ShieldCheck className="mr-1.5 h-4 w-4 text-accent" /> Approve
+                      </Button>
                     </td>
                   </tr>
                 ))}
