@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { authMiddleware, assertUser } from "@/lib/auth-middleware";
+import { authMiddleware, assertUser, assertAdmin } from "@/lib/auth-middleware";
 
 // ── Shared time math (kept in sync with dtr-functions.ts) ──────────────────────
 // Company-wide tardiness rule: any clock-in after 09:00 is late. Returns minutes
@@ -288,6 +288,86 @@ export const fetchMyPendingDisputeApprovals = createServerFn({ method: "POST" })
       employee_full_name: string | null;
       employee_department: string | null;
     })[];
+  });
+
+// Admin-only: every pending dispute across the org, regardless of where it sits
+// in its approver chain. Used to power the admin override panel so an admin can
+// clear disputes that are stuck on (or simply waiting for) another approver.
+export const fetchAllPendingDisputes = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertAdmin(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const { rows } = await pool.query(
+      `SELECT ad.id, ad.employee_id, ad.dtr_id, ad.work_date,
+              ad.original_time_in, ad.original_time_out, ad.original_shift_label,
+              ad.requested_time_in, ad.requested_time_out, ad.requested_shift_label,
+              ad.reason, ad.status, ad.approver_chain, ad.current_approver_index,
+              ad.created_at,
+              p.full_name AS employee_full_name, p.department AS employee_department,
+              ap.full_name AS current_approver_name
+         FROM attendance_disputes ad
+         LEFT JOIN profiles p ON p.id = ad.employee_id
+         LEFT JOIN profiles ap ON ap.id = ad.approver_chain[ad.current_approver_index + 1]
+        WHERE ad.status = 'pending'
+        ORDER BY ad.created_at DESC`,
+    );
+    return rows as (DisputeRow & {
+      employee_full_name: string | null;
+      employee_department: string | null;
+      current_approver_name: string | null;
+    })[];
+  });
+
+// Admin override: approve any pending dispute immediately, bypassing the whole
+// approver chain. Gated to admins via assertAdmin. The chain index is advanced
+// to the end so the dispute reads as fully approved, and the requested values
+// are written back to the DTR in the same transaction.
+export const adminApproveDispute = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { id: string; notes?: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertAdmin(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const {
+        rows: [req],
+      } = await client.query<{ approver_chain: string[]; status: string }>(
+        `SELECT approver_chain, status
+           FROM attendance_disputes WHERE id = $1 FOR UPDATE`,
+        [data.id],
+      );
+      if (!req) throw new Error("NOT_FOUND");
+      if (req.status !== "pending") throw new Error("NOT_PENDING");
+
+      await client.query(
+        `UPDATE attendance_disputes
+            SET status = 'approved',
+                current_approver_index = $1,
+                reviewed_by = $2,
+                reviewed_at = $3,
+                review_notes = COALESCE($4, review_notes)
+          WHERE id = $5`,
+        [
+          req.approver_chain.length,
+          context.user.dbUserId,
+          new Date().toISOString(),
+          data.notes ?? "Approved by admin override",
+          data.id,
+        ],
+      );
+      await applyDisputeToDTR(pool, data.id, client);
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 // Approve the current step. Advances the chain; on the final step the dispute is
