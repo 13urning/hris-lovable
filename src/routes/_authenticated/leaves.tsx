@@ -222,6 +222,8 @@ function LeavesPage() {
       end_date: d,
       reason: "",
       auto_approve: true,
+      half_day: false,
+      half_day_period: "AM" as "AM" | "PM",
     };
   });
 
@@ -347,17 +349,22 @@ function LeavesPage() {
     mutationFn: async () => {
       if (!behalf.employee_id) throw new Error("Pick an employee");
       if (isWeekend(behalf.start_date)) throw new Error("Start date cannot be a weekend");
-      if (isWeekend(behalf.end_date)) throw new Error("End date cannot be a weekend");
-      if (new Date(behalf.end_date) < new Date(behalf.start_date))
-        throw new Error("End date must be on or after start date");
+      // Half-day leave is a single day, so the end date is ignored entirely.
+      if (!behalf.half_day) {
+        if (isWeekend(behalf.end_date)) throw new Error("End date cannot be a weekend");
+        if (new Date(behalf.end_date) < new Date(behalf.start_date))
+          throw new Error("End date must be on or after start date");
+      }
       await fileLeaveOnBehalf({
         data: {
           employeeId: behalf.employee_id,
           leaveType: behalf.leave_type,
           startDate: behalf.start_date,
-          endDate: behalf.end_date,
+          endDate: behalf.half_day ? behalf.start_date : behalf.end_date,
           reason: behalf.reason || null,
           autoApprove: behalf.auto_approve,
+          halfDay: behalf.half_day,
+          halfDayPeriod: behalf.half_day ? behalf.half_day_period : null,
         },
       });
     },
@@ -905,16 +912,51 @@ function LeavesPage() {
                   }
                 />
               </div>
-              <div>
-                <Label>End date</Label>
-                <DatePickerField
-                  value={behalf.end_date}
-                  minIso={behalf.start_date}
-                  onSelect={(iso) => setBehalf({ ...behalf, end_date: iso })}
-                />
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {daysBetween(behalf.start_date, behalf.end_date)} day(s)
-                </p>
+              {behalf.half_day ? (
+                <div>
+                  <Label>Half-day period</Label>
+                  <Select
+                    value={behalf.half_day_period}
+                    onValueChange={(v) =>
+                      setBehalf({ ...behalf, half_day_period: v as "AM" | "PM" })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="AM">Morning (AM)</SelectItem>
+                      <SelectItem value="PM">Afternoon (PM)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-[11px] text-muted-foreground">0.5 day</p>
+                </div>
+              ) : (
+                <div>
+                  <Label>End date</Label>
+                  <DatePickerField
+                    value={behalf.end_date}
+                    minIso={behalf.start_date}
+                    onSelect={(iso) => setBehalf({ ...behalf, end_date: iso })}
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {daysBetween(behalf.start_date, behalf.end_date)} day(s)
+                  </p>
+                </div>
+              )}
+              <div className="md:col-span-4">
+                <label className="flex items-center gap-3 text-sm">
+                  <Switch
+                    checked={behalf.half_day}
+                    onCheckedChange={(v) => setBehalf({ ...behalf, half_day: v })}
+                  />
+                  <span>
+                    <span className="font-medium">Half day</span>
+                    <span className="block text-xs text-muted-foreground">
+                      File a single day as a half-day leave, counted as 0.5 day.
+                    </span>
+                  </span>
+                </label>
               </div>
               <div className="md:col-span-4">
                 <Label>Reason</Label>
