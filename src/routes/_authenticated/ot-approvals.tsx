@@ -274,6 +274,8 @@ function OTApprovalsPage() {
     onError: (e: Error) => {
       if (e.message === "NO_ORG_NODE") {
         toast.error("You haven't been placed in the org chart yet. Contact HR.");
+      } else if (e.message === "JUSTIFICATION_REQUIRED") {
+        toast.error("Please add a justification for this OT request.");
       } else {
         toast.error(e.message);
       }
@@ -313,7 +315,12 @@ function OTApprovalsPage() {
       qc.invalidateQueries({ queryKey: ["ot-actuals-mine"] });
       qc.invalidateQueries({ queryKey: ["ot-budgets-approved"] });
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) =>
+      toast.error(
+        e.message === "JUSTIFICATION_REQUIRED"
+          ? "Please add a justification for these OT hours."
+          : e.message,
+      ),
   });
 
   // ── Mutation: cancel my own pending OT request (soft) ────────────────────
@@ -932,7 +939,9 @@ function OTApprovalsPage() {
             </div>
 
             <div>
-              <Label htmlFor="budget-justification">Justification (optional)</Label>
+              <Label htmlFor="budget-justification">
+                Justification <span className="text-destructive">*</span>
+              </Label>
               <Textarea
                 id="budget-justification"
                 rows={2}
@@ -950,7 +959,10 @@ function OTApprovalsPage() {
             </Button>
             <Button
               disabled={
-                requestBudget.isPending || !budgetForm.month || budgetForm.requested_hours <= 0
+                requestBudget.isPending ||
+                !budgetForm.month ||
+                budgetForm.requested_hours <= 0 ||
+                !budgetForm.justification.trim()
               }
               onClick={() => requestBudget.mutate()}
             >
@@ -1071,7 +1083,9 @@ function OTApprovalsPage() {
             </div>
 
             <div>
-              <Label htmlFor="file-justification">Justification (optional)</Label>
+              <Label htmlFor="file-justification">
+                Justification <span className="text-destructive">*</span>
+              </Label>
               <Textarea
                 id="file-justification"
                 rows={2}
@@ -1094,7 +1108,8 @@ function OTApprovalsPage() {
                 !fileForm.work_date ||
                 fileForm.hours <= 0 ||
                 fileForm.hours > availableForSelected ||
-                availableForSelected === 0
+                availableForSelected === 0 ||
+                !fileForm.justification.trim()
               }
               onClick={() => fileActual.mutate()}
             >
