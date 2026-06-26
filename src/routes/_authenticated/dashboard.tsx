@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableSkeleton } from "@/components/TableSkeleton";
+import { AdminDashboard } from "@/components/AdminDashboard";
 import { formatDate, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane, PartyPopper } from "lucide-react";
@@ -286,6 +287,9 @@ function Dashboard() {
         </Card>
       )}
 
+      {/* ── Admin / HR org-wide overview ─────────────────────────────────── */}
+      {isHR && <AdminDashboard />}
+
       {/* ── Employee-only sections (OT + leave summary) ──────────────────── */}
       {!isHR && (
         <>
@@ -506,41 +510,6 @@ function Dashboard() {
           )}
         </div>
       </div>
-
-      {/* ── HR / Admin landing ──────────────────────────────────────────── */}
-      {isHR && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            {
-              to: "/employees",
-              label: "Employees",
-              desc: "Manage profiles, roles, and leave credits",
-            },
-            { to: "/org-chart", label: "Org Chart", desc: "Visualise the reporting hierarchy" },
-            {
-              to: "/ot-approvals",
-              label: "OT Approvals",
-              desc: "Review pre-approved OT budget requests",
-            },
-            { to: "/leaves", label: "Leave Requests", desc: "Review and approve employee leave" },
-            { to: "/kpi-builder", label: "KPI Builder", desc: "Build and manage KPI templates" },
-            {
-              to: "/performance-admin",
-              label: "Performance",
-              desc: "Review team performance evaluations",
-            },
-          ].map(({ to, label, desc }) => (
-            <Link
-              key={to}
-              to={to as never}
-              className="rounded-lg border bg-card p-5 transition-colors hover:bg-secondary/40"
-            >
-              <p className="font-semibold">{label}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{desc}</p>
-            </Link>
-          ))}
-        </div>
-      )}
 
       {/* Shift picker dialog */}
       <Dialog open={showShiftPicker} onOpenChange={setShowShiftPicker}>
