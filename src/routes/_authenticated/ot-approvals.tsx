@@ -52,6 +52,7 @@ interface OTRequest {
   current_approver_index: number;
   reviewed_at: string | null;
   review_notes: string | null;
+  justification: string | null;
   created_at: string;
 }
 
@@ -65,6 +66,7 @@ interface PendingOTRow {
   approver_chain: string[];
   current_approver_index: number;
   review_notes: string | null;
+  justification: string | null;
   created_at: string;
   employee_full_name: string | null;
 }
@@ -121,7 +123,7 @@ function OTApprovalsPage() {
   const [budgetForm, setBudgetForm] = useState({
     month: nextMonthValue(),
     requested_hours: 8,
-    notes: "",
+    justification: "",
   });
 
   // ── "File OT Hours" dialog ───────────────────────────────────────────────
@@ -130,6 +132,7 @@ function OTApprovalsPage() {
     pre_approved_id: "",
     work_date: new Date().toISOString().slice(0, 10),
     hours: 1,
+    justification: "",
   });
 
   // ── Decision inline-expand state ─────────────────────────────────────────
@@ -236,6 +239,7 @@ function OTApprovalsPage() {
               : formatDate(r.work_date),
         },
         { header: "Hours", value: (r) => r.requested_hours },
+        { header: "Justification", value: (r) => r.justification ?? "" },
         { header: "Notes", value: (r) => r.review_notes ?? "" },
         {
           header: "Step",
@@ -256,14 +260,14 @@ function OTApprovalsPage() {
         data: {
           targetMonth: budgetForm.month,
           requestedHours: budgetForm.requested_hours,
-          notes: budgetForm.notes || null,
+          justification: budgetForm.justification || null,
         },
       });
     },
     onSuccess: () => {
       toast.success("OT budget request submitted");
       setBudgetDialogOpen(false);
-      setBudgetForm({ month: nextMonthValue(), requested_hours: 8, notes: "" });
+      setBudgetForm({ month: nextMonthValue(), requested_hours: 8, justification: "" });
       qc.invalidateQueries({ queryKey: ["ot-budgets-mine"] });
       qc.invalidateQueries({ queryKey: ["ot-budgets-approved"] });
     },
@@ -293,6 +297,7 @@ function OTApprovalsPage() {
           preApprovedId: selectedBudget.id,
           workDate: fileForm.work_date,
           hours: fileForm.hours,
+          justification: fileForm.justification || null,
         },
       });
     },
@@ -303,6 +308,7 @@ function OTApprovalsPage() {
         pre_approved_id: "",
         work_date: new Date().toISOString().slice(0, 10),
         hours: 1,
+        justification: "",
       });
       qc.invalidateQueries({ queryKey: ["ot-actuals-mine"] });
       qc.invalidateQueries({ queryKey: ["ot-budgets-approved"] });
@@ -387,7 +393,7 @@ function OTApprovalsPage() {
             {!nextMonthBudget && (
               <Button
                 onClick={() => {
-                  setBudgetForm({ month: nextMonthValue(), requested_hours: 8, notes: "" });
+                  setBudgetForm({ month: nextMonthValue(), requested_hours: 8, justification: "" });
                   setBudgetDialogOpen(true);
                 }}
               >
@@ -474,7 +480,7 @@ function OTApprovalsPage() {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      setBudgetForm({ month: nextMonthValue(), requested_hours: 8, notes: "" });
+                      setBudgetForm({ month: nextMonthValue(), requested_hours: 8, justification: "" });
                       setBudgetDialogOpen(true);
                     }}
                   >
@@ -526,7 +532,14 @@ function OTApprovalsPage() {
                     const remaining = used !== null ? Math.max(0, r.requested_hours - used) : null;
                     return (
                       <tr key={r.id} className="border-t">
-                        <td className="px-4 py-2 font-medium">{formatMonth(r.target_month)}</td>
+                        <td className="px-4 py-2 font-medium">
+                          {formatMonth(r.target_month)}
+                          {r.justification && (
+                            <span className="mt-0.5 block max-w-[220px] text-[11px] font-normal italic text-muted-foreground">
+                              "{r.justification}"
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
                         <td className="px-4 py-2 text-right text-muted-foreground">
                           {used !== null ? `${used}h` : "—"}
@@ -610,6 +623,7 @@ function OTApprovalsPage() {
                   pre_approved_id: approvedBudgets?.[0]?.id ?? "",
                   work_date: new Date().toISOString().slice(0, 10),
                   hours: 1,
+                  justification: "",
                 });
                 setFileDialogOpen(true);
               }}
@@ -638,7 +652,14 @@ function OTApprovalsPage() {
                     const budget = myBudgets?.find((b) => b.id === r.pre_approved_id);
                     return (
                       <tr key={r.id} className="border-t">
-                        <td className="px-4 py-2 font-medium">{formatDate(r.work_date)}</td>
+                        <td className="px-4 py-2 font-medium">
+                          {formatDate(r.work_date)}
+                          {r.justification && (
+                            <span className="mt-0.5 block max-w-[220px] text-[11px] font-normal italic text-muted-foreground">
+                              "{r.justification}"
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
                         <td className="px-4 py-2 text-muted-foreground">
                           {budget
@@ -717,7 +738,7 @@ function OTApprovalsPage() {
                     <th className="px-4 py-2 text-left">Type</th>
                     <th className="px-4 py-2 text-left">For</th>
                     <th className="px-4 py-2 text-right">Hours</th>
-                    <th className="px-4 py-2 text-left">Notes</th>
+                    <th className="px-4 py-2 text-left">Justification</th>
                     <th className="px-4 py-2 text-left">Step</th>
                     <th className="px-4 py-2 text-left">Filed</th>
                     <th className="px-4 py-2"></th>
@@ -747,7 +768,7 @@ function OTApprovalsPage() {
                           </td>
                           <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
                           <td className="px-4 py-2 text-muted-foreground max-w-[260px]">
-                            {r.review_notes ?? "—"}
+                            {r.justification ?? "—"}
                           </td>
                           <td className="px-4 py-2">
                             <StepBadge row={r} />
@@ -911,14 +932,14 @@ function OTApprovalsPage() {
             </div>
 
             <div>
-              <Label htmlFor="budget-notes">Notes (optional)</Label>
+              <Label htmlFor="budget-justification">Justification (optional)</Label>
               <Textarea
-                id="budget-notes"
+                id="budget-justification"
                 rows={2}
                 className="mt-1"
-                placeholder="Context for the approvers up the chain…"
-                value={budgetForm.notes}
-                onChange={(e) => setBudgetForm({ ...budgetForm, notes: e.target.value })}
+                placeholder="Why is this OT budget needed? Context for the approvers up the chain…"
+                value={budgetForm.justification}
+                onChange={(e) => setBudgetForm({ ...budgetForm, justification: e.target.value })}
               />
             </div>
           </div>
@@ -1047,6 +1068,18 @@ function OTApprovalsPage() {
                     {pendingForSelected > 0 && ` (${pendingForSelected}h already pending)`}.
                   </p>
                 )}
+            </div>
+
+            <div>
+              <Label htmlFor="file-justification">Justification (optional)</Label>
+              <Textarea
+                id="file-justification"
+                rows={2}
+                className="mt-1"
+                placeholder="What was this overtime for? Context for the approvers up the chain…"
+                value={fileForm.justification}
+                onChange={(e) => setFileForm({ ...fileForm, justification: e.target.value })}
+              />
             </div>
           </div>
 

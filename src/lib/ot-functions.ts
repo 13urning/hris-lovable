@@ -15,6 +15,7 @@ type OTRow = {
   current_approver_index: number;
   reviewed_at: string | null;
   review_notes: string | null;
+  justification: string | null;
   created_at: string;
 };
 
@@ -93,7 +94,7 @@ export const getFiledOTForDashboard = createServerFn({ method: "POST" })
 export const fileOTBudgetRequest = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator(
-    (data: { targetMonth: string; requestedHours: number; notes: string | null }) => data,
+    (data: { targetMonth: string; requestedHours: number; justification: string | null }) => data,
   )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
@@ -109,7 +110,7 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
       `INSERT INTO ot_approval_requests
          (employee_id, request_type, target_month, requested_hours,
           work_date, status, approver_chain, current_approver_index,
-          review_notes, reviewed_at)
+          justification, reviewed_at)
        VALUES ($1, 'pre_approved', $2, $3, $2, $4, $5, 0, $6, $7)`,
       [
         context.user.dbUserId,
@@ -117,7 +118,7 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
         data.requestedHours,
         status,
         chain,
-        data.notes,
+        data.justification,
         reviewedAt,
       ],
     );
@@ -128,7 +129,14 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
 // Group Head filing auto-approves (empty chain).
 export const fileActualOTHours = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { preApprovedId: string; workDate: string; hours: number }) => data)
+  .inputValidator(
+    (data: {
+      preApprovedId: string;
+      workDate: string;
+      hours: number;
+      justification: string | null;
+    }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -171,8 +179,9 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
     await pool.query(
       `INSERT INTO ot_approval_requests
          (employee_id, request_type, pre_approved_id, work_date,
-          requested_hours, status, approver_chain, current_approver_index, reviewed_at)
-       VALUES ($1, 'actual', $2, $3, $4, $5, $6, 0, $7)`,
+          requested_hours, status, approver_chain, current_approver_index,
+          justification, reviewed_at)
+       VALUES ($1, 'actual', $2, $3, $4, $5, $6, 0, $7, $8)`,
       [
         context.user.dbUserId,
         data.preApprovedId,
@@ -180,6 +189,7 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
         data.hours,
         status,
         chain,
+        data.justification,
         reviewedAt,
       ],
     );
@@ -193,7 +203,8 @@ export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
     const { rows } = await pool.query(
       `SELECT r.id, r.employee_id, r.request_type, r.requested_hours,
               r.target_month, r.work_date,
-              r.approver_chain, r.current_approver_index, r.review_notes, r.created_at,
+              r.approver_chain, r.current_approver_index, r.review_notes, r.justification,
+              r.created_at,
               p.full_name AS employee_full_name
          FROM ot_approval_requests r
          LEFT JOIN profiles p ON p.id = r.employee_id
@@ -212,6 +223,7 @@ export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
       approver_chain: string[];
       current_approver_index: number;
       review_notes: string | null;
+      justification: string | null;
       created_at: string;
       employee_full_name: string | null;
     }[];
