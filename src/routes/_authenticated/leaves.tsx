@@ -24,6 +24,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { RejectReasonDialog } from "@/components/RejectReasonDialog";
 import {
   Select,
   SelectContent,
@@ -65,6 +66,8 @@ type LeaveRow = {
   reviewed_at: string | null;
   review_notes: string | null;
   created_at: string;
+  half_day: boolean;
+  half_day_period: "AM" | "PM" | null;
 };
 
 const LEAVE_TYPES = [
@@ -88,6 +91,11 @@ const STATUS_TONE: Record<LeaveStatus, string> = {
 
 function daysBetween(a: string, b: string) {
   return businessDaysBetween(a, b);
+}
+
+// Day count for a stored leave row, accounting for half-day leaves (0.5 day).
+function leaveDays(l: { start_date: string; end_date: string; half_day?: boolean }) {
+  return l.half_day ? 0.5 : businessDaysBetween(l.start_date, l.end_date);
 }
 
 function isWeekend(iso: string) {
@@ -189,11 +197,20 @@ function LeavesPage() {
 
   const [form, setForm] = useState(() => {
     const d = nextWeekday(todayIso());
-    return { leave_type: "VL", start_date: d, end_date: d, reason: "" };
+    return {
+      leave_type: "VL",
+      start_date: d,
+      end_date: d,
+      reason: "",
+      half_day: false,
+      half_day_period: "AM" as "AM" | "PM",
+    };
   });
   const [filter, setFilter] = useState<"all" | "mine" | LeaveStatus>(isHR ? "all" : "mine");
   const [startOpen, setStartOpen] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+  // Id of the leave request awaiting a rejection reason (drives the reject dialog).
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   // ── Admin: file a leave on an employee's behalf ──────────────────────────
   const [behalf, setBehalf] = useState(() => {
@@ -257,7 +274,7 @@ function LeavesPage() {
   // Filing balance gate: every type except Leave without Pay needs enough
   // balance for the requested days. VL→vacation, SL→sick, other paid types draw
   // from the combined pool. HR/admins aren't gated.
-  const formDays = daysBetween(form.start_date, form.end_date);
+  const formDays = form.half_day ? 0.5 : daysBetween(form.start_date, form.end_date);
   const availableForType =
     form.leave_type === "WP"
       ? Infinity
@@ -276,9 +293,12 @@ function LeavesPage() {
     mutationFn: async () => {
       if (!user) throw new Error("not signed in");
       if (isWeekend(form.start_date)) throw new Error("Start date cannot be a weekend");
-      if (isWeekend(form.end_date)) throw new Error("End date cannot be a weekend");
-      if (new Date(form.end_date) < new Date(form.start_date))
-        throw new Error("End date must be on or after start date");
+      // Half-day leave is a single day, so the end date is ignored entirely.
+      if (!form.half_day) {
+        if (isWeekend(form.end_date)) throw new Error("End date cannot be a weekend");
+        if (new Date(form.end_date) < new Date(form.start_date))
+          throw new Error("End date must be on or after start date");
+      }
       if (insufficientBalance)
         throw new Error(
           `Not enough ${formTypeLabel} balance for ${formDays} day(s). File Leave without Pay instead.`,
@@ -287,8 +307,10 @@ function LeavesPage() {
         data: {
           leaveType: form.leave_type,
           startDate: form.start_date,
-          endDate: form.end_date,
+          endDate: form.half_day ? form.start_date : form.end_date,
           reason: form.reason || null,
+          halfDay: form.half_day,
+          halfDayPeriod: form.half_day ? form.half_day_period : null,
         },
       });
     },
@@ -373,6 +395,7 @@ function LeavesPage() {
     },
     onSuccess: () => {
       toast.success("Rejected");
+      setRejectingId(null);
       qc.invalidateQueries({ queryKey: ["leaves"] });
       qc.invalidateQueries({ queryKey: ["leaves-pending-for-me"] });
     },
@@ -416,7 +439,11 @@ function LeavesPage() {
         },
         { header: "Start Date", value: (l) => l.start_date },
         { header: "End Date", value: (l) => l.end_date },
-        { header: "Days", value: (l) => daysBetween(l.start_date, l.end_date) },
+        { header: "Days", value: (l) => leaveDays(l) },
+        {
+          header: "Half Day",
+          value: (l) => (l.half_day ? `Yes (${l.half_day_period ?? ""})` : "No"),
+        },
         { header: "Reason", value: (l) => l.reason ?? "" },
         { header: "Status", value: (l) => l.status },
         { header: "Filed", value: (l) => l.created_at },
@@ -429,6 +456,13 @@ function LeavesPage() {
 
   return (
     <div className="space-y-8">
+      <RejectReasonDialog
+        open={rejectingId !== null}
+        onOpenChange={(o) => !o && setRejectingId(null)}
+        onConfirm={(reason) => rejectingId && rejectStep.mutate({ id: rejectingId, notes: reason })}
+        pending={rejectStep.isPending}
+        title="Reject leave request"
+      />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Team</p>
@@ -593,11 +627,20 @@ function LeavesPage() {
                         <div className="mt-0.5 text-[11px] text-muted-foreground">{typeLabel}</div>
                       </td>
                       <td className="px-4 py-2">
-                        {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                        {l.half_day ? (
+                          <span>
+                            {formatDate(l.start_date)}{" "}
+                            <span className="text-muted-foreground">
+                              (half day · {l.half_day_period})
+                            </span>
+                          </span>
+                        ) : (
+                          <>
+                            {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                          </>
+                        )}
                       </td>
-                      <td className="px-4 py-2 text-right">
-                        {daysBetween(l.start_date, l.end_date)}
-                      </td>
+                      <td className="px-4 py-2 text-right">{leaveDays(l)}</td>
                       <td className="px-4 py-2 text-muted-foreground max-w-[260px]">
                         {l.reason ?? ""}
                       </td>
@@ -619,7 +662,7 @@ function LeavesPage() {
                             size="icon"
                             variant="ghost"
                             title="Reject"
-                            onClick={() => rejectStep.mutate({ id: l.id })}
+                            onClick={() => setRejectingId(l.id)}
                             disabled={approveStep.isPending || rejectStep.isPending}
                           >
                             <X className="h-4 w-4 text-destructive" />
@@ -697,34 +740,72 @@ function LeavesPage() {
               </Popover>
               <p className="mt-1 text-[11px] text-muted-foreground">Past or future dates allowed</p>
             </div>
-            <div>
-              <Label>End date</Label>
-              <Popover open={endOpen} onOpenChange={setEndOpen}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start text-left font-normal">
-                    <CalendarDays className="mr-2 h-4 w-4" />
-                    {formatDate(form.end_date)}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={fromIso(form.end_date)}
-                    onSelect={(date) => {
-                      if (!date) return;
-                      setForm({ ...form, end_date: toIso(date) });
-                      setEndOpen(false);
-                    }}
-                    disabled={(date) => {
-                      const dow = date.getDay();
-                      return dow === 0 || dow === 6 || toIso(date) < form.start_date;
-                    }}
-                  />
-                </PopoverContent>
-              </Popover>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {daysBetween(form.start_date, form.end_date)} day(s)
-              </p>
+            {form.half_day ? (
+              <div>
+                <Label>Half-day period</Label>
+                <Select
+                  value={form.half_day_period}
+                  onValueChange={(v) =>
+                    setForm({ ...form, half_day_period: v as "AM" | "PM" })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AM">Morning (AM)</SelectItem>
+                    <SelectItem value="PM">Afternoon (PM)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="mt-1 text-[11px] text-muted-foreground">0.5 day</p>
+              </div>
+            ) : (
+              <div>
+                <Label>End date</Label>
+                <Popover open={endOpen} onOpenChange={setEndOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                    >
+                      <CalendarDays className="mr-2 h-4 w-4" />
+                      {formatDate(form.end_date)}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={fromIso(form.end_date)}
+                      onSelect={(date) => {
+                        if (!date) return;
+                        setForm({ ...form, end_date: toIso(date) });
+                        setEndOpen(false);
+                      }}
+                      disabled={(date) => {
+                        const dow = date.getDay();
+                        return dow === 0 || dow === 6 || toIso(date) < form.start_date;
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {daysBetween(form.start_date, form.end_date)} day(s)
+                </p>
+              </div>
+            )}
+            <div className="md:col-span-4">
+              <label className="flex items-center gap-3 text-sm">
+                <Switch
+                  checked={form.half_day}
+                  onCheckedChange={(v) => setForm({ ...form, half_day: v })}
+                />
+                <span>
+                  <span className="font-medium">Half day</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Take a single day as a half-day leave, counted as 0.5 day.
+                  </span>
+                </span>
+              </label>
             </div>
             <div className="md:col-span-4">
               <Label>Reason</Label>
@@ -952,7 +1033,18 @@ function LeavesPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div>
-                          {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                          {l.half_day ? (
+                            <span>
+                              {formatDate(l.start_date)}{" "}
+                              <span className="text-muted-foreground">
+                                (half day · {l.half_day_period})
+                              </span>
+                            </span>
+                          ) : (
+                            <>
+                              {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                            </>
+                          )}
                         </div>
                         {isToday && (
                           <div className="mt-0.5 text-[10px] uppercase tracking-wide text-accent">
@@ -960,9 +1052,7 @@ function LeavesPage() {
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-2 text-right">
-                        {daysBetween(l.start_date, l.end_date)}
-                      </td>
+                      <td className="px-4 py-2 text-right">{leaveDays(l)}</td>
                       <td className="px-4 py-2 text-muted-foreground max-w-[260px]">
                         {l.reason ?? ""}
                       </td>
@@ -970,6 +1060,11 @@ function LeavesPage() {
                         <Badge className={STATUS_TONE[l.status]} variant="secondary">
                           {l.status}
                         </Badge>
+                        {l.review_notes && (
+                          <span className="mt-0.5 block max-w-[200px] text-[11px] italic text-muted-foreground">
+                            "{l.review_notes}"
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-right">
                         <div className="flex justify-end gap-1">

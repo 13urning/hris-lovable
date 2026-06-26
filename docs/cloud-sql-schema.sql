@@ -221,6 +221,10 @@ CREATE TABLE public.leave_requests (
   reviewed_by            UUID REFERENCES public.users(id),
   reviewed_at            TIMESTAMPTZ,
   review_notes           TEXT,
+  -- Half-day leave: single day (start_date = end_date) counted as 0.5 days.
+  -- half_day_period records which half ('AM' / 'PM'). Invariants enforced in app.
+  half_day               BOOLEAN NOT NULL DEFAULT false,
+  half_day_period        TEXT CHECK (half_day_period IS NULL OR half_day_period IN ('AM', 'PM')),
   created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (end_date >= start_date)

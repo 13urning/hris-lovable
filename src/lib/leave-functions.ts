@@ -25,7 +25,7 @@ export const fetchMyLeaves = createServerFn({ method: "POST" })
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT id, employee_id, leave_type, start_date, end_date, reason,
-              status, reviewed_at, review_notes, created_at
+              status, reviewed_at, review_notes, created_at, half_day, half_day_period
        FROM leave_requests
        WHERE employee_id = $1 ORDER BY start_date DESC`,
       [context.user.dbUserId],
@@ -41,6 +41,8 @@ export const fetchMyLeaves = createServerFn({ method: "POST" })
       reviewed_at: string | null;
       review_notes: string | null;
       created_at: string;
+      half_day: boolean;
+      half_day_period: "AM" | "PM" | null;
     }[];
   });
 
@@ -52,7 +54,7 @@ export const fetchAllLeaves = createServerFn({ method: "POST" })
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT id, employee_id, leave_type, start_date, end_date, reason,
-              status, reviewed_at, review_notes, created_at
+              status, reviewed_at, review_notes, created_at, half_day, half_day_period
        FROM leave_requests
        ORDER BY start_date DESC`,
     );
@@ -67,6 +69,8 @@ export const fetchAllLeaves = createServerFn({ method: "POST" })
       reviewed_at: string | null;
       review_notes: string | null;
       created_at: string;
+      half_day: boolean;
+      half_day_period: "AM" | "PM" | null;
     }[];
   });
 
@@ -90,12 +94,28 @@ export const fetchProfilesByIds = createServerFn({ method: "POST" })
 export const fileLeaveRequest = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator(
-    (data: { leaveType: string; startDate: string; endDate: string; reason: string | null }) =>
-      data,
+    (data: {
+      leaveType: string;
+      startDate: string;
+      endDate: string;
+      reason: string | null;
+      halfDay?: boolean;
+      halfDayPeriod?: "AM" | "PM" | null;
+    }) => data,
   )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
+
+    // A half-day leave always covers exactly one day, so collapse the range and
+    // require a valid AM/PM period. It counts as 0.5 days against the balance.
+    const halfDay = data.halfDay === true;
+    const halfDayPeriod = halfDay ? data.halfDayPeriod ?? null : null;
+    if (halfDay && halfDayPeriod !== "AM" && halfDayPeriod !== "PM") {
+      throw new Error("HALF_DAY_PERIOD_REQUIRED");
+    }
+    const startDate = data.startDate;
+    const endDate = halfDay ? data.startDate : data.endDate;
 
     // Balance gate (employees only): every leave type except Leave without Pay
     // (WP) requires enough remaining balance to cover the requested business
@@ -104,7 +124,7 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
     // type. HR/admins filing their own leave are not balance-limited.
     if (!context.user.isHR && data.leaveType !== "WP") {
       const { businessDaysBetween } = await import("@/lib/utils");
-      const days = businessDaysBetween(data.startDate, data.endDate);
+      const days = halfDay ? 0.5 : businessDaysBetween(startDate, endDate);
       const {
         rows: [prof],
       } = await pool.query<{ vl_remaining: number | null; sl_remaining: number | null }>(
@@ -129,18 +149,21 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
     await pool.query(
       `INSERT INTO leave_requests
          (employee_id, leave_type, start_date, end_date, reason,
-          status, approver_chain, current_approver_index, reviewed_by, reviewed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9)`,
+          status, approver_chain, current_approver_index, reviewed_by, reviewed_at,
+          half_day, half_day_period)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11)`,
       [
         context.user.dbUserId,
         data.leaveType,
-        data.startDate,
-        data.endDate,
+        startDate,
+        endDate,
         data.reason,
         status,
         chain,
         reviewedBy,
         reviewedAt,
+        halfDay,
+        halfDayPeriod,
       ],
     );
   });
@@ -171,6 +194,8 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
       endDate: string;
       reason: string | null;
       autoApprove: boolean;
+      halfDay?: boolean;
+      halfDayPeriod?: "AM" | "PM" | null;
     }) => data,
   )
   .handler(async ({ data, context }) => {
@@ -178,6 +203,15 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
     if (!data.employeeId) throw new Error("EMPLOYEE_REQUIRED");
     const { pool } = await import("@/lib/db.server");
     const { resolveChain } = await import("@/lib/chain.server");
+
+    // Half-day leave collapses to a single day and needs a valid AM/PM period.
+    const halfDay = data.halfDay === true;
+    const halfDayPeriod = halfDay ? data.halfDayPeriod ?? null : null;
+    if (halfDay && halfDayPeriod !== "AM" && halfDayPeriod !== "PM") {
+      throw new Error("HALF_DAY_PERIOD_REQUIRED");
+    }
+    const startDate = data.startDate;
+    const endDate = halfDay ? data.startDate : data.endDate;
 
     // Resolve the TARGET employee's chain. If they aren't in the org tree we
     // can't route for approval — only an immediate approval can proceed.
@@ -198,19 +232,22 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
     await pool.query(
       `INSERT INTO leave_requests
          (employee_id, leave_type, start_date, end_date, reason,
-          status, approver_chain, current_approver_index, reviewed_by, reviewed_at, review_notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)`,
+          status, approver_chain, current_approver_index, reviewed_by, reviewed_at, review_notes,
+          half_day, half_day_period)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, $12)`,
       [
         data.employeeId,
         data.leaveType,
-        data.startDate,
-        data.endDate,
+        startDate,
+        endDate,
         data.reason,
         status,
         chain,
         reviewedBy,
         reviewedAt,
         autoApprove ? note : null,
+        halfDay,
+        halfDayPeriod,
       ],
     );
   });
@@ -317,6 +354,7 @@ export const fetchMyPendingLeaveApprovals = createServerFn({ method: "POST" })
     const { rows } = await pool.query(
       `SELECT lr.id, lr.employee_id, lr.leave_type, lr.start_date, lr.end_date,
               lr.reason, lr.current_approver_index, lr.approver_chain, lr.created_at,
+              lr.half_day, lr.half_day_period,
               p.full_name AS employee_full_name, p.department AS employee_department
          FROM leave_requests lr
          LEFT JOIN profiles p ON p.id = lr.employee_id
@@ -335,6 +373,8 @@ export const fetchMyPendingLeaveApprovals = createServerFn({ method: "POST" })
       current_approver_index: number;
       approver_chain: string[];
       created_at: string;
+      half_day: boolean;
+      half_day_period: "AM" | "PM" | null;
       employee_full_name: string | null;
       employee_department: string | null;
     }[];
