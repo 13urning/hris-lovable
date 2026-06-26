@@ -135,19 +135,15 @@ function OTApprovalsPage() {
     justification: "",
   });
 
-  // ── Decision inline-expand state ─────────────────────────────────────────
-  const [decidingId, setDecidingId] = useState<string | null>(null);
+  // ── Review modal state ───────────────────────────────────────────────────
+  // The pending request being reviewed (null = modal closed) + the approver's
+  // notes / rejection reason.
+  const [reviewing, setReviewing] = useState<PendingOTRow | null>(null);
   const [decisionNotes, setDecisionNotes] = useState("");
 
-  function toggleDecision(requestId: string, action: "approve" | "reject") {
-    const key = `${requestId}-${action}`;
-    if (decidingId === key) {
-      setDecidingId(null);
-      setDecisionNotes("");
-    } else {
-      setDecidingId(key);
-      setDecisionNotes("");
-    }
+  function openReview(row: PendingOTRow) {
+    setReviewing(row);
+    setDecisionNotes("");
   }
 
   // ── Section 1: My pre-approved OT budget requests ───────────────────────
@@ -346,7 +342,7 @@ function OTApprovalsPage() {
     },
     onSuccess: () => {
       toast.success("Approved");
-      setDecidingId(null);
+      setReviewing(null);
       setDecisionNotes("");
       qc.invalidateQueries({ queryKey: ["ot-pending-for-me"] });
     },
@@ -361,7 +357,7 @@ function OTApprovalsPage() {
     },
     onSuccess: () => {
       toast.success("Request rejected");
-      setDecidingId(null);
+      setReviewing(null);
       setDecisionNotes("");
       qc.invalidateQueries({ queryKey: ["ot-pending-for-me"] });
     },
@@ -578,6 +574,11 @@ function OTApprovalsPage() {
                         </td>
                         <td className="px-4 py-2">
                           <StatusBadge status={r.status} />
+                          {r.status === "rejected" && r.review_notes && (
+                            <span className="mt-0.5 block max-w-[220px] text-[11px] italic text-destructive">
+                              "{r.review_notes}"
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-right">
                           {r.status === "pending" && (
@@ -675,6 +676,11 @@ function OTApprovalsPage() {
                         </td>
                         <td className="px-4 py-2">
                           <StatusBadge status={r.status} />
+                          {r.status === "rejected" && r.review_notes && (
+                            <span className="mt-0.5 block max-w-[220px] text-[11px] italic text-destructive">
+                              "{r.review_notes}"
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-right">
                           {r.status === "pending" && (
@@ -753,122 +759,42 @@ function OTApprovalsPage() {
                 </thead>
                 <tbody>
                   {pendingPg.pageItems.map((r) => {
-                    const approveKey = `${r.id}-approve`;
-                    const rejectKey = `${r.id}-reject`;
-                    const expandingApprove = decidingId === approveKey;
-                    const expandingReject = decidingId === rejectKey;
-                    const expanding = expandingApprove || expandingReject;
                     const isBudget = r.request_type === "pre_approved";
                     return (
-                      <>
-                        <tr key={r.id} className="border-t">
-                          <td className="px-4 py-2 font-medium">{r.employee_full_name ?? "—"}</td>
-                          <td className="px-4 py-2">
-                            <span
-                              className={`rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${isBudget ? "bg-primary/10 text-primary" : "bg-accent/15 text-accent"}`}
-                            >
-                              {isBudget ? "Budget" : "Filed hours"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2">
-                            {isBudget ? formatMonth(r.target_month) : formatDate(r.work_date)}
-                          </td>
-                          <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
-                          <td className="px-4 py-2 text-muted-foreground max-w-[260px]">
-                            {r.justification ?? "—"}
-                          </td>
-                          <td className="px-4 py-2">
-                            <StepBadge row={r} />
-                          </td>
-                          <td className="px-4 py-2 text-muted-foreground">
-                            {formatDate(r.created_at)}
-                          </td>
-                          <td className="px-4 py-2">
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                size="sm"
-                                variant={expandingApprove ? "default" : "outline"}
-                                className="text-success border-success/40 hover:bg-success/10"
-                                onClick={() => toggleDecision(r.id, "approve")}
-                              >
-                                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Approve
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={expandingReject ? "default" : "outline"}
-                                className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                                onClick={() => toggleDecision(r.id, "reject")}
-                              >
-                                <XCircle className="mr-1.5 h-3.5 w-3.5" /> Reject
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                        {expanding && (
-                          <tr key={`${r.id}-expand`} className="border-t bg-secondary/30">
-                            <td colSpan={8} className="px-4 py-3">
-                              <div className="flex flex-wrap items-end gap-3">
-                                <div className="flex-1 min-w-[240px]">
-                                  <Label className="text-xs">
-                                    {expandingApprove
-                                      ? "Approval notes (optional)"
-                                      : "Rejection reason (optional)"}
-                                  </Label>
-                                  <Textarea
-                                    rows={2}
-                                    className="mt-1"
-                                    placeholder={
-                                      expandingApprove
-                                        ? "Any notes for the next approver…"
-                                        : "Explain why this OT budget is being denied…"
-                                    }
-                                    value={decisionNotes}
-                                    onChange={(e) => setDecisionNotes(e.target.value)}
-                                  />
-                                </div>
-                                <div className="flex gap-2 pb-0.5">
-                                  {expandingApprove && (
-                                    <Button
-                                      size="sm"
-                                      disabled={approveStep.isPending}
-                                      onClick={() =>
-                                        approveStep.mutate({
-                                          requestId: r.id,
-                                          notes: decisionNotes,
-                                        })
-                                      }
-                                    >
-                                      Confirm approval
-                                    </Button>
-                                  )}
-                                  {expandingReject && (
-                                    <Button
-                                      size="sm"
-                                      variant="destructive"
-                                      disabled={rejectStep.isPending}
-                                      onClick={() =>
-                                        rejectStep.mutate({ requestId: r.id, notes: decisionNotes })
-                                      }
-                                    >
-                                      Confirm rejection
-                                    </Button>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => {
-                                      setDecidingId(null);
-                                      setDecisionNotes("");
-                                    }}
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </>
+                      <tr key={r.id} className="border-t">
+                        <td className="px-4 py-2 font-medium">{r.employee_full_name ?? "—"}</td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={`rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${isBudget ? "bg-primary/10 text-primary" : "bg-accent/15 text-accent"}`}
+                          >
+                            {isBudget ? "Budget" : "Filed hours"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          {isBudget ? formatMonth(r.target_month) : formatDate(r.work_date)}
+                        </td>
+                        <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
+                        <td className="px-4 py-2 text-muted-foreground max-w-[280px]">
+                          {r.justification ? (
+                            <span className="line-clamp-2">{r.justification}</span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-4 py-2">
+                          <StepBadge row={r} />
+                        </td>
+                        <td className="px-4 py-2 text-muted-foreground">
+                          {formatDate(r.created_at)}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex justify-end">
+                            <Button size="sm" variant="outline" onClick={() => openReview(r)}>
+                              Review
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
                     );
                   })}
                 </tbody>
@@ -1114,6 +1040,90 @@ function OTApprovalsPage() {
               onClick={() => fileActual.mutate()}
             >
               {fileActual.isPending ? "Filing…" : "File Hours"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Review OT request modal (approve / reject) ────────────────────── */}
+      <Dialog open={reviewing !== null} onOpenChange={(o) => !o && setReviewing(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl">Review OT request</DialogTitle>
+          </DialogHeader>
+          {reviewing && (
+            <div className="space-y-4 py-1">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Employee</p>
+                  <p className="font-medium">{reviewing.employee_full_name ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Type</p>
+                  <p className="font-medium">
+                    {reviewing.request_type === "pre_approved" ? "Budget" : "Filed hours"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">For</p>
+                  <p className="font-medium">
+                    {reviewing.request_type === "pre_approved"
+                      ? formatMonth(reviewing.target_month)
+                      : formatDate(reviewing.work_date)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Hours</p>
+                  <p className="font-medium">{reviewing.requested_hours}h</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Justification
+                </p>
+                <div className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-md border bg-secondary/30 p-3 text-sm">
+                  {reviewing.justification?.trim() ? reviewing.justification : "—"}
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="review-notes" className="text-xs">
+                  Notes / rejection reason (optional)
+                </Label>
+                <Textarea
+                  id="review-notes"
+                  rows={3}
+                  className="mt-1"
+                  placeholder="Add a note for the next approver, or a reason if rejecting…"
+                  value={decisionNotes}
+                  onChange={(e) => setDecisionNotes(e.target.value)}
+                />
+              </div>
+
+              <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <StepBadge row={reviewing} /> · filed {formatDate(reviewing.created_at)}
+              </p>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10"
+              disabled={approveStep.isPending || rejectStep.isPending}
+              onClick={() =>
+                reviewing && rejectStep.mutate({ requestId: reviewing.id, notes: decisionNotes })
+              }
+            >
+              <XCircle className="mr-1.5 h-4 w-4" /> Reject
+            </Button>
+            <Button
+              disabled={approveStep.isPending || rejectStep.isPending}
+              onClick={() =>
+                reviewing && approveStep.mutate({ requestId: reviewing.id, notes: decisionNotes })
+              }
+            >
+              <CheckCircle2 className="mr-1.5 h-4 w-4" /> Approve
             </Button>
           </DialogFooter>
         </DialogContent>
