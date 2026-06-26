@@ -1,10 +1,21 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { todayIso } from "@/lib/dtr";
-import { getAdminDashboardStats } from "@/lib/admin-dashboard-functions";
+import {
+  getAdminDashboardStats,
+  getAdminAttendanceRoster,
+  type RosterEntry,
+} from "@/lib/admin-dashboard-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Users,
   UserCheck,
@@ -18,18 +29,22 @@ import {
   ArrowRight,
 } from "lucide-react";
 
+type RosterCategory = "present" | "onLeave" | "notClockedIn" | "late";
+
 function MetricCard({
   icon,
   label,
   value,
   sub,
   tone,
+  onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   value: React.ReactNode;
   sub?: string;
   tone?: "warn" | "danger" | "success" | "accent";
+  onClick?: () => void;
 }) {
   const valueTone =
     tone === "danger"
@@ -41,16 +56,28 @@ function MetricCard({
           : tone === "accent"
             ? "text-accent"
             : "";
-  return (
-    <div className="rounded-lg border bg-background/60 p-4">
+  const body = (
+    <>
       <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
         {icon}
         {label}
       </div>
       <p className={`mt-1 font-display text-3xl tabular-nums ${valueTone}`}>{value}</p>
       {sub && <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>}
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="rounded-lg border bg-background/60 p-4 text-left transition-colors hover:bg-secondary/50 hover:border-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {body}
+      </button>
+    );
+  }
+  return <div className="rounded-lg border bg-background/60 p-4">{body}</div>;
 }
 
 // Pending-approval tile: links to the relevant queue and highlights when the
@@ -123,6 +150,15 @@ export function AdminDashboard() {
     queryFn: () => getAdminDashboardStats({ data: { today, monthStart } }),
   });
 
+  // Drill-down: which roster category the admin clicked (null = closed). The
+  // roster is fetched once and cached; switching categories reuses it.
+  const [rosterCat, setRosterCat] = useState<RosterCategory | null>(null);
+  const { data: roster, isLoading: rosterLoading } = useQuery({
+    queryKey: ["admin-attendance-roster", user?.id, today],
+    enabled: !!user && rosterCat !== null,
+    queryFn: () => getAdminAttendanceRoster({ data: { today } }),
+  });
+
   if (isLoading || !stats) {
     return (
       <div className="space-y-4">
@@ -164,24 +200,28 @@ export function AdminDashboard() {
             value={stats.presentToday}
             sub={`${stats.stillClockedIn} still clocked in`}
             tone="success"
+            onClick={() => setRosterCat("present")}
           />
           <MetricCard
             icon={<Plane className="h-4 w-4" />}
             label="On leave"
             value={stats.onLeaveToday}
             tone={stats.onLeaveToday > 0 ? "accent" : undefined}
+            onClick={() => setRosterCat("onLeave")}
           />
           <MetricCard
             icon={<UserX className="h-4 w-4" />}
             label="Not clocked in"
             value={stats.notClockedIn}
             tone={stats.notClockedIn > 0 ? "warn" : undefined}
+            onClick={() => setRosterCat("notClockedIn")}
           />
           <MetricCard
             icon={<AlertCircle className="h-4 w-4" />}
             label="Late today"
             value={stats.lateToday}
             tone={stats.lateToday > 0 ? "danger" : undefined}
+            onClick={() => setRosterCat("late")}
           />
         </div>
       </div>
@@ -295,6 +335,114 @@ export function AdminDashboard() {
           ))}
         </div>
       </div>
+
+      <RosterDialog
+        category={rosterCat}
+        onClose={() => setRosterCat(null)}
+        roster={roster}
+        loading={rosterLoading}
+      />
     </div>
+  );
+}
+
+const ROSTER_TITLES: Record<RosterCategory, string> = {
+  present: "Present today",
+  onLeave: "On leave today",
+  notClockedIn: "Not clocked in",
+  late: "Late today",
+};
+
+function entriesFor(
+  category: RosterCategory,
+  roster: { present: RosterEntry[]; onLeave: RosterEntry[]; notClockedIn: RosterEntry[] },
+): RosterEntry[] {
+  switch (category) {
+    case "present":
+      return roster.present;
+    case "late":
+      return roster.present.filter((e) => e.lateMinutes > 0);
+    case "onLeave":
+      return roster.onLeave;
+    case "notClockedIn":
+      return roster.notClockedIn;
+  }
+}
+
+// Right-aligned detail line per category (time worked, leave type, etc.).
+function EntryDetail({ category, e }: { category: RosterCategory; e: RosterEntry }) {
+  if (category === "onLeave") {
+    return (
+      <span className="text-xs text-muted-foreground">
+        {e.leaveType}
+        {e.halfDay ? ` · half day (${e.halfDayPeriod})` : ""}
+        {e.leaveEnd ? ` · until ${e.leaveEnd}` : ""}
+      </span>
+    );
+  }
+  if (category === "notClockedIn") {
+    return null;
+  }
+  // present / late
+  return (
+    <span className="flex items-center gap-2 text-xs tabular-nums text-muted-foreground">
+      <span>
+        {e.timeIn ?? "—"} → {e.timeOut ?? "still in"}
+      </span>
+      {e.lateMinutes > 0 && (
+        <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">
+          {e.lateMinutes}m late
+        </span>
+      )}
+    </span>
+  );
+}
+
+function RosterDialog({
+  category,
+  onClose,
+  roster,
+  loading,
+}: {
+  category: RosterCategory | null;
+  onClose: () => void;
+  roster: { present: RosterEntry[]; onLeave: RosterEntry[]; notClockedIn: RosterEntry[] } | undefined;
+  loading: boolean;
+}) {
+  const entries = category && roster ? entriesFor(category, roster) : [];
+  return (
+    <Dialog open={category !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {category ? ROSTER_TITLES[category] : ""}
+            {category && roster ? ` (${entries.length})` : ""}
+          </DialogTitle>
+        </DialogHeader>
+        {loading || !roster ? (
+          <div className="space-y-2 py-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 rounded-md" />
+            ))}
+          </div>
+        ) : entries.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No one in this list.</p>
+        ) : (
+          <ul className="max-h-[60vh] divide-y overflow-y-auto">
+            {entries.map((e) => (
+              <li key={e.id} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{e.name}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {e.department ?? "Unassigned"}
+                  </p>
+                </div>
+                {category && <EntryDetail category={category} e={e} />}
+              </li>
+            ))}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
