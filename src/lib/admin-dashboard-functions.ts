@@ -99,3 +99,125 @@ export const getAdminDashboardStats = createServerFn({ method: "POST" })
       })),
     } satisfies AdminDashboardStats;
   });
+
+export type RosterEntry = {
+  id: string;
+  name: string;
+  department: string | null;
+  timeIn: string | null;
+  timeOut: string | null;
+  shift: string | null;
+  lateMinutes: number;
+  leaveType: string | null;
+  halfDay: boolean;
+  halfDayPeriod: "AM" | "PM" | null;
+  leaveEnd: string | null;
+};
+
+export type AttendanceRoster = {
+  present: RosterEntry[];
+  onLeave: RosterEntry[];
+  notClockedIn: RosterEntry[];
+};
+
+// Who is present / on leave / not clocked in today. Powers the click-through
+// drill-downs on the dashboard metric cards. "Late" is derived client-side from
+// the present list (lateMinutes > 0). Admin/HR only.
+export const getAdminAttendanceRoster = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { today: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertHR(context.user);
+    const { pool } = await import("@/lib/db.server");
+
+    const [present, onLeave, notIn] = await Promise.all([
+      pool.query<{
+        id: string;
+        full_name: string;
+        department: string | null;
+        time_in: string | null;
+        time_out: string | null;
+        shift_label: string | null;
+        late_minutes: number;
+      }>(
+        `SELECT p.id, p.full_name, p.department,
+                d.time_in, d.time_out, d.shift_label, d.late_minutes
+           FROM daily_time_reports d
+           JOIN profiles p ON p.id = d.employee_id
+          WHERE d.work_date = $1 AND d.time_in IS NOT NULL
+          ORDER BY p.full_name ASC`,
+        [data.today],
+      ),
+      pool.query<{
+        id: string;
+        full_name: string;
+        department: string | null;
+        leave_type: string;
+        half_day: boolean;
+        half_day_period: "AM" | "PM" | null;
+        end_date: string;
+      }>(
+        `SELECT DISTINCT ON (p.id) p.id, p.full_name, p.department,
+                lr.leave_type, lr.half_day, lr.half_day_period, lr.end_date
+           FROM leave_requests lr
+           JOIN profiles p ON p.id = lr.employee_id
+          WHERE lr.status = 'approved' AND lr.start_date <= $1 AND lr.end_date >= $1
+          ORDER BY p.id, lr.start_date ASC`,
+        [data.today],
+      ),
+      pool.query<{ id: string; full_name: string; department: string | null }>(
+        `SELECT p.id, p.full_name, p.department
+           FROM profiles p
+          WHERE p.id NOT IN (
+                  SELECT employee_id FROM daily_time_reports
+                   WHERE work_date = $1 AND time_in IS NOT NULL)
+            AND p.id NOT IN (
+                  SELECT employee_id FROM leave_requests
+                   WHERE status = 'approved' AND start_date <= $1 AND end_date >= $1)
+          ORDER BY p.full_name ASC`,
+        [data.today],
+      ),
+    ]);
+
+    const blank = {
+      timeIn: null,
+      timeOut: null,
+      shift: null,
+      lateMinutes: 0,
+      leaveType: null,
+      halfDay: false,
+      halfDayPeriod: null,
+      leaveEnd: null,
+    } as const;
+
+    return {
+      present: present.rows.map((r) => ({
+        ...blank,
+        id: r.id,
+        name: r.full_name,
+        department: r.department,
+        timeIn: r.time_in,
+        timeOut: r.time_out,
+        shift: r.shift_label,
+        lateMinutes: Number(r.late_minutes ?? 0),
+      })),
+      onLeave: onLeave.rows
+        .map((r) => ({
+          ...blank,
+          id: r.id,
+          name: r.full_name,
+          department: r.department,
+          leaveType: r.leave_type,
+          halfDay: r.half_day,
+          halfDayPeriod: r.half_day_period,
+          leaveEnd: r.end_date,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      notClockedIn: notIn.rows.map((r) => ({
+        ...blank,
+        id: r.id,
+        name: r.full_name,
+        department: r.department,
+      })),
+    } satisfies AttendanceRoster;
+  });
