@@ -9,6 +9,7 @@ import {
   setAttendanceTracking,
   bulkCreateEmployees,
   deleteEmployee,
+  resetEmployeePassword,
 } from "@/lib/employee-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ import {
   FileDown,
   Trash2,
   CalendarDays,
+  KeyRound,
 } from "lucide-react";
 import { TablePagination } from "@/components/TablePagination";
 import { TableSkeleton } from "@/components/TableSkeleton";
@@ -442,6 +444,11 @@ function EmployeesPage() {
   // Delete confirm dialog state
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
 
+  // Reset-password dialog state. resetResult holds the generated temp password
+  // once the reset succeeds (shown once, then cleared on close).
+  const [resetTarget, setResetTarget] = useState<Row | null>(null);
+  const [resetResult, setResetResult] = useState<string | null>(null);
+
   // Import dialog state
   const [importOpen, setImportOpen] = useState(false);
   const [importStep, setImportStep] = useState<"upload" | "preview" | "results">("upload");
@@ -490,6 +497,20 @@ function EmployeesPage() {
     },
     onError: (e: Error) => {
       if (e.message === "CANNOT_DELETE_SELF") toast.error("You can't delete your own account");
+      else toast.error(e.message);
+    },
+  });
+
+  const resetPassword = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await resetEmployeePassword({ data: { id } });
+      return res.temp_password;
+    },
+    onSuccess: (pwd) => setResetResult(pwd),
+    onError: (e: Error) => {
+      if (e.message === "NO_AUTH_ACCOUNT")
+        toast.error("This employee has no sign-in account to reset.");
+      else if (e.message === "NOT_FOUND") toast.error("Employee not found.");
       else toast.error(e.message);
     },
   });
@@ -812,6 +833,19 @@ function EmployeesPage() {
                               <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>
                                 <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
                               </Button>
+                              {isAdmin && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setResetResult(null);
+                                    setResetTarget(r);
+                                  }}
+                                  title="Reset password"
+                                >
+                                  <KeyRound className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                               {isAdmin && (
                                 <Button
                                   size="sm"
@@ -1219,6 +1253,96 @@ function EmployeesPage() {
             >
               {removeEmployee.isPending ? "Deleting…" : "Delete permanently"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Password Dialog ───────────────────────────────────────── */}
+      <Dialog
+        open={!!resetTarget}
+        onOpenChange={(o) => {
+          if (resetPassword.isPending) return;
+          if (!o) {
+            setResetTarget(null);
+            setResetResult(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl">
+              {resetResult ? "Password reset" : "Reset password?"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {resetTarget && !resetResult && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm">
+                This generates a new temporary password for{" "}
+                <strong>{displayName(resetTarget)}</strong>. Their current password stops working
+                immediately, active sessions are signed out, and they&rsquo;ll be required to set a
+                new password the next time they sign in.
+              </p>
+              <div className="rounded-md border bg-secondary/30 p-3 text-xs text-muted-foreground">
+                Email: <span className="text-foreground">{resetTarget.email ?? "—"}</span>
+              </div>
+            </div>
+          )}
+
+          {resetTarget && resetResult && (
+            <div className="space-y-3 py-2">
+              <p className="text-sm">
+                A temporary password for <strong>{displayName(resetTarget)}</strong> has been set.
+                Share it securely — it won&rsquo;t be shown again.
+              </p>
+              <div className="flex items-center gap-2 rounded-md border bg-secondary/40 p-3">
+                <code className="flex-1 font-mono text-sm break-all">{resetResult}</code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    navigator.clipboard
+                      .writeText(resetResult)
+                      .then(() => toast.success("Password copied"))
+                  }
+                >
+                  <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {resetTarget.email ?? "The employee"} will be prompted to choose a new password on
+                their next sign-in.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            {!resetResult ? (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setResetTarget(null)}
+                  disabled={resetPassword.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  disabled={resetPassword.isPending}
+                  onClick={() => resetTarget && resetPassword.mutate(resetTarget.id)}
+                >
+                  {resetPassword.isPending ? "Resetting…" : "Reset password"}
+                </Button>
+              </>
+            ) : (
+              <Button
+                onClick={() => {
+                  setResetTarget(null);
+                  setResetResult(null);
+                }}
+              >
+                Done
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
