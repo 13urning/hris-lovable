@@ -222,6 +222,44 @@ export const deleteEmployee = createServerFn({ method: "POST" })
     await pool.query(`DELETE FROM users WHERE id = $1`, [data.id]);
   });
 
+// Admin-only password reset. Sets the employee's Firebase Auth password to a
+// freshly generated temporary one, flags must_change_password so they're forced
+// to choose a new password on next login, and revokes existing refresh tokens so
+// active sessions can't outlive the reset. Returns the temp password ONCE — it is
+// never stored and can't be retrieved again.
+export const resetEmployeePassword = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { id: string }) => data)
+  .handler(async ({ data, context }): Promise<{ temp_password: string }> => {
+    assertAdmin(context.user);
+    const { pool } = await import("@/lib/db.server");
+
+    const {
+      rows: [user],
+    } = await pool.query<{ firebase_uid: string | null }>(
+      `SELECT firebase_uid FROM users WHERE id = $1`,
+      [data.id],
+    );
+    if (!user) throw new Error("NOT_FOUND");
+    if (!user.firebase_uid) throw new Error("NO_AUTH_ACCOUNT");
+
+    const tempPassword = generateTempPassword();
+
+    const { adminAuth } = await import("@/lib/firebase-admin.server");
+    await adminAuth.updateUser(user.firebase_uid, { password: tempPassword });
+    // Best-effort: invalidate existing sessions. Failure here must not leave the
+    // password un-reset, so it's logged rather than thrown.
+    try {
+      await adminAuth.revokeRefreshTokens(user.firebase_uid);
+    } catch (err) {
+      console.warn("[resetEmployeePassword] revokeRefreshTokens failed", err);
+    }
+
+    await pool.query(`UPDATE profiles SET must_change_password = TRUE WHERE id = $1`, [data.id]);
+
+    return { temp_password: tempPassword };
+  });
+
 export const setEmployeeRole = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data: { userId: string; roles: { user_id: string; role: string }[] }) => data)
