@@ -1,15 +1,22 @@
-// Device-facing kiosk clock-in endpoint (NFC scanner -> POST /api/kiosk/clock-in).
+// Device-facing attendance clock-in endpoint (POST /api/attendance/clock-in).
 //
-// This is the FIRST raw HTTP route in the app. The interactive clock-in
-// (dtr-functions.ts -> clockInDTR) authenticates a human via a Firebase ID token;
-// an unattended NFC reader has no such session, so this path authenticates the
-// DEVICE with a static API key and resolves the employee from the scanned code.
+// CHANNEL-AGNOSTIC BY DESIGN. This route knows nothing about NFC specifically.
+// It authenticates a trusted DEVICE (not a human) and accepts an employee number
+// (`employeeCode`) that the device produced. Any source that can output an
+// employee number works: NFC reader, face-recognition server, fingerprint /
+// biometric terminal, or a manual kiosk keypad. Each device/channel gets its own
+// `key:label` pair in DEVICE_API_KEYS, so they are independently authenticated
+// and revocable. The optional `channel` field tags each event for audit.
 //
-// Security posture (see design doc / security-gate notes):
-//   - Auth fails CLOSED - no/invalid key => 401; missing KIOSK_API_KEYS => 401 for all.
+// The interactive web clock-in (dtr-functions.ts -> clockInDTR) authenticates a
+// human via a Firebase ID token; an unattended device has no such session, which
+// is why this is a separate raw HTTP route with device-key auth.
+//
+// Security posture (see handover doc / security-gate notes):
+//   - Auth fails CLOSED - no/invalid key => 401; missing DEVICE_API_KEYS => 401 for all.
 //   - Scanned value is only ever used as a parameterized query value ($1).
 //   - work_date / time_in / lateness are derived from SERVER PH time, never from
-//     the device - a tampered kiosk clock can't backdate a punch or dodge lateness.
+//     the device - a tampered device clock can't backdate a punch or dodge lateness.
 //   - Idempotent via UNIQUE(employee_id, work_date) - a re-tap never overwrites
 //     the original punch.
 //   - Response exposes only the employee's display name (no UUID/email) to limit
@@ -35,14 +42,15 @@ function lateMinutesFor(timeIn: string): number {
 }
 
 // -- Device authentication -----------------------------------------------------
-// KIOSK_API_KEYS is a comma-separated list of `key:label` pairs, e.g.
-//   "abc123...:kiosk-lobby-01,def456...:kiosk-floor-02"
-// Multiple pairs support several readers and key rotation with no code/schema
-// change (add the new key, deploy, swap devices, drop the old key next deploy).
+// DEVICE_API_KEYS is a comma-separated list of `key:label` pairs, e.g.
+//   "abc123...:nfc-lobby-01,def456...:face-rec-gate,ghi789...:biometric-hr"
+// Multiple pairs support several devices/channels and key rotation with no
+// code/schema change (add the new key, deploy, swap devices, drop the old key
+// next deploy).
 type DeviceKey = { key: string; label: string };
 
 function loadDeviceKeys(): DeviceKey[] {
-  const raw = process.env.KIOSK_API_KEYS ?? "";
+  const raw = process.env.DEVICE_API_KEYS ?? "";
   return raw
     .split(",")
     .map((pair) => pair.trim())
@@ -79,9 +87,9 @@ function authenticateDevice(provided: string | null): string | null {
 // -- Rate limiting -------------------------------------------------------------
 // Per-client-IP sliding window. Throttles tap-storms AND brute-forcing the device
 // key. NOTE: in-memory => per Cloud Run instance, not globally shared. That's an
-// accepted abuse-damper at kiosk volume; the UNIQUE(employee_id, work_date)
+// accepted abuse-damper at device volume; the UNIQUE(employee_id, work_date)
 // constraint is the real correctness backstop. Keep the service's max-instances
-// low for the kiosk's traffic.
+// low for this traffic.
 const RATE_LIMIT = 30;
 const RATE_WINDOW_MS = 10_000;
 const rateBuckets = new Map<string, number[]>();
@@ -94,6 +102,7 @@ function rateLimited(bucketKey: string): boolean {
   return hits.length > RATE_LIMIT;
 }
 
+// -- Input helpers -------------------------------------------------------------
 // Control chars (incl. newlines / NUL) are never valid in a scanned code and
 // could pollute logs - reject rather than sanitize. Checked by code point so no
 // control byte appears in this source.
@@ -104,6 +113,10 @@ function hasControlChars(s: string): boolean {
   }
   return false;
 }
+
+// `channel` is a short source slug (e.g. "nfc", "face", "biometric", "kiosk")
+// used purely for audit attribution. Kept to a strict slug so it's log-safe.
+const CHANNEL_RE = /^[A-Za-z0-9_-]{1,32}$/;
 
 // -- Response helper -----------------------------------------------------------
 function json(
@@ -117,7 +130,7 @@ function json(
   });
 }
 
-export async function handleKioskClockIn(request: Request): Promise<Response> {
+export async function handleDeviceClockIn(request: Request): Promise<Response> {
   const ip = resolveClientIp(request);
 
   if (request.method !== "POST") {
@@ -134,9 +147,9 @@ export async function handleKioskClockIn(request: Request): Promise<Response> {
   }
 
   // Device auth - fail closed.
-  const deviceLabel = authenticateDevice(request.headers.get("x-kiosk-key"));
+  const deviceLabel = authenticateDevice(request.headers.get("x-device-key"));
   if (!deviceLabel) {
-    console.warn(`[kiosk] unauthorized ip=${ip}`);
+    console.warn(`[device-clockin] unauthorized ip=${ip}`);
     return json(401, { ok: false, code: "UNAUTHORIZED" });
   }
 
@@ -149,7 +162,7 @@ export async function handleKioskClockIn(request: Request): Promise<Response> {
   }
   if (raw.length > 4096) return json(400, { ok: false, code: "INVALID_REQUEST" });
 
-  let parsed: { employeeCode?: unknown; deviceId?: unknown };
+  let parsed: { employeeCode?: unknown; deviceId?: unknown; channel?: unknown };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch {
@@ -162,13 +175,25 @@ export async function handleKioskClockIn(request: Request): Promise<Response> {
   }
   const deviceId = typeof parsed.deviceId === "string" ? parsed.deviceId.trim().slice(0, 64) : "";
 
+  // Optional source channel ("nfc" | "face" | "biometric" | ...). Defaults to the
+  // authenticated device label so events are always attributable even if omitted.
+  let channel = deviceLabel;
+  if (parsed.channel !== undefined) {
+    if (typeof parsed.channel !== "string" || !CHANNEL_RE.test(parsed.channel.trim())) {
+      return json(400, { ok: false, code: "INVALID_REQUEST" });
+    }
+    channel = parsed.channel.trim().toLowerCase();
+  }
+
   try {
     // Geofence - same control as the interactive clock-in. Fails OPEN when no
     // office networks are configured; the device key is the always-on gate.
     try {
       await assertOnOfficeNetwork(pool, ip);
     } catch {
-      console.warn(`[kiosk] off_network device=${deviceLabel} ip=${ip}`);
+      console.warn(
+        `[device-clockin] off_network device=${deviceLabel} channel=${channel} ip=${ip}`,
+      );
       return json(403, { ok: false, code: "OFF_NETWORK" });
     }
 
@@ -180,11 +205,15 @@ export async function handleKioskClockIn(request: Request): Promise<Response> {
       [employeeCode],
     );
     if (matches.length === 0) {
-      console.warn(`[kiosk] not_found device=${deviceLabel} code=${employeeCode}`);
+      console.warn(
+        `[device-clockin] not_found device=${deviceLabel} channel=${channel} code=${employeeCode}`,
+      );
       return json(404, { ok: false, code: "EMPLOYEE_NOT_FOUND" });
     }
     if (matches.length > 1) {
-      console.warn(`[kiosk] ambiguous device=${deviceLabel} code=${employeeCode}`);
+      console.warn(
+        `[device-clockin] ambiguous device=${deviceLabel} channel=${channel} code=${employeeCode}`,
+      );
       return json(409, { ok: false, code: "AMBIGUOUS_EMPLOYEE" });
     }
     const employee = matches[0];
@@ -211,7 +240,9 @@ export async function handleKioskClockIn(request: Request): Promise<Response> {
         `SELECT time_in FROM daily_time_reports WHERE employee_id = $1 AND work_date = $2`,
         [employee.id, workDate],
       );
-      console.log(`[kiosk] already device=${deviceLabel} emp=${employee.id} date=${workDate}`);
+      console.log(
+        `[device-clockin] already device=${deviceLabel} channel=${channel} emp=${employee.id} date=${workDate}`,
+      );
       return json(200, {
         ok: true,
         code: "ALREADY_CLOCKED_IN",
@@ -222,7 +253,7 @@ export async function handleKioskClockIn(request: Request): Promise<Response> {
     }
 
     console.log(
-      `[kiosk] clocked_in device=${deviceLabel} deviceId=${deviceId} emp=${employee.id} date=${workDate} time=${timeIn} late=${lateMinutes}`,
+      `[device-clockin] clocked_in device=${deviceLabel} channel=${channel} deviceId=${deviceId} emp=${employee.id} date=${workDate} time=${timeIn} late=${lateMinutes}`,
     );
     return json(201, {
       ok: true,
@@ -234,7 +265,7 @@ export async function handleKioskClockIn(request: Request): Promise<Response> {
     });
   } catch (err) {
     // Never leak SQL/stack to the device.
-    console.error("[kiosk] server_error", err);
+    console.error("[device-clockin] server_error", err);
     return json(500, { ok: false, code: "SERVER_ERROR" });
   }
 }

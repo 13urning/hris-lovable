@@ -101,15 +101,15 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
-      // Device-facing kiosk endpoints are raw HTTP routes that bypass the
-      // Firebase-token auth used by the SSR app (an NFC reader has no session).
-      // Intercept here, before delegating to TanStack, and still apply the
-      // baseline security headers. Imported lazily so the pg pool isn't spun up
-      // unless a kiosk request actually arrives.
+      // Device-facing attendance endpoints are raw HTTP routes that bypass the
+      // Firebase-token auth used by the SSR app (an unattended device — NFC, face,
+      // biometric — has no session). Intercept here, before delegating to
+      // TanStack, and still apply the baseline security headers. Imported lazily
+      // so the pg pool isn't spun up unless such a request actually arrives.
       const { pathname } = new URL(request.url);
-      if (pathname === "/api/kiosk/clock-in") {
-        const { handleKioskClockIn } = await import("./lib/kiosk-clock-in.server");
-        return withSecurityHeaders(await handleKioskClockIn(request));
+      if (pathname === "/api/attendance/clock-in") {
+        const { handleDeviceClockIn } = await import("./lib/device-clock-in.server");
+        return withSecurityHeaders(await handleDeviceClockIn(request));
       }
 
       const handler = await getServerEntry();
