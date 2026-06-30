@@ -12,7 +12,7 @@ let serverEntryPromise: Promise<ServerEntry> | undefined;
 async function getServerEntry(): Promise<ServerEntry> {
   if (!serverEntryPromise) {
     serverEntryPromise = import("@tanstack/react-start/server-entry").then(
-      (m) => ((m as { default?: ServerEntry }).default ?? (m as unknown as ServerEntry)),
+      (m) => (m as { default?: ServerEntry }).default ?? (m as unknown as ServerEntry),
     );
   }
   return serverEntryPromise;
@@ -101,6 +101,17 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      // Device-facing kiosk endpoints are raw HTTP routes that bypass the
+      // Firebase-token auth used by the SSR app (an NFC reader has no session).
+      // Intercept here, before delegating to TanStack, and still apply the
+      // baseline security headers. Imported lazily so the pg pool isn't spun up
+      // unless a kiosk request actually arrives.
+      const { pathname } = new URL(request.url);
+      if (pathname === "/api/kiosk/clock-in") {
+        const { handleKioskClockIn } = await import("./lib/kiosk-clock-in.server");
+        return withSecurityHeaders(await handleKioskClockIn(request));
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
