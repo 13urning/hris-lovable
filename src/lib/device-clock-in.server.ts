@@ -1,12 +1,18 @@
-// Device-facing attendance clock-in endpoint (POST /api/attendance/clock-in).
+// Device-facing attendance endpoints:
+//   POST /api/attendance/clock-in  -> handleDeviceClockIn  (clocks an employee in)
+//   POST /api/attendance/verify    -> handleDeviceVerify   (confirms a device key)
 //
-// CHANNEL-AGNOSTIC BY DESIGN. This route knows nothing about NFC specifically.
-// It authenticates a trusted DEVICE (not a human) and accepts an employee number
+// CHANNEL-AGNOSTIC BY DESIGN. These routes know nothing about NFC specifically.
+// They authenticate a trusted DEVICE (not a human) and accept an employee number
 // (`employeeCode`) that the device produced. Any source that can output an
 // employee number works: NFC reader, face-recognition server, fingerprint /
-// biometric terminal, or a manual kiosk keypad. Each device/channel gets its own
-// `key:label` pair in DEVICE_API_KEYS, so they are independently authenticated
-// and revocable. The optional `channel` field tags each event for audit.
+// biometric terminal, or a manual kiosk keypad.
+//
+// Each device/channel gets its own `key:label:channel` triple in DEVICE_API_KEYS,
+// so keys are independently authenticated, SCOPED TO A CHANNEL, and revocable. A
+// key bound to "nfc" can only submit channel=nfc; cross-channel use is refused
+// (403 CHANNEL_NOT_ALLOWED). This means a leaked NFC key can't masquerade as the
+// face-recognition channel.
 //
 // The interactive web clock-in (dtr-functions.ts -> clockInDTR) authenticates a
 // human via a Firebase ID token; an unattended device has no such session, which
@@ -14,6 +20,7 @@
 //
 // Security posture (see handover doc / security-gate notes):
 //   - Auth fails CLOSED - no/invalid key => 401; missing DEVICE_API_KEYS => 401 for all.
+//   - Each key is scoped to a channel; cross-channel use => 403.
 //   - Scanned value is only ever used as a parameterized query value ($1).
 //   - work_date / time_in / lateness are derived from SERVER PH time, never from
 //     the device - a tampered device clock can't backdate a punch or dodge lateness.
@@ -42,23 +49,29 @@ function lateMinutesFor(timeIn: string): number {
 }
 
 // -- Device authentication -----------------------------------------------------
-// DEVICE_API_KEYS is a comma-separated list of `key:label` pairs, e.g.
-//   "abc123...:nfc-lobby-01,def456...:face-rec-gate,ghi789...:biometric-hr"
-// Multiple pairs support several devices/channels and key rotation with no
-// code/schema change (add the new key, deploy, swap devices, drop the old key
-// next deploy).
-type DeviceKey = { key: string; label: string };
+// DEVICE_API_KEYS is a comma-separated list of `key:label:channel` triples, e.g.
+//   "abc123...:nfc-lobby-01:nfc,def456...:face-gate:face,ghi789...:biometric-hr:biometric"
+// The third field BINDS the key to a channel. A 2-field entry ("key:label") or a
+// channel of "*" leaves the key unrestricted (any channel) for backward compat.
+// Splitting on ":" is safe because base64url keys never contain ":".
+// Multiple entries support several devices/channels and key rotation with no
+// code/schema change.
+const ANY_CHANNEL = "*";
+type DeviceKey = { key: string; label: string; channel: string };
 
 function loadDeviceKeys(): DeviceKey[] {
   const raw = process.env.DEVICE_API_KEYS ?? "";
   return raw
     .split(",")
-    .map((pair) => pair.trim())
+    .map((entry) => entry.trim())
     .filter(Boolean)
-    .map((pair) => {
-      const idx = pair.indexOf(":");
-      if (idx === -1) return { key: pair, label: "unnamed" };
-      return { key: pair.slice(0, idx).trim(), label: pair.slice(idx + 1).trim() || "unnamed" };
+    .map((entry) => {
+      const parts = entry.split(":").map((s) => s.trim());
+      return {
+        key: parts[0] ?? "",
+        label: parts[1] || "unnamed",
+        channel: (parts[2] || ANY_CHANNEL).toLowerCase(),
+      };
     })
     .filter((d) => d.key.length > 0);
 }
@@ -72,16 +85,22 @@ function constantTimeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb);
 }
 
-// Returns the matched device label, or null when no configured key matches.
+// Non-secret, stable identifier for a key (sha256 prefix). Safe to share / log so
+// an integrator can confirm WHICH credential they hold without exposing the key.
+function keyId(key: string): string {
+  return "kid_" + createHash("sha256").update(key).digest("hex").slice(0, 12);
+}
+
+// Returns the matched device record, or null when no configured key matches.
 // Iterates ALL keys with no early return so total work doesn't depend on which
 // key matched (keeps comparison timing flat across devices). Fails closed.
-function authenticateDevice(provided: string | null): string | null {
+function authenticateDevice(provided: string | null): DeviceKey | null {
   if (!provided) return null;
-  let matchedLabel: string | null = null;
+  let matched: DeviceKey | null = null;
   for (const d of loadDeviceKeys()) {
-    if (constantTimeEqual(provided, d.key)) matchedLabel = d.label;
+    if (constantTimeEqual(provided, d.key)) matched = d;
   }
-  return matchedLabel;
+  return matched;
 }
 
 // -- Rate limiting -------------------------------------------------------------
@@ -115,7 +134,8 @@ function hasControlChars(s: string): boolean {
 }
 
 // `channel` is a short source slug (e.g. "nfc", "face", "biometric", "kiosk")
-// used purely for audit attribution. Kept to a strict slug so it's log-safe.
+// used for audit attribution AND per-key scoping. Kept to a strict slug so it's
+// log-safe and can never be the "*" wildcard sentinel.
 const CHANNEL_RE = /^[A-Za-z0-9_-]{1,32}$/;
 
 // -- Response helper -----------------------------------------------------------
@@ -127,6 +147,38 @@ function json(
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json; charset=utf-8", ...(extraHeaders ?? {}) },
+  });
+}
+
+// POST /api/attendance/verify — confirms a device key without any side effect.
+// Lets an integrator check they hold the right credential (and see its bound
+// channel + non-secret key id) without clocking anyone in. No DB write, no
+// geofence; still constant-time auth + rate limited + fail-closed.
+export async function handleDeviceVerify(request: Request): Promise<Response> {
+  const ip = resolveClientIp(request);
+
+  if (request.method !== "POST") {
+    return json(405, { ok: false, code: "METHOD_NOT_ALLOWED" }, { allow: "POST" });
+  }
+  if (rateLimited(ip)) {
+    return json(429, { ok: false, code: "RATE_LIMITED" }, { "retry-after": "10" });
+  }
+
+  const device = authenticateDevice(request.headers.get("x-device-key"));
+  if (!device) {
+    console.warn(`[device-verify] unauthorized ip=${ip}`);
+    return json(401, { ok: false, code: "UNAUTHORIZED" });
+  }
+
+  console.log(
+    `[device-verify] ok keyId=${keyId(device.key)} label=${device.label} channel=${device.channel} ip=${ip}`,
+  );
+  return json(200, {
+    ok: true,
+    code: "KEY_VALID",
+    keyId: keyId(device.key),
+    label: device.label,
+    channel: device.channel === ANY_CHANNEL ? null : device.channel,
   });
 }
 
@@ -147,8 +199,8 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
   }
 
   // Device auth - fail closed.
-  const deviceLabel = authenticateDevice(request.headers.get("x-device-key"));
-  if (!deviceLabel) {
+  const device = authenticateDevice(request.headers.get("x-device-key"));
+  if (!device) {
     console.warn(`[device-clockin] unauthorized ip=${ip}`);
     return json(401, { ok: false, code: "UNAUTHORIZED" });
   }
@@ -175,14 +227,23 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
   }
   const deviceId = typeof parsed.deviceId === "string" ? parsed.deviceId.trim().slice(0, 64) : "";
 
-  // Optional source channel ("nfc" | "face" | "biometric" | ...). Defaults to the
-  // authenticated device label so events are always attributable even if omitted.
-  let channel = deviceLabel;
+  // Resolve the request's channel, then enforce the key's binding. If the request
+  // omits `channel`, it defaults to the key's bound channel (or the label for an
+  // unrestricted key). A bound key may only act on its own channel.
+  let channel: string;
   if (parsed.channel !== undefined) {
     if (typeof parsed.channel !== "string" || !CHANNEL_RE.test(parsed.channel.trim())) {
       return json(400, { ok: false, code: "INVALID_REQUEST" });
     }
     channel = parsed.channel.trim().toLowerCase();
+  } else {
+    channel = device.channel === ANY_CHANNEL ? device.label : device.channel;
+  }
+  if (device.channel !== ANY_CHANNEL && channel !== device.channel) {
+    console.warn(
+      `[device-clockin] channel_not_allowed keyId=${keyId(device.key)} bound=${device.channel} requested=${channel} ip=${ip}`,
+    );
+    return json(403, { ok: false, code: "CHANNEL_NOT_ALLOWED" });
   }
 
   try {
@@ -192,7 +253,7 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       await assertOnOfficeNetwork(pool, ip);
     } catch {
       console.warn(
-        `[device-clockin] off_network device=${deviceLabel} channel=${channel} ip=${ip}`,
+        `[device-clockin] off_network label=${device.label} channel=${channel} ip=${ip}`,
       );
       return json(403, { ok: false, code: "OFF_NETWORK" });
     }
@@ -206,13 +267,13 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     );
     if (matches.length === 0) {
       console.warn(
-        `[device-clockin] not_found device=${deviceLabel} channel=${channel} code=${employeeCode}`,
+        `[device-clockin] not_found label=${device.label} channel=${channel} code=${employeeCode}`,
       );
       return json(404, { ok: false, code: "EMPLOYEE_NOT_FOUND" });
     }
     if (matches.length > 1) {
       console.warn(
-        `[device-clockin] ambiguous device=${deviceLabel} channel=${channel} code=${employeeCode}`,
+        `[device-clockin] ambiguous label=${device.label} channel=${channel} code=${employeeCode}`,
       );
       return json(409, { ok: false, code: "AMBIGUOUS_EMPLOYEE" });
     }
@@ -241,7 +302,7 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
         [employee.id, workDate],
       );
       console.log(
-        `[device-clockin] already device=${deviceLabel} channel=${channel} emp=${employee.id} date=${workDate}`,
+        `[device-clockin] already label=${device.label} channel=${channel} emp=${employee.id} date=${workDate}`,
       );
       return json(200, {
         ok: true,
@@ -253,7 +314,7 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     }
 
     console.log(
-      `[device-clockin] clocked_in device=${deviceLabel} channel=${channel} deviceId=${deviceId} emp=${employee.id} date=${workDate} time=${timeIn} late=${lateMinutes}`,
+      `[device-clockin] clocked_in label=${device.label} channel=${channel} deviceId=${deviceId} emp=${employee.id} date=${workDate} time=${timeIn} late=${lateMinutes}`,
     );
     return json(201, {
       ok: true,
