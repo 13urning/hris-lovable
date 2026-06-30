@@ -107,9 +107,12 @@ export default {
       // TanStack, and still apply the baseline security headers. Imported lazily
       // so the pg pool isn't spun up unless such a request actually arrives.
       const { pathname } = new URL(request.url);
-      if (pathname === "/api/attendance/clock-in") {
-        const { handleDeviceClockIn } = await import("./lib/device-clock-in.server");
-        return withSecurityHeaders(await handleDeviceClockIn(request));
+      if (pathname === "/api/attendance/clock-in" || pathname === "/api/attendance/verify") {
+        const mod = await import("./lib/device-clock-in.server");
+        const handler = pathname.endsWith("/verify")
+          ? mod.handleDeviceVerify
+          : mod.handleDeviceClockIn;
+        return withSecurityHeaders(await handler(request));
       }
 
       const handler = await getServerEntry();
