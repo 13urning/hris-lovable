@@ -43,3 +43,6 @@ api/_server/
 .env.*
 !.env.example
 drafts/
+
+# Claude Code local settings — may contain machine-local secrets in allow-listed commands
+.claude/settings.local.json
