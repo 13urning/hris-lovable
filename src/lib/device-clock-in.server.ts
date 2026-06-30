@@ -157,8 +157,12 @@ function json(
 export async function handleDeviceVerify(request: Request): Promise<Response> {
   const ip = resolveClientIp(request);
 
-  if (request.method !== "POST") {
-    return json(405, { ok: false, code: "METHOD_NOT_ALLOWED" }, { allow: "POST" });
+  // GET (read-only) is the primary verb — a bodyless POST is rejected by the
+  // Cloud Run front end with 411 (no Content-Length), so GET avoids that snag.
+  // POST is also accepted for clients that prefer it. The key travels in the
+  // X-Device-Key header, never the URL.
+  if (request.method !== "GET" && request.method !== "POST") {
+    return json(405, { ok: false, code: "METHOD_NOT_ALLOWED" }, { allow: "GET, POST" });
   }
   if (rateLimited(ip)) {
     return json(429, { ok: false, code: "RATE_LIMITED" }, { "retry-after": "10" });
