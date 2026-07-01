@@ -31,7 +31,10 @@ type SortState = { key: SortKey; dir: "asc" | "desc" };
 function flagScore(e: LogEntry): number {
   if (e.is_absent) return 4; // absences sort to the top of the Status column
   if (!e.time_in) return 0;
-  return ((e.late_minutes ?? 0) > 0 ? 2 : 0) + (e.is_undertime ? 1 : 0);
+  // A device-initiated clock-out that produced undertime is the review case
+  // (a kiosk ended someone's day short) — float it above all other flags.
+  const deviceUndertime = e.clockout_channel && e.is_undertime ? 4 : 0;
+  return ((e.late_minutes ?? 0) > 0 ? 2 : 0) + (e.is_undertime ? 1 : 0) + deviceUndertime;
 }
 
 type LogEntry = {
@@ -46,6 +49,7 @@ type LogEntry = {
   undertime_minutes: number | null;
   late_minutes: number | null;
   created_at: string | null;
+  clockout_channel: string | null;
   is_absent?: boolean | null;
   profile: {
     full_name: string;
@@ -227,6 +231,10 @@ function ActivityLogPage() {
         },
         { header: "Late (min)", value: (e) => e.late_minutes ?? 0 },
         { header: "Undertime (min)", value: (e) => e.undertime_minutes ?? "" },
+        {
+          header: "Clock-Out Source",
+          value: (e) => (e.time_out ? (e.clockout_channel ?? "web") : ""),
+        },
         { header: "Status", value: statusText },
       ],
       "activity-log",
@@ -262,6 +270,17 @@ function ActivityLogPage() {
           In progress
         </Badge>,
       );
+    else if (entry.is_undertime && entry.clockout_channel)
+      // A device clocked this employee out AND the day came up short — the review
+      // case. Rendered instead of the plain Undertime badge so it stands out.
+      badges.push(
+        <Badge
+          key="under-dev"
+          className="bg-amber-100 text-amber-900 border border-amber-300 ring-1 ring-amber-400 hover:bg-amber-100"
+        >
+          Review: device undertime
+        </Badge>,
+      );
     else if (entry.is_undertime)
       badges.push(
         <Badge
@@ -269,6 +288,16 @@ function ActivityLogPage() {
           className="bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-100"
         >
           Undertime
+        </Badge>,
+      );
+    else if (entry.clockout_channel)
+      // Device clock-out with full hours — informational, not a concern.
+      badges.push(
+        <Badge
+          key="dev-out"
+          className="bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-100"
+        >
+          Device out · {entry.clockout_channel}
         </Badge>,
       );
     if (badges.length === 0)

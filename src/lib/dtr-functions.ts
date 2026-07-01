@@ -287,6 +287,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
         pool.query(
           `SELECT d.id, d.employee_id, d.work_date, d.time_in, d.time_out,
                   d.hours_worked, d.shift_label, d.is_undertime, d.undertime_minutes, d.late_minutes, d.created_at,
+                  d.clockout_channel,
                   p.full_name, p.employee_code, p.department
            FROM daily_time_reports d
            LEFT JOIN profiles p ON p.id = d.employee_id
@@ -325,6 +326,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       undertime_minutes: number | null;
       late_minutes: number | null;
       created_at: string | null;
+      clockout_channel: string | null;
       is_absent: boolean;
       profile: {
         full_name: string;
@@ -345,6 +347,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       undertime_minutes: r.undertime_minutes as number | null,
       late_minutes: r.late_minutes as number | null,
       created_at: r.created_at as string | null,
+      clockout_channel: r.clockout_channel as string | null,
       is_absent: false,
       profile: r.full_name
         ? {
@@ -394,6 +397,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
           undertime_minutes: null,
           late_minutes: null,
           created_at: null,
+          clockout_channel: null,
           is_absent: true,
           profile: {
             full_name: p.full_name as string,
