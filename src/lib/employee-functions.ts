@@ -299,8 +299,7 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<ImportResult[]> => {
     assertAdmin(context.user);
     const { pool } = await import("@/lib/db.server");
-    const apiKey = process.env.FIREBASE_WEB_API_KEY;
-    if (!apiKey) throw new Error("FIREBASE_WEB_API_KEY not configured");
+    const { adminAuth } = await import("@/lib/firebase-admin.server");
 
     const results: ImportResult[] = [];
 
@@ -327,37 +326,25 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
 
       const tempPassword = generateTempPassword();
       try {
-        // Try to mint a new Firebase login. If the email already has one (the
-        // wave-hris-fb Auth pool is SHARED across staging/prod, so a user created
-        // in one environment already exists in the other), don't fail — LINK to
-        // the existing identity and create only the DB rows. A linked user keeps
-        // their existing password: we never call updateUser and never force a
-        // change (which would rewrite the shared credential).
-        const fbRes = await fetch(
-          `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email,
-              password: tempPassword,
-              returnSecureToken: false,
-            }),
-          },
-        );
-        const fbData = (await fbRes.json()) as { localId?: string; error?: { message?: string } };
-
+        // Create the Firebase login via the ADMIN SDK (server-credentialed) instead
+        // of the public accounts:signUp REST endpoint — so account creation can
+        // never be performed by anyone holding the (public) web API key. If the
+        // email already has a login (the wave-hris-fb Auth pool is SHARED across
+        // staging/prod, so a user created in one environment already exists in the
+        // other), LINK to it: create only the DB rows and leave the shared password
+        // untouched (no updateUser; must_change_password=FALSE for linked users).
         let firebaseUid: string;
         let intent: "create" | "link";
-        if (fbRes.ok && fbData.localId) {
-          firebaseUid = fbData.localId;
+        try {
+          firebaseUid = (await adminAuth.createUser({ email, password: tempPassword })).uid;
           intent = "create";
-        } else if (fbData.error?.message === "EMAIL_EXISTS") {
-          const { adminAuth } = await import("@/lib/firebase-admin.server");
-          firebaseUid = (await adminAuth.getUserByEmail(email)).uid;
-          intent = "link";
-        } else {
-          throw new Error(fbData.error?.message ?? "Firebase user creation failed");
+        } catch (err) {
+          if ((err as { code?: string }).code === "auth/email-already-exists") {
+            firebaseUid = (await adminAuth.getUserByEmail(email)).uid;
+            intent = "link";
+          } else {
+            throw err;
+          }
         }
 
         const client = await pool.connect();
