@@ -223,21 +223,25 @@ function AttendancePage() {
           <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">My Records</p>
           <h1 className="mt-1 font-display text-4xl">Attendance History</h1>
         </div>
-        <div className="flex items-center gap-3">
-          <Label className="text-xs text-muted-foreground">Month</Label>
-          <Input
-            type="month"
-            className="w-44"
-            value={selectedMonth}
-            max={todayYearMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-          />
-          <Button variant="outline" onClick={handleExport} disabled={sortedDtrs.length === 0}>
-            <FileDown className="mr-2 h-4 w-4" /> Export CSV
-          </Button>
-          <Button onClick={() => setDisputeOpen(true)}>
-            <Scale className="mr-2 h-4 w-4" /> Dispute attendance
-          </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Month</Label>
+            <Input
+              type="month"
+              className="w-44"
+              value={selectedMonth}
+              max={todayYearMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={handleExport} disabled={sortedDtrs.length === 0}>
+              <FileDown className="mr-2 h-4 w-4" /> Export CSV
+            </Button>
+            <Button onClick={() => setDisputeOpen(true)}>
+              <Scale className="mr-2 h-4 w-4" /> Dispute attendance
+            </Button>
+          </div>
         </div>
       </div>
 
