@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { randomInt } from "node:crypto";
 import { authMiddleware, assertHR, assertAdmin } from "@/lib/auth-middleware";
+import { assertNotStagingFirebase } from "@/lib/staging-guard.server";
 
 type EmployeeRow = {
   id: string;
@@ -207,6 +208,8 @@ export const deleteEmployee = createServerFn({ method: "POST" })
   .inputValidator((data: { id: string }) => data)
   .handler(async ({ data, context }) => {
     assertAdmin(context.user);
+    // Deleting removes the SHARED Firebase login — would lock the user out of prod.
+    assertNotStagingFirebase("deleteEmployee");
     if (data.id === context.user.dbUserId) throw new Error("CANNOT_DELETE_SELF");
     const { pool } = await import("@/lib/db.server");
 
@@ -240,6 +243,8 @@ export const resetEmployeePassword = createServerFn({ method: "POST" })
   .inputValidator((data: { id: string }) => data)
   .handler(async ({ data, context }): Promise<{ temp_password: string }> => {
     assertAdmin(context.user);
+    // Resetting changes the SHARED Firebase password — would change it in prod too.
+    assertNotStagingFirebase("resetEmployeePassword");
     const { pool } = await import("@/lib/db.server");
 
     const {
