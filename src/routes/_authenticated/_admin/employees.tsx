@@ -1362,7 +1362,7 @@ function EmployeesPage() {
           setImportOpen(o);
         }}
       >
-        <DialogContent className="max-w-4xl overflow-x-hidden">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl">Import Employees</DialogTitle>
           </DialogHeader>
@@ -1412,8 +1412,8 @@ function EmployeesPage() {
                 {importRows.length} row{importRows.length !== 1 ? "s" : ""} parsed. Review before
                 creating accounts.
               </p>
-              <div className="max-h-80 overflow-auto rounded-md border min-w-0">
-                <table className="min-w-max w-full text-xs">
+              <div className="max-h-80 overflow-auto rounded-md border">
+                <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-secondary/80 text-[10px] uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 text-left">Email</th>
@@ -1423,7 +1423,7 @@ function EmployeesPage() {
                       <th className="px-3 py-2 text-left">Department</th>
                       <th className="px-3 py-2 text-left">Position</th>
                       <th
-                        className="px-3 py-2 text-right"
+                        className="px-3 py-2 text-right whitespace-nowrap"
                         title="Vacation / Sick / Emergency / Birthday / Maternity / Paternity / Bereavement"
                       >
                         Credits (VL/SL/EL/BDAY/ML/PL/BL)
@@ -1433,7 +1433,7 @@ function EmployeesPage() {
                   <tbody>
                     {importRows.map((row, i) => (
                       <tr key={i} className="border-t">
-                        <td className="px-3 py-1.5 font-medium">
+                        <td className="px-3 py-1.5 font-medium whitespace-nowrap">
                           {row.email || <span className="text-destructive">missing</span>}
                         </td>
                         <td className="px-3 py-1.5">
@@ -1449,7 +1449,7 @@ function EmployeesPage() {
                           {row.department || "—"}
                         </td>
                         <td className="px-3 py-1.5 text-muted-foreground">{row.position || "—"}</td>
-                        <td className="px-3 py-1.5 text-right text-muted-foreground font-mono">
+                        <td className="px-3 py-1.5 text-right text-muted-foreground font-mono whitespace-nowrap">
                           {[
                             row.vl_credits,
                             row.sl_credits,
