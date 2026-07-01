@@ -358,19 +358,26 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
         });
       }
 
-      // State (b2): 2nd tap too soon after clock-in -> debounce (accidental
-      // re-tap). Never write a ~0-hour day.
+      // State (b2): 2nd tap too soon after clock-in -> treat as an accidental
+      // re-tap and DON'T clock out (never write a ~0-hour day). Return a distinct,
+      // self-explanatory code (not ALREADY_CLOCKED_IN, which read like a failed
+      // clock-out to testers) plus how long until a real clock-out is allowed.
       const dwellMins = row?.time_in ? minutesOfDay(timeIn) - minutesOfDay(row.time_in) : 0;
       if (dwellMins < MIN_DWELL_MINUTES) {
+        const retryAfterMinutes = Math.max(1, MIN_DWELL_MINUTES - dwellMins);
         console.log(
-          `[device-clockin] debounced label=${device.label} channel=${channel} emp=${employee.id} date=${workDate} dwell=${dwellMins}m`,
+          `[device-clockin] too_soon label=${device.label} channel=${channel} emp=${employee.id} date=${workDate} dwell=${dwellMins}m`,
         );
         return json(200, {
           ok: true,
-          code: "ALREADY_CLOCKED_IN",
+          code: "CLOCKOUT_TOO_SOON",
           employee: { name: employee.full_name },
           timeIn: inAt,
           workDate,
+          retryAfterMinutes,
+          message: `Just clocked in at ${inAt}. Tap again in about ${retryAfterMinutes} minute${
+            retryAfterMinutes === 1 ? "" : "s"
+          } to clock out.`,
         });
       }
 
