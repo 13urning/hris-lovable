@@ -382,10 +382,11 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       const { hoursWorked, isUndertime, undertimeMinutes } = computeHours(row.time_in, timeOut);
       const { rows: updated } = await pool.query<{ time_out: string }>(
         `UPDATE daily_time_reports
-            SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4
-          WHERE employee_id = $5 AND work_date = $6 AND time_out IS NULL
+            SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4,
+                clockout_channel = $5
+          WHERE employee_id = $6 AND work_date = $7 AND time_out IS NULL
         RETURNING time_out`,
-        [timeOut, hoursWorked, isUndertime, undertimeMinutes, employee.id, workDate],
+        [timeOut, hoursWorked, isUndertime, undertimeMinutes, channel, employee.id, workDate],
       );
 
       if (updated.length === 0) {

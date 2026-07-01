@@ -379,6 +379,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
                   d.hours_worked, d.shift_label, d.is_undertime, d.undertime_minutes, d.late_minutes, d.created_at,
                   d.clock_in_lat, d.clock_in_lon, d.clock_in_accuracy, d.clock_in_loc_status,
                   d.clock_out_lat, d.clock_out_lon, d.clock_out_accuracy, d.clock_out_loc_status,
+                  d.clockout_channel,
                   p.full_name, p.employee_code, p.department
            FROM daily_time_reports d
            LEFT JOIN profiles p ON p.id = d.employee_id
@@ -425,6 +426,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       clock_out_lon: number | null;
       clock_out_accuracy: number | null;
       clock_out_loc_status: string | null;
+      clockout_channel: string | null;
       is_absent: boolean;
       profile: {
         full_name: string;
@@ -453,6 +455,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       clock_out_lon: r.clock_out_lon as number | null,
       clock_out_accuracy: r.clock_out_accuracy as number | null,
       clock_out_loc_status: r.clock_out_loc_status as string | null,
+      clockout_channel: r.clockout_channel as string | null,
       is_absent: false,
       profile: r.full_name
         ? {
@@ -510,6 +513,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
           clock_out_lon: null,
           clock_out_accuracy: null,
           clock_out_loc_status: null,
+          clockout_channel: null,
           is_absent: true,
           profile: {
             full_name: p.full_name as string,

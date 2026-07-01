@@ -147,6 +147,7 @@ CREATE TABLE public.daily_time_reports (
   shift_label       TEXT CHECK (shift_label IN ('7-4', '8-5', '9-6')),
   is_undertime      BOOLEAN NOT NULL DEFAULT FALSE,
   undertime_minutes INT NOT NULL DEFAULT 0,
+  clockout_channel  TEXT,   -- source channel of a DEVICE clock-OUT (nfc/face/...); NULL = web/self
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (employee_id, work_date)
