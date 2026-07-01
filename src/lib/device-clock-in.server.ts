@@ -24,8 +24,10 @@
 //   - Scanned value is only ever used as a parameterized query value ($1).
 //   - work_date / time_in / lateness are derived from SERVER PH time, never from
 //     the device - a tampered device clock can't backdate a punch or dodge lateness.
-//   - Idempotent via UNIQUE(employee_id, work_date) - a re-tap never overwrites
-//     the original punch.
+//   - Tap-toggle: the 1st tap of the day clocks IN; the 2nd (after a short
+//     debounce) clocks OUT with server-computed hours; further taps are no-ops.
+//     The UNIQUE(employee_id, work_date) row is the state machine, and time_out is
+//     write-once - a re-tap can never overwrite the punch or shorten the hours.
 //   - Response exposes only the employee's display name (no UUID/email) to limit
 //     what a caller can learn by probing codes.
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -46,6 +48,37 @@ function lateMinutesFor(timeIn: string): number {
   const [h, m] = timeIn.split(":").map(Number);
   if (Number.isNaN(h) || Number.isNaN(m)) return 0;
   return Math.max(0, h * 60 + m - LATE_CUTOFF_MINUTES);
+}
+
+// Standard workday length for undertime; mirrors clockOutDTR's STANDARD (9h).
+const STANDARD_HOURS = 9;
+
+// Minimum minutes between clock-IN and clock-OUT on the same daily row. A 2nd tap
+// sooner than this is treated as an accidental re-tap (NFC bounce / unsure user)
+// and is a no-op - it must never write a ~0-hour completed day. Debounces
+// accidents, NOT legitimate short / early-departure days (hence minutes, not hours).
+const MIN_DWELL_MINUTES = 5;
+
+// Minutes-since-midnight for a "HH:MM[:SS]" time string.
+function minutesOfDay(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+// Server-side hours computation, mirroring clockOutDTR in dtr-functions.ts. Same
+// same-day assumption; Math.max(0, ...) clamps out-before-in to 0 (overnight
+// shifts are unsupported here, exactly as in the interactive web flow).
+function computeHours(
+  timeIn: string,
+  timeOut: string,
+): { hoursWorked: number; isUndertime: boolean; undertimeMinutes: number } {
+  const totalMins = minutesOfDay(timeOut) - minutesOfDay(timeIn);
+  const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
+  const isUndertime = hoursWorked < STANDARD_HOURS;
+  const undertimeMinutes = isUndertime
+    ? Math.max(0, Math.round(STANDARD_HOURS * 60 - totalMins))
+    : 0;
+  return { hoursWorked, isUndertime, undertimeMinutes };
 }
 
 // -- Device authentication -----------------------------------------------------
@@ -288,8 +321,9 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     const timeIn = now.toISOString().slice(11, 16); // HH:MM (PH)
     const lateMinutes = lateMinutesFor(timeIn);
 
-    // Idempotent upsert: ON CONFLICT DO NOTHING means a second tap the same day is
-    // a safe no-op and is race-safe (exactly one of two concurrent taps inserts).
+    // First tap inserts the clock-in (race-safe: exactly one of two concurrent
+    // first-taps wins the ON CONFLICT). A 2nd+ tap inserts nothing (0 rows) and
+    // falls through to the clock-OUT / already-out state machine below.
     const { rows: inserted } = await pool.query<{ id: string }>(
       `INSERT INTO daily_time_reports
          (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes, late_minutes)
@@ -300,19 +334,88 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     );
 
     if (inserted.length === 0) {
-      // Already clocked in today - return the existing punch, unchanged.
-      const { rows: existing } = await pool.query<{ time_in: string | null }>(
-        `SELECT time_in FROM daily_time_reports WHERE employee_id = $1 AND work_date = $2`,
+      // A row already exists today -> this is a 2nd+ tap. Toggle to clock-OUT, or
+      // report already-out, or debounce an accidental re-tap.
+      const { rows: existing } = await pool.query<{ time_in: string; time_out: string | null }>(
+        `SELECT time_in, time_out FROM daily_time_reports WHERE employee_id = $1 AND work_date = $2`,
         [employee.id, workDate],
       );
+      const row = existing[0];
+      const inAt = row?.time_in?.slice(0, 5) ?? null;
+
+      // State (c): already clocked out -> read-only no-op.
+      if (row?.time_out) {
+        console.log(
+          `[device-clockin] already_out label=${device.label} channel=${channel} emp=${employee.id} date=${workDate}`,
+        );
+        return json(200, {
+          ok: true,
+          code: "ALREADY_CLOCKED_OUT",
+          employee: { name: employee.full_name },
+          timeIn: inAt,
+          timeOut: row.time_out.slice(0, 5),
+          workDate,
+        });
+      }
+
+      // State (b2): 2nd tap too soon after clock-in -> debounce (accidental
+      // re-tap). Never write a ~0-hour day.
+      const dwellMins = row?.time_in ? minutesOfDay(timeIn) - minutesOfDay(row.time_in) : 0;
+      if (dwellMins < MIN_DWELL_MINUTES) {
+        console.log(
+          `[device-clockin] debounced label=${device.label} channel=${channel} emp=${employee.id} date=${workDate} dwell=${dwellMins}m`,
+        );
+        return json(200, {
+          ok: true,
+          code: "ALREADY_CLOCKED_IN",
+          employee: { name: employee.full_name },
+          timeIn: inAt,
+          workDate,
+        });
+      }
+
+      // State (b1): clock OUT. `timeIn` here is the CURRENT server time (the
+      // clock-out moment); row.time_in is the earlier clock-in. Hours are computed
+      // server-side and time_out is filled ONCE - the `time_out IS NULL` guard
+      // makes two concurrent 2nd-taps race-safe (exactly one wins).
+      const timeOut = timeIn;
+      const { hoursWorked, isUndertime, undertimeMinutes } = computeHours(row.time_in, timeOut);
+      const { rows: updated } = await pool.query<{ time_out: string }>(
+        `UPDATE daily_time_reports
+            SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4
+          WHERE employee_id = $5 AND work_date = $6 AND time_out IS NULL
+        RETURNING time_out`,
+        [timeOut, hoursWorked, isUndertime, undertimeMinutes, employee.id, workDate],
+      );
+
+      if (updated.length === 0) {
+        // Race loser: another tap filled time_out first. Report already-out.
+        const { rows: fresh } = await pool.query<{ time_in: string; time_out: string | null }>(
+          `SELECT time_in, time_out FROM daily_time_reports WHERE employee_id = $1 AND work_date = $2`,
+          [employee.id, workDate],
+        );
+        return json(200, {
+          ok: true,
+          code: "ALREADY_CLOCKED_OUT",
+          employee: { name: employee.full_name },
+          timeIn: fresh[0]?.time_in?.slice(0, 5) ?? null,
+          timeOut: fresh[0]?.time_out?.slice(0, 5) ?? null,
+          workDate,
+        });
+      }
+
       console.log(
-        `[device-clockin] already label=${device.label} channel=${channel} emp=${employee.id} date=${workDate}`,
+        `[device-clockin] clocked_out label=${device.label} channel=${channel} deviceId=${deviceId} emp=${employee.id} date=${workDate} in=${inAt} out=${timeOut} hours=${hoursWorked}`,
       );
       return json(200, {
         ok: true,
-        code: "ALREADY_CLOCKED_IN",
+        code: "CLOCKED_OUT",
         employee: { name: employee.full_name },
-        timeIn: existing[0]?.time_in?.slice(0, 5) ?? null,
+        timeIn: inAt,
+        timeOut,
+        hoursWorked,
+        isUndertime,
+        undertimeMinutes,
         workDate,
       });
     }
