@@ -51,10 +51,18 @@ type ImportEmployee = {
   bl_credits: string;
 };
 
+// "created" = new Firebase login minted (has a temp_password to distribute).
+// "linked"  = email already had a login (shared wave-hris-fb pool); we created
+//             only the DB rows against the existing uid — no password touched.
+// "skipped" = a profile already existed for that uid (already onboarded here).
+// "failed"  = validation or an unexpected error (see error).
+type ImportStatus = "created" | "linked" | "skipped" | "failed";
+
 type ImportResult = {
   email: string;
   full_name: string;
   success: boolean;
+  status: ImportStatus;
   temp_password?: string;
   error?: string;
 };
@@ -302,11 +310,16 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
         emp.middle_name ?? "",
         emp.last_name ?? "",
       );
-      if (!emp.email || !emp.first_name || !emp.last_name) {
+      // Canonicalize once: Firebase treats email case-insensitively and stores it
+      // lowercased, so use the same canonical form for the Auth call, the lookup,
+      // and the DB rows — otherwise "A@x" and "a@x" could yield duplicate profiles.
+      const email = (emp.email ?? "").trim().toLowerCase();
+      if (!email || !emp.first_name || !emp.last_name) {
         results.push({
-          email: emp.email,
+          email,
           full_name: fullName,
           success: false,
+          status: "failed",
           error: "email, first_name and last_name are required",
         });
         continue;
@@ -314,87 +327,136 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
 
       const tempPassword = generateTempPassword();
       try {
+        // Try to mint a new Firebase login. If the email already has one (the
+        // wave-hris-fb Auth pool is SHARED across staging/prod, so a user created
+        // in one environment already exists in the other), don't fail — LINK to
+        // the existing identity and create only the DB rows. A linked user keeps
+        // their existing password: we never call updateUser and never force a
+        // change (which would rewrite the shared credential).
         const fbRes = await fetch(
           `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              email: emp.email,
+              email,
               password: tempPassword,
               returnSecureToken: false,
             }),
           },
         );
         const fbData = (await fbRes.json()) as { localId?: string; error?: { message?: string } };
-        if (!fbRes.ok || !fbData.localId) {
+
+        let firebaseUid: string;
+        let intent: "create" | "link";
+        if (fbRes.ok && fbData.localId) {
+          firebaseUid = fbData.localId;
+          intent = "create";
+        } else if (fbData.error?.message === "EMAIL_EXISTS") {
+          const { adminAuth } = await import("@/lib/firebase-admin.server");
+          firebaseUid = (await adminAuth.getUserByEmail(email)).uid;
+          intent = "link";
+        } else {
           throw new Error(fbData.error?.message ?? "Firebase user creation failed");
         }
-        const firebaseUid = fbData.localId;
 
         const client = await pool.connect();
+        let status: Exclude<ImportStatus, "failed">;
         try {
           await client.query("BEGIN");
 
-          const {
-            rows: [user],
-          } = await client.query<{ id: string }>(
-            `INSERT INTO public.users (firebase_uid, email) VALUES ($1, $2) RETURNING id`,
-            [firebaseUid, emp.email],
+          // Upsert the users row keyed by the (unique) firebase_uid; a concurrent
+          // import or a prior half-completed run may already own it.
+          const ins = await client.query<{ id: string }>(
+            `INSERT INTO public.users (firebase_uid, email) VALUES ($1, $2)
+             ON CONFLICT (firebase_uid) DO NOTHING RETURNING id`,
+            [firebaseUid, email],
           );
+          const userId =
+            ins.rows[0]?.id ??
+            (
+              await client.query<{ id: string }>(
+                `SELECT id FROM public.users WHERE firebase_uid = $1`,
+                [firebaseUid],
+              )
+            ).rows[0].id;
 
-          const parseCredit = (raw: string | undefined, fallback: number | null): number | null => {
-            if (raw === undefined || raw === "") return fallback;
-            const n = parseInt(raw);
-            return Number.isFinite(n) ? n : fallback;
-          };
-          const vl = parseCredit(emp.vl_credits, 10);
-          const sl = parseCredit(emp.sl_credits, 10);
-          const el = parseCredit(emp.el_credits, null);
-          const bday = parseCredit(emp.bday_credits, null);
-          const ml = parseCredit(emp.ml_credits, null);
-          const pl = parseCredit(emp.pl_credits, null);
-          const bl = parseCredit(emp.bl_credits, null);
-          await client.query(
-            `INSERT INTO profiles (id, full_name, first_name, middle_name, last_name,
-                                   email, employee_code, company, department, position,
-                                   vl_credits, vl_remaining,
-                                   sl_credits, sl_remaining,
-                                   el_credits, el_remaining,
-                                   bday_credits, bday_remaining,
-                                   ml_credits, ml_remaining,
-                                   pl_credits, pl_remaining,
-                                   bl_credits, bl_remaining,
-                                   must_change_password)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                     $11,$11, $12,$12, $13,$13, $14,$14, $15,$15, $16,$16, $17,$17,
-                     TRUE)`,
-            [
-              user.id,
-              fullName,
-              emp.first_name.trim(),
-              emp.middle_name?.trim() || null,
-              emp.last_name.trim(),
-              emp.email,
-              emp.employee_code || null,
-              emp.company || null,
-              emp.department || "General",
-              emp.position || null,
-              vl,
-              sl,
-              el,
-              bday,
-              ml,
-              pl,
-              bl,
-            ],
-          );
-
-          await client.query(`INSERT INTO user_roles (user_id, role) VALUES ($1, 'employee')`, [
-            user.id,
+          // Never clobber an already-onboarded profile — if one exists for this
+          // uid in THIS database, skip (the identity is already set up here).
+          const existingProfile = await client.query(`SELECT 1 FROM profiles WHERE id = $1`, [
+            userId,
           ]);
+          if (existingProfile.rowCount) {
+            await client.query("COMMIT");
+            status = "skipped";
+          } else {
+            const parseCredit = (
+              raw: string | undefined,
+              fallback: number | null,
+            ): number | null => {
+              if (raw === undefined || raw === "") return fallback;
+              const n = parseInt(raw);
+              return Number.isFinite(n) ? n : fallback;
+            };
+            const vl = parseCredit(emp.vl_credits, 10);
+            const sl = parseCredit(emp.sl_credits, 10);
+            const el = parseCredit(emp.el_credits, null);
+            const bday = parseCredit(emp.bday_credits, null);
+            const ml = parseCredit(emp.ml_credits, null);
+            const pl = parseCredit(emp.pl_credits, null);
+            const bl = parseCredit(emp.bl_credits, null);
+            // must_change_password only for freshly-created logins. A linked user
+            // already has a working (shared) password; forcing a change would
+            // rewrite it in the other environment too.
+            const mustChange = intent === "create";
+            const profIns = await client.query(
+              `INSERT INTO profiles (id, full_name, first_name, middle_name, last_name,
+                                     email, employee_code, company, department, position,
+                                     vl_credits, vl_remaining,
+                                     sl_credits, sl_remaining,
+                                     el_credits, el_remaining,
+                                     bday_credits, bday_remaining,
+                                     ml_credits, ml_remaining,
+                                     pl_credits, pl_remaining,
+                                     bl_credits, bl_remaining,
+                                     must_change_password)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+                       $11,$11, $12,$12, $13,$13, $14,$14, $15,$15, $16,$16, $17,$17,
+                       $18)
+               ON CONFLICT (id) DO NOTHING`,
+              [
+                userId,
+                fullName,
+                emp.first_name.trim(),
+                emp.middle_name?.trim() || null,
+                emp.last_name.trim(),
+                email,
+                emp.employee_code || null,
+                emp.company || null,
+                emp.department || "General",
+                emp.position || null,
+                vl,
+                sl,
+                el,
+                bday,
+                ml,
+                pl,
+                bl,
+                mustChange,
+              ],
+            );
 
-          await client.query("COMMIT");
+            await client.query(
+              `INSERT INTO user_roles (user_id, role) VALUES ($1, 'employee')
+               ON CONFLICT DO NOTHING`,
+              [userId],
+            );
+
+            await client.query("COMMIT");
+            // If a racing writer inserted the profile between our check and insert,
+            // profIns affects 0 rows — treat as skipped, not created/linked.
+            status = profIns.rowCount ? (intent === "create" ? "created" : "linked") : "skipped";
+          }
         } catch (err) {
           await client.query("ROLLBACK");
           throw err;
@@ -403,16 +465,19 @@ export const bulkCreateEmployees = createServerFn({ method: "POST" })
         }
 
         results.push({
-          email: emp.email,
+          email,
           full_name: fullName,
           success: true,
-          temp_password: tempPassword,
+          status,
+          // Only a freshly-created login has a distributable password.
+          ...(status === "created" ? { temp_password: tempPassword } : {}),
         });
       } catch (err) {
         results.push({
-          email: emp.email,
+          email,
           full_name: fullName,
           success: false,
+          status: "failed",
           error: err instanceof Error ? err.message : String(err),
         });
       }
