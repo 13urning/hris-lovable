@@ -103,10 +103,13 @@ type ImportRow = {
   bl_credits: string;
 };
 
+type ImportStatus = "created" | "linked" | "skipped" | "failed";
+
 type ImportResult = {
   email: string;
   full_name: string;
   success: boolean;
+  status: ImportStatus;
   temp_password?: string;
   error?: string;
 };
@@ -319,8 +322,10 @@ function parseCSV(text: string): ImportRow[] {
 }
 
 function copyCredentials(results: ImportResult[]) {
+  // Only freshly-created logins have a distributable temp password. Linked/skipped
+  // rows reuse an existing login and have no credential to copy.
   const lines = results
-    .filter((r) => r.success)
+    .filter((r) => r.status === "created")
     .map((r) => `${r.full_name}\t${r.email}\t${r.temp_password}`);
   const text = ["Name\tEmail\tTemporary Password", ...lines].join("\n");
   navigator.clipboard.writeText(text).then(() => toast.success("Credentials copied to clipboard"));
@@ -681,8 +686,10 @@ function EmployeesPage() {
 
   const pg = usePagination(filtered, 25);
 
-  const successCount = importResults.filter((r) => r.success).length;
-  const failCount = importResults.filter((r) => !r.success).length;
+  const createdCount = importResults.filter((r) => r.status === "created").length;
+  const linkedCount = importResults.filter((r) => r.status === "linked").length;
+  const skippedCount = importResults.filter((r) => r.status === "skipped").length;
+  const failCount = importResults.filter((r) => r.status === "failed").length;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -1469,11 +1476,22 @@ function EmployeesPage() {
 
           {importStep === "results" && (
             <div className="space-y-4 py-2">
-              <div className="flex items-center gap-4 text-sm">
-                {successCount > 0 && (
+              <div className="flex flex-wrap items-center gap-4 text-sm">
+                {createdCount > 0 && (
                   <span className="flex items-center gap-1.5 text-success font-medium">
-                    <Check className="h-4 w-4" /> {successCount} account
-                    {successCount !== 1 ? "s" : ""} created
+                    <Check className="h-4 w-4" /> {createdCount} account
+                    {createdCount !== 1 ? "s" : ""} created
+                  </span>
+                )}
+                {linkedCount > 0 && (
+                  <span className="flex items-center gap-1.5 text-primary font-medium">
+                    <Check className="h-4 w-4" /> {linkedCount} linked to existing login
+                    {linkedCount !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {skippedCount > 0 && (
+                  <span className="flex items-center gap-1.5 text-muted-foreground font-medium">
+                    {skippedCount} already onboarded
                   </span>
                 )}
                 {failCount > 0 && (
@@ -1498,7 +1516,7 @@ function EmployeesPage() {
                         <td className="px-3 py-1.5 font-medium">{r.full_name}</td>
                         <td className="px-3 py-1.5">{r.email}</td>
                         <td className="px-3 py-1.5 font-mono">
-                          {r.success ? (
+                          {r.status === "created" ? (
                             <span className="rounded bg-secondary px-1.5 py-0.5">
                               {r.temp_password}
                             </span>
@@ -1507,9 +1525,24 @@ function EmployeesPage() {
                           )}
                         </td>
                         <td className="px-3 py-1.5">
-                          {r.success ? (
-                            <span className="text-success">Created</span>
-                          ) : (
+                          {r.status === "created" && <span className="text-success">Created</span>}
+                          {r.status === "linked" && (
+                            <span
+                              className="text-primary"
+                              title="Email already had a login; only the employee record was created. Existing password unchanged."
+                            >
+                              Linked to existing login
+                            </span>
+                          )}
+                          {r.status === "skipped" && (
+                            <span
+                              className="text-muted-foreground"
+                              title="A profile for this login already exists here."
+                            >
+                              Already onboarded
+                            </span>
+                          )}
+                          {r.status === "failed" && (
                             <span className="text-destructive" title={r.error}>
                               Failed: {r.error}
                             </span>
@@ -1520,10 +1553,16 @@ function EmployeesPage() {
                   </tbody>
                 </table>
               </div>
-              {successCount > 0 && (
+              {createdCount > 0 && (
                 <div className="rounded-md bg-warning/10 border border-warning/30 px-4 py-3 text-xs text-warning-foreground">
                   <strong>Important:</strong> Copy and securely distribute the temporary passwords
                   above. They will not be shown again.
+                </div>
+              )}
+              {linkedCount > 0 && (
+                <div className="rounded-md bg-primary/5 border border-primary/20 px-4 py-3 text-xs text-muted-foreground">
+                  <strong>Linked accounts</strong> already had a login (emails are shared across
+                  environments). No new password was set — they sign in with their existing one.
                 </div>
               )}
             </div>
@@ -1549,7 +1588,7 @@ function EmployeesPage() {
             )}
             {importStep === "results" && (
               <>
-                {successCount > 0 && (
+                {createdCount > 0 && (
                   <Button variant="outline" onClick={() => copyCredentials(importResults)}>
                     <Copy className="mr-2 h-4 w-4" /> Copy All Credentials
                   </Button>
