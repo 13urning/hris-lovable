@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut as fbSignOut,
   type User as FirebaseUser,
 } from "firebase/auth";
@@ -35,7 +34,6 @@ type AuthState = {
   isAdmin: boolean;
   isGroupHead: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 };
 
@@ -124,21 +122,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signUp: AuthState["signUp"] = async (email, password, fullName) => {
-    try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      await provisionUser({ data: { fullName } });
-      return { error: null };
-    } catch (e) {
-      const err = e as { code?: string; message?: string };
-      const msg: Record<string, string> = {
-        "auth/email-already-in-use": "An account with that email already exists.",
-        "auth/weak-password": "Password must be at least 6 characters.",
-      };
-      return { error: (err.code && msg[err.code]) || err.message || "Sign up failed." };
-    }
-  };
-
   const signOut = async () => {
     clearSession();
     await fbSignOut(auth);
@@ -156,7 +139,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAdmin: roles.includes("admin"),
     isGroupHead: roles.includes("group_head"),
     signIn,
-    signUp,
     signOut,
   };
 
