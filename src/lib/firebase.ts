@@ -1,14 +1,12 @@
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps, type FirebaseOptions } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { PROD_FIREBASE_CONFIG } from "@/lib/firebase-config";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyC4W2GyXTnKCW1JhT_neqXRuML7X17RO8I",
-  authDomain: "wave-hris-fb.firebaseapp.com",
-  projectId: "wave-hris-fb",
-  storageBucket: "wave-hris-fb.firebasestorage.app",
-  messagingSenderId: "1059074578468",
-  appId: "1:1059074578468:web:37da08fc701e090cf3e0b1",
-};
+// The per-environment config is injected by the SSR shell as window.__FIREBASE_CONFIG__
+// (see __root.tsx / firebase-config.ts). This module is only ever imported in the
+// browser, so that global is present; PROD is a defensive fallback.
+const firebaseConfig: FirebaseOptions =
+  (typeof window !== "undefined" && window.__FIREBASE_CONFIG__) || PROD_FIREBASE_CONFIG;
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 export const auth = getAuth(app);
