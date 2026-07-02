@@ -72,6 +72,8 @@ function buildCsp(nonce: string): string {
     "form-action 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
+    // Collect violations during the Report-Only window (see lib/csp-report.server).
+    "report-uri /api/csp-report",
   ].join("; ");
 }
 
@@ -159,6 +161,13 @@ export default {
           ? mod.handleDeviceVerify
           : mod.handleDeviceClockIn;
         return withSecurityHeaders(await handler(request));
+      }
+
+      // CSP violation report sink (unauthenticated; browsers POST here via the
+      // report-uri directive). Handled before SSR; no nonce/CSP needed on it.
+      if (pathname === "/api/csp-report") {
+        const { handleCspReport } = await import("./lib/csp-report.server");
+        return withSecurityHeaders(await handleCspReport(request));
       }
 
       // Per-request CSP nonce: generate it, run the SSR render inside the nonce
