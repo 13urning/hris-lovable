@@ -1,9 +1,18 @@
 import "./lib/error-capture";
 
 import { randomBytes } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import { SSR_NONCE_HEADER } from "./lib/ssr-nonce";
+import { SSR_NONCE_STORAGE_KEY } from "./lib/ssr-nonce";
+
+// Per-request CSP nonce store, published on a shared global symbol so the
+// isomorphic reader in lib/ssr-nonce can pull it during SSR without importing
+// node:async_hooks. Reuse an existing instance if one is already on globalThis.
+const globalForNonce = globalThis as Record<symbol, unknown>;
+const nonceStorage: AsyncLocalStorage<string> =
+  (globalForNonce[SSR_NONCE_STORAGE_KEY] as AsyncLocalStorage<string> | undefined) ??
+  (globalForNonce[SSR_NONCE_STORAGE_KEY] = new AsyncLocalStorage<string>());
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -152,21 +161,18 @@ export default {
         return withSecurityHeaders(await handler(request));
       }
 
-      // Per-request CSP nonce: generate it, hand it to the renderer as a request
-      // header (read back via lib/ssr-nonce in router.tsx + __root.tsx), and emit a
-      // matching CSP. Only GET/HEAD document navigations are re-issued with the
-      // header, so we never reconstruct a request that carries a body.
+      // Per-request CSP nonce: generate it, run the SSR render inside the nonce
+      // AsyncLocalStorage so router.tsx + __root.tsx can read it back (via
+      // lib/ssr-nonce), and emit a matching CSP. We do NOT touch the request —
+      // reconstructing it (`new Request`) throws in this Nitro/h3 runtime because
+      // the incoming request isn't an undici Request.
       const nonce = randomBytes(16).toString("base64");
-      let renderRequest = request;
-      if (request.method === "GET" || request.method === "HEAD") {
-        const headers = new Headers(request.headers);
-        headers.set(SSR_NONCE_HEADER, nonce);
-        renderRequest = new Request(request, { headers });
-      }
-
       const handler = await getServerEntry();
-      const response = await handler.fetch(renderRequest, env, ctx);
-      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response), nonce);
+      const response = await nonceStorage.run(nonce, async () => {
+        const res = await handler.fetch(request, env, ctx);
+        return normalizeCatastrophicSsrResponse(res);
+      });
+      return withSecurityHeaders(response, nonce);
     } catch (error) {
       console.error(error);
       return withSecurityHeaders(brandedErrorResponse());
