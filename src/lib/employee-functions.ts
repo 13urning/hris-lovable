@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { randomInt } from "node:crypto";
-import { authMiddleware, assertHR, assertAdmin } from "@/lib/auth-middleware";
+import { authMiddleware, strictAuthMiddleware, assertHR, assertAdmin } from "@/lib/auth-middleware";
 
 type EmployeeRow = {
   id: string;
@@ -203,7 +203,7 @@ export const setAttendanceTracking = createServerFn({ method: "POST" })
 // leaves, DTRs, evaluations) via FK constraints. Best-effort Firebase Auth
 // cleanup — failure logged but does not block the DB delete.
 export const deleteEmployee = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([strictAuthMiddleware])
   .inputValidator((data: { id: string }) => data)
   .handler(async ({ data, context }) => {
     assertAdmin(context.user);
@@ -236,7 +236,7 @@ export const deleteEmployee = createServerFn({ method: "POST" })
 // active sessions can't outlive the reset. Returns the temp password ONCE — it is
 // never stored and can't be retrieved again.
 export const resetEmployeePassword = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([strictAuthMiddleware])
   .inputValidator((data: { id: string }) => data)
   .handler(async ({ data, context }): Promise<{ temp_password: string }> => {
     assertAdmin(context.user);
@@ -269,7 +269,7 @@ export const resetEmployeePassword = createServerFn({ method: "POST" })
   });
 
 export const setEmployeeRole = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([strictAuthMiddleware])
   .inputValidator((data: { userId: string; roles: { user_id: string; role: string }[] }) => data)
   .handler(async ({ data, context }) => {
     assertAdmin(context.user);
@@ -294,7 +294,7 @@ export const setEmployeeRole = createServerFn({ method: "POST" })
   });
 
 export const bulkCreateEmployees = createServerFn({ method: "POST" })
-  .middleware([authMiddleware])
+  .middleware([strictAuthMiddleware])
   .inputValidator((data: { employees: ImportEmployee[] }) => data)
   .handler(async ({ data, context }): Promise<ImportResult[]> => {
     assertAdmin(context.user);
