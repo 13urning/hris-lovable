@@ -89,6 +89,17 @@ export const getProfileFlags = createServerFn({ method: "POST" })
     return result.rows[0] ?? null;
   });
 
+// Revoke the caller's own Firebase refresh tokens on explicit logout, so a
+// captured refresh token on a shared/kiosk device can't silently mint new sessions
+// after sign-out. Best-effort — the client still signs out even if this throws.
+export const revokeOwnSessions = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertAuthenticated(context.user);
+    const { adminAuth } = await import("@/lib/firebase-admin.server");
+    await adminAuth.revokeRefreshTokens(context.user.firebaseUid);
+  });
+
 // Clear the must_change_password flag after a successful password reset.
 export const clearPasswordChangeFlag = createServerFn({ method: "POST" })
   .middleware([authMiddleware])

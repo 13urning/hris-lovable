@@ -1,7 +1,9 @@
 import "./lib/error-capture";
 
+import { randomBytes } from "node:crypto";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { SSR_NONCE_HEADER } from "./lib/ssr-nonce";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -25,9 +27,7 @@ function brandedErrorResponse(): Response {
   });
 }
 
-// Baseline security headers applied to every response. CSP is intentionally
-// omitted here — a strict policy needs per-route testing against Firebase Auth
-// and the SSR inline bootstrap, so it's tracked as a follow-up.
+// Baseline security headers applied to every response.
 const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
@@ -36,23 +36,60 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 };
 
-function withSecurityHeaders(response: Response): Response {
+// Content-Security-Policy for HTML document responses. Shipped in REPORT-ONLY mode
+// first: violations are reported (browser console / a report endpoint) but nothing
+// is blocked, so a mis-scoped directive can't take the app down. Flip CSP_ENFORCE
+// to true to switch the header to enforcing "Content-Security-Policy" — only after
+// the report window is clean (see docs/soc-security-spec.md).
+//
+// 'strict-dynamic' + the per-request nonce trusts the SSR hydration bootstrap to
+// load the app's module chunks without host-allowlisting every asset path.
+const CSP_ENFORCE = false;
+
+function buildCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    // 'https:' and 'unsafe-inline' are CSP1/CSP2 fallbacks that modern browsers
+    // IGNORE when a nonce + 'strict-dynamic' are present. Drop 'https:' before
+    // flipping CSP_ENFORCE on (security-gate finding) — nonce + strict-dynamic is
+    // sufficient and 'https:' would otherwise loosen script-src on legacy browsers.
+    `script-src 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev",
+    "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.googleapis.com",
+    "frame-src 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
+// Applies the baseline headers, and — when a nonce is supplied (HTML SSR path) —
+// the (report-only) CSP built for that request's nonce.
+function withSecurityHeaders(response: Response, nonce?: string): Response {
+  const headers: Record<string, string> = { ...SECURITY_HEADERS };
+  if (nonce) {
+    const name = CSP_ENFORCE ? "Content-Security-Policy" : "Content-Security-Policy-Report-Only";
+    headers[name] = buildCsp(nonce);
+  }
   // Handler responses expose mutable headers, so set them in place to avoid
   // re-streaming the body. Fall back to a copy if a response has frozen headers.
   try {
-    for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    for (const [key, value] of Object.entries(headers)) {
       if (!response.headers.has(key)) response.headers.set(key, value);
     }
     return response;
   } catch {
-    const headers = new Headers(response.headers);
-    for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
-      if (!headers.has(key)) headers.set(key, value);
+    const copied = new Headers(response.headers);
+    for (const [key, value] of Object.entries(headers)) {
+      if (!copied.has(key)) copied.set(key, value);
     }
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
-      headers,
+      headers: copied,
     });
   }
 }
@@ -115,9 +152,21 @@ export default {
         return withSecurityHeaders(await handler(request));
       }
 
+      // Per-request CSP nonce: generate it, hand it to the renderer as a request
+      // header (read back via lib/ssr-nonce in router.tsx + __root.tsx), and emit a
+      // matching CSP. Only GET/HEAD document navigations are re-issued with the
+      // header, so we never reconstruct a request that carries a body.
+      const nonce = randomBytes(16).toString("base64");
+      let renderRequest = request;
+      if (request.method === "GET" || request.method === "HEAD") {
+        const headers = new Headers(request.headers);
+        headers.set(SSR_NONCE_HEADER, nonce);
+        renderRequest = new Request(request, { headers });
+      }
+
       const handler = await getServerEntry();
-      const response = await handler.fetch(request, env, ctx);
-      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
+      const response = await handler.fetch(renderRequest, env, ctx);
+      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response), nonce);
     } catch (error) {
       console.error(error);
       return withSecurityHeaders(brandedErrorResponse());

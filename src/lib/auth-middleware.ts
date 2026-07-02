@@ -28,55 +28,74 @@ const clientAuth = createMiddleware({ type: "function" })
     return next({ sendContext: { idToken } });
   });
 
+// Verify the token, resolve the DB user + roles. Anonymous (no token) resolves to
+// an empty user so handlers like provisionUser can still run on first login.
+// `checkRevoked` additionally rejects tokens that have been revoked (logout,
+// password reset, admin disable) at the cost of an extra Firebase lookup — only
+// the strict middleware passes it, so the default hot path stays JWKS-local.
+async function resolveAuthUser(
+  idToken: string | null,
+  checkRevoked = false,
+): Promise<AuthUserContext> {
+  const empty: AuthUserContext = {
+    firebaseUid: "",
+    dbUserId: null,
+    email: null,
+    roles: [],
+    isHR: false,
+    isAdmin: false,
+  };
+  if (!idToken) return empty;
+
+  const { adminAuth } = await import("@/lib/firebase-admin.server");
+  const decoded = await adminAuth.verifyIdToken(idToken, checkRevoked);
+  const { pool } = await import("@/lib/db.server");
+  // Single round-trip: resolve the user row and aggregate its roles in one query.
+  // LEFT JOIN keeps users with no roles; array_remove drops the NULL produced for
+  // those so they come back as an empty array. Cast role to text so the aggregate
+  // comes back as text[] (well-known OID 1009) — node-postgres won't auto-parse an
+  // array of the custom app_role enum and would otherwise hand back a raw
+  // "{employee,hr}" string.
+  const { rows } = await pool.query<{ id: string; email: string | null; roles: AuthRole[] }>(
+    `SELECT u.id, u.email,
+            array_remove(array_agg(ur.role::text), NULL) AS roles
+       FROM users u
+       LEFT JOIN user_roles ur ON ur.user_id = u.id
+      WHERE u.firebase_uid = $1
+      GROUP BY u.id, u.email
+      LIMIT 1`,
+    [decoded.uid],
+  );
+  const roles: AuthRole[] = rows[0]?.roles ?? [];
+  return {
+    firebaseUid: decoded.uid,
+    dbUserId: rows[0]?.id ?? null,
+    email: rows[0]?.email ?? decoded.email ?? null,
+    roles,
+    isHR: roles.includes("hr") || roles.includes("admin"),
+    isAdmin: roles.includes("admin"),
+  };
+}
+
 // Server half: verify the token, resolve the DB user + roles, attach to context.
-// Anonymous (no token) is allowed through with user=null so that handlers like
-// provisionUser can still run on first login. Each handler decides what to do
-// with a null user via the assertXxx helpers below.
+// Each handler decides what to do with a null user via the assertXxx helpers below.
 export const authMiddleware = createMiddleware({ type: "function" })
   .middleware([clientAuth])
   .server(async ({ next, context }) => {
     const idToken = (context as { idToken: string | null }).idToken;
-    let user: AuthUserContext = {
-      firebaseUid: "",
-      dbUserId: null,
-      email: null,
-      roles: [],
-      isHR: false,
-      isAdmin: false,
-    };
+    const user = await resolveAuthUser(idToken);
+    return next({ context: { user } });
+  });
 
-    if (idToken) {
-      const { adminAuth } = await import("@/lib/firebase-admin.server");
-      const decoded = await adminAuth.verifyIdToken(idToken);
-      const { pool } = await import("@/lib/db.server");
-      // Single round-trip: resolve the user row and aggregate its roles in one
-      // query. LEFT JOIN keeps users with no roles; array_remove drops the NULL
-      // produced for those so they come back as an empty array.
-      // Cast role to text so the aggregate comes back as text[] (well-known OID
-      // 1009) — node-postgres won't auto-parse an array of the custom app_role
-      // enum and would otherwise hand back a raw "{employee,hr}" string.
-      const { rows } = await pool.query<{ id: string; email: string | null; roles: AuthRole[] }>(
-        `SELECT u.id, u.email,
-                array_remove(array_agg(ur.role::text), NULL) AS roles
-           FROM users u
-           LEFT JOIN user_roles ur ON ur.user_id = u.id
-          WHERE u.firebase_uid = $1
-          GROUP BY u.id, u.email
-          LIMIT 1`,
-        [decoded.uid],
-      );
-      const dbUserId = rows[0]?.id ?? null;
-      const roles: AuthRole[] = rows[0]?.roles ?? [];
-      user = {
-        firebaseUid: decoded.uid,
-        dbUserId,
-        email: rows[0]?.email ?? decoded.email ?? null,
-        roles,
-        isHR: roles.includes("hr") || roles.includes("admin"),
-        isAdmin: roles.includes("admin"),
-      };
-    }
-
+// Same as authMiddleware but also rejects REVOKED tokens. Reserved for sensitive,
+// privilege-bearing operations (user create/delete, role changes, password resets)
+// so the extra Firebase round-trip only happens where account takeover / privilege
+// escalation is the risk — not on every authenticated request.
+export const strictAuthMiddleware = createMiddleware({ type: "function" })
+  .middleware([clientAuth])
+  .server(async ({ next, context }) => {
+    const idToken = (context as { idToken: string | null }).idToken;
+    const user = await resolveAuthUser(idToken, true);
     return next({ context: { user } });
   });
 
