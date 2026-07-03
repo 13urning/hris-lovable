@@ -108,22 +108,52 @@ export const fileOTBudgetRequest = createServerFn({ method: "POST" })
     const status = isAutoApproved ? "approved" : "pending";
     const reviewedAt = isAutoApproved ? new Date().toISOString() : null;
 
-    await pool.query(
-      `INSERT INTO ot_approval_requests
-         (employee_id, request_type, target_month, requested_hours,
-          work_date, status, approver_chain, current_approver_index,
-          justification, reviewed_at)
-       VALUES ($1, 'pre_approved', $2, $3, $2, $4, $5, 0, $6, $7)`,
-      [
-        context.user.dbUserId,
-        data.targetMonth + "-01",
-        data.requestedHours,
-        status,
-        chain,
-        justification,
-        reviewedAt,
-      ],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const {
+        rows: [inserted],
+      } = await client.query<{ id: string }>(
+        `INSERT INTO ot_approval_requests
+           (employee_id, request_type, target_month, requested_hours,
+            work_date, status, approver_chain, current_approver_index,
+            justification, reviewed_at)
+         VALUES ($1, 'pre_approved', $2, $3, $2, $4, $5, 0, $6, $7)
+         RETURNING id`,
+        [
+          context.user.dbUserId,
+          data.targetMonth + "-01",
+          data.requestedHours,
+          status,
+          chain,
+          justification,
+          reviewedAt,
+        ],
+      );
+      // Nudge the first approver; auto-approved filings (empty chain) skip it.
+      if (!isAutoApproved) {
+        const { notifyUser, phMonth } = await import("@/lib/notify.server");
+        const {
+          rows: [me],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [context.user.dbUserId],
+        );
+        await notifyUser(client, {
+          userId: chain[0],
+          type: "ot_request",
+          refId: inserted.id,
+          title: `OT budget request from ${me?.full_name ?? "an employee"}`,
+          body: `${data.requestedHours}h · ${phMonth(data.targetMonth + "-01")}`,
+        });
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 // File actual OT hours against an approved budget. Goes through the same
@@ -180,23 +210,52 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
     const status = isAutoApproved ? "approved" : "pending";
     const reviewedAt = isAutoApproved ? new Date().toISOString() : null;
 
-    await pool.query(
-      `INSERT INTO ot_approval_requests
-         (employee_id, request_type, pre_approved_id, work_date,
-          requested_hours, status, approver_chain, current_approver_index,
-          justification, reviewed_at)
-       VALUES ($1, 'actual', $2, $3, $4, $5, $6, 0, $7, $8)`,
-      [
-        context.user.dbUserId,
-        data.preApprovedId,
-        data.workDate,
-        data.hours,
-        status,
-        chain,
-        justification,
-        reviewedAt,
-      ],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const {
+        rows: [inserted],
+      } = await client.query<{ id: string }>(
+        `INSERT INTO ot_approval_requests
+           (employee_id, request_type, pre_approved_id, work_date,
+            requested_hours, status, approver_chain, current_approver_index,
+            justification, reviewed_at)
+         VALUES ($1, 'actual', $2, $3, $4, $5, $6, 0, $7, $8)
+         RETURNING id`,
+        [
+          context.user.dbUserId,
+          data.preApprovedId,
+          data.workDate,
+          data.hours,
+          status,
+          chain,
+          justification,
+          reviewedAt,
+        ],
+      );
+      if (!isAutoApproved) {
+        const { notifyUser, phDate } = await import("@/lib/notify.server");
+        const {
+          rows: [me],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [context.user.dbUserId],
+        );
+        await notifyUser(client, {
+          userId: chain[0],
+          type: "ot_request",
+          refId: inserted.id,
+          title: `OT hours from ${me?.full_name ?? "an employee"}`,
+          body: `${data.hours}h · ${phDate(data.workDate)}`,
+        });
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
@@ -249,8 +308,14 @@ export const approveOTStep = createServerFn({ method: "POST" })
         approver_chain: string[];
         current_approver_index: number;
         status: string;
+        employee_id: string;
+        request_type: "pre_approved" | "actual";
+        requested_hours: number;
+        target_month: string | null;
+        work_date: string | null;
       }>(
-        `SELECT approver_chain, current_approver_index, status
+        `SELECT approver_chain, current_approver_index, status,
+                employee_id, request_type, requested_hours, target_month, work_date
          FROM ot_approval_requests WHERE id = $1 FOR UPDATE`,
         [data.id],
       );
@@ -263,6 +328,12 @@ export const approveOTStep = createServerFn({ method: "POST" })
       const nextIndex = req.current_approver_index + 1;
       const isFinal = nextIndex >= req.approver_chain.length;
 
+      const { notifyUser, phDate, phMonth } = await import("@/lib/notify.server");
+      const isBudget = req.request_type === "pre_approved";
+      const body = isBudget
+        ? `${req.requested_hours}h · ${req.target_month ? phMonth(req.target_month) : ""}`
+        : `${req.requested_hours}h · ${req.work_date ? phDate(req.work_date) : ""}`;
+
       if (isFinal) {
         await client.query(
           `UPDATE ot_approval_requests
@@ -273,11 +344,34 @@ export const approveOTStep = createServerFn({ method: "POST" })
             WHERE id = $4`,
           [nextIndex, new Date().toISOString(), data.notes ?? null, data.id],
         );
+        await notifyUser(client, {
+          userId: req.employee_id,
+          type: "ot_decision",
+          refId: data.id,
+          title: isBudget ? "Your OT budget was approved" : "Your OT hours were approved",
+          body,
+        });
       } else {
         await client.query(
           `UPDATE ot_approval_requests SET current_approver_index = $1 WHERE id = $2`,
           [nextIndex, data.id],
         );
+        // Plain SELECT (no FOR UPDATE) — don't widen the lock onto profiles.
+        const {
+          rows: [emp],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [req.employee_id],
+        );
+        await notifyUser(client, {
+          userId: req.approver_chain[nextIndex],
+          type: "ot_request",
+          refId: data.id,
+          title: isBudget
+            ? `OT budget request from ${emp?.full_name ?? "an employee"}`
+            : `OT hours from ${emp?.full_name ?? "an employee"}`,
+          body,
+        });
       }
 
       await client.query("COMMIT");
@@ -301,8 +395,14 @@ export const rejectOTStep = createServerFn({ method: "POST" })
       approver_chain: string[];
       current_approver_index: number;
       status: string;
+      employee_id: string;
+      request_type: "pre_approved" | "actual";
+      requested_hours: number;
+      target_month: string | null;
+      work_date: string | null;
     }>(
-      `SELECT approver_chain, current_approver_index, status
+      `SELECT approver_chain, current_approver_index, status,
+              employee_id, request_type, requested_hours, target_month, work_date
        FROM ot_approval_requests WHERE id = $1`,
       [data.id],
     );
@@ -312,14 +412,35 @@ export const rejectOTStep = createServerFn({ method: "POST" })
       throw new Error("NOT_CURRENT_APPROVER");
     }
 
-    await pool.query(
-      `UPDATE ot_approval_requests
-          SET status = 'rejected',
-              reviewed_at = $1,
-              review_notes = COALESCE($2, review_notes)
-        WHERE id = $3`,
-      [new Date().toISOString(), data.notes ?? null, data.id],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE ot_approval_requests
+            SET status = 'rejected',
+                reviewed_at = $1,
+                review_notes = COALESCE($2, review_notes)
+          WHERE id = $3`,
+        [new Date().toISOString(), data.notes ?? null, data.id],
+      );
+      const { notifyUser, phDate, phMonth } = await import("@/lib/notify.server");
+      const isBudget = req.request_type === "pre_approved";
+      await notifyUser(client, {
+        userId: req.employee_id,
+        type: "ot_decision",
+        refId: data.id,
+        title: isBudget ? "Your OT budget was rejected" : "Your OT hours were rejected",
+        body: isBudget
+          ? `${req.requested_hours}h · ${req.target_month ? phMonth(req.target_month) : ""}`
+          : `${req.requested_hours}h · ${req.work_date ? phDate(req.work_date) : ""}`,
+      });
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 // Soft-cancel an OT request: owner can cancel their own pending request,

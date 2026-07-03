@@ -110,7 +110,7 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
     // A half-day leave always covers exactly one day, so collapse the range and
     // require a valid AM/PM period. It counts as 0.5 days against the balance.
     const halfDay = data.halfDay === true;
-    const halfDayPeriod = halfDay ? data.halfDayPeriod ?? null : null;
+    const halfDayPeriod = halfDay ? (data.halfDayPeriod ?? null) : null;
     if (halfDay && halfDayPeriod !== "AM" && halfDayPeriod !== "PM") {
       throw new Error("HALF_DAY_PERIOD_REQUIRED");
     }
@@ -146,26 +146,59 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
     const reviewedAt = isAutoApproved ? new Date().toISOString() : null;
     const reviewedBy = isAutoApproved ? context.user.dbUserId : null;
 
-    await pool.query(
-      `INSERT INTO leave_requests
-         (employee_id, leave_type, start_date, end_date, reason,
-          status, approver_chain, current_approver_index, reviewed_by, reviewed_at,
-          half_day, half_day_period)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11)`,
-      [
-        context.user.dbUserId,
-        data.leaveType,
-        startDate,
-        endDate,
-        data.reason,
-        status,
-        chain,
-        reviewedBy,
-        reviewedAt,
-        halfDay,
-        halfDayPeriod,
-      ],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const {
+        rows: [inserted],
+      } = await client.query<{ id: string }>(
+        `INSERT INTO leave_requests
+           (employee_id, leave_type, start_date, end_date, reason,
+            status, approver_chain, current_approver_index, reviewed_by, reviewed_at,
+            half_day, half_day_period)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11)
+         RETURNING id`,
+        [
+          context.user.dbUserId,
+          data.leaveType,
+          startDate,
+          endDate,
+          data.reason,
+          status,
+          chain,
+          reviewedBy,
+          reviewedAt,
+          halfDay,
+          halfDayPeriod,
+        ],
+      );
+      // Nudge the first approver's inbox. Auto-approved filings skip it — the
+      // filer is the actor and sees the approved state immediately.
+      if (!isAutoApproved) {
+        const { notifyUser, phDate, phDateRange } = await import("@/lib/notify.server");
+        const {
+          rows: [me],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [context.user.dbUserId],
+        );
+        await notifyUser(client, {
+          userId: chain[0],
+          type: "leave_request",
+          refId: inserted.id,
+          title: `Leave request from ${me?.full_name ?? "an employee"}`,
+          body: halfDay
+            ? `${data.leaveType} · ${phDate(startDate)} (${halfDayPeriod})`
+            : `${data.leaveType} · ${phDateRange(startDate, endDate)}`,
+        });
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 // Lightweight employee list for the admin "file on behalf" picker. HR/admin only.
@@ -206,7 +239,7 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
 
     // Half-day leave collapses to a single day and needs a valid AM/PM period.
     const halfDay = data.halfDay === true;
-    const halfDayPeriod = halfDay ? data.halfDayPeriod ?? null : null;
+    const halfDayPeriod = halfDay ? (data.halfDayPeriod ?? null) : null;
     if (halfDay && halfDayPeriod !== "AM" && halfDayPeriod !== "PM") {
       throw new Error("HALF_DAY_PERIOD_REQUIRED");
     }
@@ -229,27 +262,60 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
     const reviewedBy = autoApprove ? context.user.dbUserId : null;
     const note = `Filed on behalf by ${context.user.email ?? "an administrator"}`;
 
-    await pool.query(
-      `INSERT INTO leave_requests
-         (employee_id, leave_type, start_date, end_date, reason,
-          status, approver_chain, current_approver_index, reviewed_by, reviewed_at, review_notes,
-          half_day, half_day_period)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, $12)`,
-      [
-        data.employeeId,
-        data.leaveType,
-        startDate,
-        endDate,
-        data.reason,
-        status,
-        chain,
-        reviewedBy,
-        reviewedAt,
-        autoApprove ? note : null,
-        halfDay,
-        halfDayPeriod,
-      ],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const {
+        rows: [inserted],
+      } = await client.query<{ id: string }>(
+        `INSERT INTO leave_requests
+           (employee_id, leave_type, start_date, end_date, reason,
+            status, approver_chain, current_approver_index, reviewed_by, reviewed_at, review_notes,
+            half_day, half_day_period)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10, $11, $12)
+         RETURNING id`,
+        [
+          data.employeeId,
+          data.leaveType,
+          startDate,
+          endDate,
+          data.reason,
+          status,
+          chain,
+          reviewedBy,
+          reviewedAt,
+          autoApprove ? note : null,
+          halfDay,
+          halfDayPeriod,
+        ],
+      );
+      // Routed on-behalf filing: the TARGET employee is the requester, so their
+      // first approver gets the nudge, named after the employee (not the HR filer).
+      if (!autoApprove) {
+        const { notifyUser, phDate, phDateRange } = await import("@/lib/notify.server");
+        const {
+          rows: [emp],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [data.employeeId],
+        );
+        await notifyUser(client, {
+          userId: chain[0],
+          type: "leave_request",
+          refId: inserted.id,
+          title: `Leave request from ${emp?.full_name ?? "an employee"}`,
+          body: halfDay
+            ? `${data.leaveType} · ${phDate(startDate)} (${halfDayPeriod})`
+            : `${data.leaveType} · ${phDateRange(startDate, endDate)}`,
+        });
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 // Approver at current step approves → advance the chain. If past the end, mark
@@ -270,8 +336,15 @@ export const approveLeaveStep = createServerFn({ method: "POST" })
         approver_chain: string[];
         current_approver_index: number;
         status: string;
+        employee_id: string;
+        leave_type: string;
+        start_date: string;
+        end_date: string;
+        half_day: boolean;
+        half_day_period: string | null;
       }>(
-        `SELECT approver_chain, current_approver_index, status
+        `SELECT approver_chain, current_approver_index, status,
+                employee_id, leave_type, start_date, end_date, half_day, half_day_period
          FROM leave_requests WHERE id = $1 FOR UPDATE`,
         [data.id],
       );
@@ -284,6 +357,11 @@ export const approveLeaveStep = createServerFn({ method: "POST" })
       const nextIndex = req.current_approver_index + 1;
       const isFinal = nextIndex >= req.approver_chain.length;
 
+      const { notifyUser, phDate, phDateRange } = await import("@/lib/notify.server");
+      const body = req.half_day
+        ? `${req.leave_type} · ${phDate(req.start_date)} (${req.half_day_period})`
+        : `${req.leave_type} · ${phDateRange(req.start_date, req.end_date)}`;
+
       if (isFinal) {
         await client.query(
           `UPDATE leave_requests
@@ -295,11 +373,32 @@ export const approveLeaveStep = createServerFn({ method: "POST" })
             WHERE id = $5`,
           [nextIndex, context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
         );
+        await notifyUser(client, {
+          userId: req.employee_id,
+          type: "leave_decision",
+          refId: data.id,
+          title: "Your leave request was approved",
+          body,
+        });
       } else {
         await client.query(`UPDATE leave_requests SET current_approver_index = $1 WHERE id = $2`, [
           nextIndex,
           data.id,
         ]);
+        // Plain SELECT (no FOR UPDATE) — don't widen the lock onto profiles.
+        const {
+          rows: [emp],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [req.employee_id],
+        );
+        await notifyUser(client, {
+          userId: req.approver_chain[nextIndex],
+          type: "leave_request",
+          refId: data.id,
+          title: `Leave request from ${emp?.full_name ?? "an employee"}`,
+          body,
+        });
       }
 
       await client.query("COMMIT");
@@ -324,24 +423,55 @@ export const rejectLeaveStep = createServerFn({ method: "POST" })
       approver_chain: string[];
       current_approver_index: number;
       status: string;
-    }>(`SELECT approver_chain, current_approver_index, status FROM leave_requests WHERE id = $1`, [
-      data.id,
-    ]);
+      employee_id: string;
+      leave_type: string;
+      start_date: string;
+      end_date: string;
+      half_day: boolean;
+      half_day_period: string | null;
+    }>(
+      `SELECT approver_chain, current_approver_index, status,
+              employee_id, leave_type, start_date, end_date, half_day, half_day_period
+         FROM leave_requests WHERE id = $1`,
+      [data.id],
+    );
     if (!req) throw new Error("NOT_FOUND");
     if (req.status !== "pending") throw new Error("NOT_PENDING");
     if (req.approver_chain[req.current_approver_index] !== context.user.dbUserId) {
       throw new Error("NOT_CURRENT_APPROVER");
     }
 
-    await pool.query(
-      `UPDATE leave_requests
-          SET status = 'rejected',
-              reviewed_by = $1,
-              reviewed_at = $2,
-              review_notes = COALESCE($3, review_notes)
-        WHERE id = $4`,
-      [context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE leave_requests
+            SET status = 'rejected',
+                reviewed_by = $1,
+                reviewed_at = $2,
+                review_notes = COALESCE($3, review_notes)
+          WHERE id = $4`,
+        [context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
+      );
+      const { notifyUser, phDate, phDateRange } = await import("@/lib/notify.server");
+      await notifyUser(client, {
+        userId: req.employee_id,
+        type: "leave_decision",
+        refId: data.id,
+        title: "Your leave request was rejected",
+        // Review notes stay off the body — they can carry sensitive manager
+        // comments; the recipient reads them on the leaves page.
+        body: req.half_day
+          ? `${req.leave_type} · ${phDate(req.start_date)} (${req.half_day_period})`
+          : `${req.leave_type} · ${phDateRange(req.start_date, req.end_date)}`,
+      });
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 // Queue for the current user: leaves where they are the next approver in line.

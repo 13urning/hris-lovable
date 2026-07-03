@@ -129,36 +129,67 @@ export const fileAttendanceDispute = createServerFn({ method: "POST" })
     // Top of the tree → no approver → apply immediately.
     const autoApprove = chain.length === 0;
 
-    const {
-      rows: [dispute],
-    } = await pool.query<{ id: string }>(
-      `INSERT INTO attendance_disputes
-         (employee_id, dtr_id, work_date,
-          original_time_in, original_time_out, original_shift_label,
-          requested_time_in, requested_time_out, requested_shift_label,
-          reason, status, approver_chain, current_approver_index, reviewed_by, reviewed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, $13, $14)
-       RETURNING id`,
-      [
-        context.user.dbUserId,
-        existing?.id ?? null,
-        data.workDate,
-        normTime(existing?.time_in),
-        normTime(existing?.time_out),
-        existing?.shift_label ?? null,
-        reqTimeIn,
-        reqTimeOut,
-        reqShift,
-        data.reason,
-        autoApprove ? "approved" : "pending",
-        chain,
-        autoApprove ? context.user.dbUserId : null,
-        autoApprove ? new Date().toISOString() : null,
-      ],
-    );
+    const client = await pool.connect();
+    let disputeId: string;
+    try {
+      await client.query("BEGIN");
+      const {
+        rows: [dispute],
+      } = await client.query<{ id: string }>(
+        `INSERT INTO attendance_disputes
+           (employee_id, dtr_id, work_date,
+            original_time_in, original_time_out, original_shift_label,
+            requested_time_in, requested_time_out, requested_shift_label,
+            reason, status, approver_chain, current_approver_index, reviewed_by, reviewed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, $13, $14)
+         RETURNING id`,
+        [
+          context.user.dbUserId,
+          existing?.id ?? null,
+          data.workDate,
+          normTime(existing?.time_in),
+          normTime(existing?.time_out),
+          existing?.shift_label ?? null,
+          reqTimeIn,
+          reqTimeOut,
+          reqShift,
+          data.reason,
+          autoApprove ? "approved" : "pending",
+          chain,
+          autoApprove ? context.user.dbUserId : null,
+          autoApprove ? new Date().toISOString() : null,
+        ],
+      );
+      disputeId = dispute.id;
+      // Nudge the first approver; auto-applied top-of-tree disputes skip it.
+      if (!autoApprove) {
+        const { notifyUser, phDate } = await import("@/lib/notify.server");
+        const {
+          rows: [me],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [context.user.dbUserId],
+        );
+        await notifyUser(client, {
+          userId: chain[0],
+          type: "dispute_request",
+          refId: disputeId,
+          title: `Attendance dispute from ${me?.full_name ?? "an employee"}`,
+          body: reqTimeOut
+            ? `${phDate(data.workDate)} · ${reqTimeIn}–${reqTimeOut}`
+            : `${phDate(data.workDate)} · in ${reqTimeIn}`,
+        });
+      }
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
 
     if (autoApprove) {
-      await applyDisputeToDTR(pool, dispute.id);
+      await applyDisputeToDTR(pool, disputeId);
     }
   });
 
@@ -335,8 +366,13 @@ export const adminApproveDispute = createServerFn({ method: "POST" })
 
       const {
         rows: [req],
-      } = await client.query<{ approver_chain: string[]; status: string }>(
-        `SELECT approver_chain, status
+      } = await client.query<{
+        approver_chain: string[];
+        status: string;
+        employee_id: string;
+        work_date: string;
+      }>(
+        `SELECT approver_chain, status, employee_id, work_date
            FROM attendance_disputes WHERE id = $1 FOR UPDATE`,
         [data.id],
       );
@@ -360,6 +396,16 @@ export const adminApproveDispute = createServerFn({ method: "POST" })
         ],
       );
       await applyDisputeToDTR(pool, data.id, client);
+
+      // Admin override is still a final decision for the requester.
+      const { notifyUser, phDate } = await import("@/lib/notify.server");
+      await notifyUser(client, {
+        userId: req.employee_id,
+        type: "dispute_decision",
+        refId: data.id,
+        title: "Your attendance dispute was approved",
+        body: phDate(req.work_date),
+      });
 
       await client.query("COMMIT");
     } catch (err) {
@@ -388,8 +434,13 @@ export const approveDisputeStep = createServerFn({ method: "POST" })
         approver_chain: string[];
         current_approver_index: number;
         status: string;
+        employee_id: string;
+        work_date: string;
+        requested_time_in: string | null;
+        requested_time_out: string | null;
       }>(
-        `SELECT approver_chain, current_approver_index, status
+        `SELECT approver_chain, current_approver_index, status,
+                employee_id, work_date, requested_time_in, requested_time_out
            FROM attendance_disputes WHERE id = $1 FOR UPDATE`,
         [data.id],
       );
@@ -401,6 +452,8 @@ export const approveDisputeStep = createServerFn({ method: "POST" })
 
       const nextIndex = req.current_approver_index + 1;
       const isFinal = nextIndex >= req.approver_chain.length;
+
+      const { notifyUser, phDate } = await import("@/lib/notify.server");
 
       if (isFinal) {
         await client.query(
@@ -414,11 +467,34 @@ export const approveDisputeStep = createServerFn({ method: "POST" })
           [nextIndex, context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
         );
         await applyDisputeToDTR(pool, data.id, client);
+        await notifyUser(client, {
+          userId: req.employee_id,
+          type: "dispute_decision",
+          refId: data.id,
+          title: "Your attendance dispute was approved",
+          body: phDate(req.work_date),
+        });
       } else {
         await client.query(
           `UPDATE attendance_disputes SET current_approver_index = $1 WHERE id = $2`,
           [nextIndex, data.id],
         );
+        // Plain SELECT (no FOR UPDATE) — don't widen the lock onto profiles.
+        const {
+          rows: [emp],
+        } = await client.query<{ full_name: string | null }>(
+          `SELECT full_name FROM profiles WHERE id = $1`,
+          [req.employee_id],
+        );
+        await notifyUser(client, {
+          userId: req.approver_chain[nextIndex],
+          type: "dispute_request",
+          refId: data.id,
+          title: `Attendance dispute from ${emp?.full_name ?? "an employee"}`,
+          body: req.requested_time_out
+            ? `${phDate(req.work_date)} · ${req.requested_time_in}–${req.requested_time_out}`
+            : `${phDate(req.work_date)} · in ${req.requested_time_in}`,
+        });
       }
 
       await client.query("COMMIT");
@@ -443,8 +519,10 @@ export const rejectDisputeStep = createServerFn({ method: "POST" })
       approver_chain: string[];
       current_approver_index: number;
       status: string;
+      employee_id: string;
+      work_date: string;
     }>(
-      `SELECT approver_chain, current_approver_index, status
+      `SELECT approver_chain, current_approver_index, status, employee_id, work_date
          FROM attendance_disputes WHERE id = $1`,
       [data.id],
     );
@@ -454,15 +532,33 @@ export const rejectDisputeStep = createServerFn({ method: "POST" })
       throw new Error("NOT_CURRENT_APPROVER");
     }
 
-    await pool.query(
-      `UPDATE attendance_disputes
-          SET status = 'rejected',
-              reviewed_by = $1,
-              reviewed_at = $2,
-              review_notes = COALESCE($3, review_notes)
-        WHERE id = $4`,
-      [context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE attendance_disputes
+            SET status = 'rejected',
+                reviewed_by = $1,
+                reviewed_at = $2,
+                review_notes = COALESCE($3, review_notes)
+          WHERE id = $4`,
+        [context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
+      );
+      const { notifyUser, phDate } = await import("@/lib/notify.server");
+      await notifyUser(client, {
+        userId: req.employee_id,
+        type: "dispute_decision",
+        refId: data.id,
+        title: "Your attendance dispute was rejected",
+        body: phDate(req.work_date),
+      });
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   });
 
 // Owner cancels their own still-pending dispute.
