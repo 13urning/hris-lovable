@@ -29,6 +29,7 @@ export type AppNotification = {
   id: string;
   type: string;
   event_id: string | null;
+  ref_id: string | null;
   title: string;
   body: string | null;
   read_at: string | null;
@@ -383,7 +384,7 @@ export const getMyNotifications = createServerFn({ method: "POST" })
         [me],
       ),
       pool.query(
-        `SELECT id, type, event_id, title, body, read_at, created_at
+        `SELECT id, type, event_id, ref_id, title, body, read_at, created_at
            FROM notifications
           WHERE user_id = $1
           ORDER BY created_at DESC
