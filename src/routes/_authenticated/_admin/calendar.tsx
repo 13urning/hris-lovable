@@ -254,7 +254,7 @@ function CalendarPage() {
 
   const reminderRecipientSelect = (
     <Select value={remRecipient} onValueChange={setRemRecipient}>
-      <SelectTrigger className="w-full sm:w-48">
+      <SelectTrigger className="w-full sm:min-w-0 sm:flex-1">
         <SelectValue placeholder="Notify..." />
       </SelectTrigger>
       <SelectContent>
@@ -271,7 +271,7 @@ function CalendarPage() {
 
   const reminderOffsetSelect = (
     <Select value={remOffset} onValueChange={setRemOffset}>
-      <SelectTrigger className="w-full sm:w-44">
+      <SelectTrigger className="w-full sm:min-w-0 sm:flex-1">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -392,7 +392,7 @@ function CalendarPage() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{isEditing ? "Edit event" : "New event"}</DialogTitle>
             <DialogDescription>
@@ -401,7 +401,7 @@ function CalendarPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Title</Label>
               <Input
