@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware, assertUser, assertAdmin } from "@/lib/auth-middleware";
+import { generateOccurrenceDates, MAX_OCCURRENCES_PER_SERIES } from "@/lib/recurrence";
 
 export type EventReminder = {
   id: string;
@@ -21,6 +22,11 @@ export type CalendarEvent = {
   location: string | null;
   created_by: string;
   created_by_name: string | null;
+  // Series occurrence metadata; all NULL for one-off events.
+  series_id: string | null;
+  occurrence_index: number | null;
+  series_frequency: string | null;
+  series_interval: number | null;
   // Present only for admins (authoring view); empty array for everyone else.
   reminders: EventReminder[];
 };
@@ -64,8 +70,16 @@ const eventFieldsSchema = z.object({
   endTime: z.string().regex(TIME_RE).optional(),
 });
 
+const recurrenceSchema = z.object({
+  frequency: z.enum(["daily", "weekly", "monthly", "yearly"]),
+  intervalN: z.number().int().min(1).max(52).default(1),
+  untilDate: z.string().regex(DATE_RE),
+});
+
 const createEventSchema = eventFieldsSchema.extend({
   reminders: z.array(reminderInputSchema).max(MAX_REMINDERS_PER_EVENT).default([]),
+  // Absent = one-off event (the original path, unchanged).
+  recurrence: recurrenceSchema.optional(),
 });
 
 const updateEventSchema = eventFieldsSchema.extend({
@@ -114,6 +128,9 @@ const KNOWN_ERRORS = new Set([
   "END_BEFORE_START",
   "INVALID_RECIPIENT",
   "REMINDER_LIMIT",
+  "TOO_MANY_OCCURRENCES",
+  "HORIZON_EXCEEDED",
+  "NO_OCCURRENCES",
   "NOT_FOUND",
   "UNAUTHENTICATED",
   "NO_PROFILE",
@@ -140,9 +157,12 @@ export const listCalendarEvents = createServerFn({ method: "POST" })
       const { rows } = await pool.query(
         `SELECT e.id, e.title, e.description, e.starts_at, e.ends_at, e.all_day,
                 e.location, e.created_by, p.full_name AS created_by_name,
+                e.series_id, e.occurrence_index,
+                s.frequency AS series_frequency, s.interval_n AS series_interval,
                 COALESCE(r.reminders, '[]'::json) AS reminders
            FROM calendar_events e
            LEFT JOIN profiles p ON p.id = e.created_by
+           LEFT JOIN event_series s ON s.id = e.series_id
            LEFT JOIN LATERAL (
              SELECT json_agg(json_build_object(
                       'id', er.id,
@@ -163,9 +183,12 @@ export const listCalendarEvents = createServerFn({ method: "POST" })
     const { rows } = await pool.query(
       `SELECT e.id, e.title, e.description, e.starts_at, e.ends_at, e.all_day,
               e.location, e.created_by, p.full_name AS created_by_name,
+              e.series_id, e.occurrence_index,
+              s.frequency AS series_frequency, s.interval_n AS series_interval,
               '[]'::json AS reminders
          FROM calendar_events e
          LEFT JOIN profiles p ON p.id = e.created_by
+         LEFT JOIN event_series s ON s.id = e.series_id
         ORDER BY e.starts_at`,
     );
     return rows as CalendarEvent[];
@@ -179,47 +202,107 @@ export const createEvent = createServerFn({ method: "POST" })
     const input = parseOrInvalid(createEventSchema, data);
     const { startsAt, endsAt } = eventInstants(input);
 
+    // Recurring: expand the rule to concrete PH dates up front (throws the
+    // stable cap/horizon codes before any DB work). One-off: a single date.
+    const time = input.allDay ? "00:00" : input.time;
+    const occurrenceDates = input.recurrence
+      ? generateOccurrenceDates(
+          input.date,
+          input.recurrence.frequency,
+          input.recurrence.intervalN,
+          input.recurrence.untilDate,
+        )
+      : [input.date];
+    // ends_at only carries over to one-offs; a per-occurrence duration would
+    // need endDate offsets per occurrence — out of scope for series v1.
+    const occEndsAt = input.recurrence ? null : endsAt;
+    const now = Date.now();
+
     const { pool } = await import("@/lib/db.server");
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO calendar_events (title, description, starts_at, ends_at, all_day, location, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id`,
-        [
-          input.title,
-          input.description || null,
-          startsAt,
-          endsAt,
-          input.allDay,
-          input.location || null,
-          context.user.dbUserId,
-        ],
-      );
-      const eventId = rows[0].id;
-      for (const rem of input.reminders) {
-        const fireAt = new Date(startsAt.getTime() - rem.offsetMinutes * 60_000);
-        await client.query(
-          `INSERT INTO event_reminders (event_id, notify_user_id, fire_at, offset_minutes, created_by)
-           VALUES ($1, $2, $3, $4, $5)`,
+
+      let seriesId: string | null = null;
+      if (input.recurrence) {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO event_series (frequency, interval_n, starts_at, until_date, occurrence_count, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id`,
           [
-            eventId,
-            rem.notifyUserId ?? context.user.dbUserId,
-            fireAt,
-            rem.offsetMinutes,
+            input.recurrence.frequency,
+            input.recurrence.intervalN,
+            startsAt,
+            input.recurrence.untilDate,
+            occurrenceDates.length,
             context.user.dbUserId,
           ],
         );
+        seriesId = rows[0].id;
+      }
+
+      let firstId: string | null = null;
+      for (let i = 0; i < occurrenceDates.length; i++) {
+        const occStartsAt = phToInstant(occurrenceDates[i], time);
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO calendar_events
+             (title, description, starts_at, ends_at, all_day, location, created_by, series_id, occurrence_index)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id`,
+          [
+            input.title,
+            input.description || null,
+            occStartsAt,
+            occEndsAt,
+            input.allDay,
+            input.location || null,
+            context.user.dbUserId,
+            seriesId,
+            seriesId ? i : null,
+          ],
+        );
+        firstId ??= rows[0].id;
+        // Reminders replicate to every occurrence. Skip occurrences already in
+        // the past (a backdated series must not flood inboxes with stale
+        // pings); a future occurrence whose fire_at is already past still
+        // fires on the next poll, same as a one-off (the dialog warns so).
+        if (occStartsAt.getTime() < now && seriesId) continue;
+        for (const rem of input.reminders) {
+          const fireAt = new Date(occStartsAt.getTime() - rem.offsetMinutes * 60_000);
+          await client.query(
+            `INSERT INTO event_reminders (event_id, notify_user_id, fire_at, offset_minutes, created_by)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+              rows[0].id,
+              rem.notifyUserId ?? context.user.dbUserId,
+              fireAt,
+              rem.offsetMinutes,
+              context.user.dbUserId,
+            ],
+          );
+        }
       }
       await client.query("COMMIT");
-      return { id: eventId };
+      return { id: firstId, seriesId, count: occurrenceDates.length };
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
       rethrowMapped(err);
     } finally {
       client.release();
     }
+  });
+
+// Delete a whole series: cascades to all its occurrences, which cascade their
+// reminders. Delivered notifications survive via the existing SET NULL chain.
+export const deleteSeries = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { seriesId: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertAdmin(context.user);
+    const seriesId = parseOrInvalid(z.string().uuid(), data.seriesId);
+    const { pool } = await import("@/lib/db.server");
+    const { rowCount } = await pool.query(`DELETE FROM event_series WHERE id = $1`, [seriesId]);
+    if (!rowCount) throw new Error("NOT_FOUND");
   });
 
 export const updateEvent = createServerFn({ method: "POST" })
