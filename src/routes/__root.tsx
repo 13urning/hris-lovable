@@ -10,6 +10,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider } from "@/hooks/use-auth";
 import { resolveFirebaseConfig } from "@/lib/firebase-config";
+import { readSsrNonce } from "@/lib/ssr-nonce";
 import type { FirebaseOptions } from "firebase/app";
 import appCss from "../styles.css?url";
 
@@ -124,13 +125,20 @@ function RootShell({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // Per-request CSP nonce (see src/server.ts + lib/ssr-nonce). Present during SSR,
+  // undefined on the client; TanStack stamps the same nonce onto the hydration
+  // scripts via router.options.ssr.nonce, so both inline-script sources match the
+  // Content-Security-Policy header.
+  const nonce = readSsrNonce();
+
   return (
     <html lang="en">
       <head>
         <HeadContent />
         <script
+          nonce={nonce}
           // JSON.stringify of a fixed-shape object of known-safe string literals —
-          // no user input, not an XSS sink. (Add a CSP nonce when CSP lands.)
+          // no user input, not an XSS sink.
           dangerouslySetInnerHTML={{ __html: `window.__FIREBASE_CONFIG__=${JSON.stringify(cfg)}` }}
         />
       </head>

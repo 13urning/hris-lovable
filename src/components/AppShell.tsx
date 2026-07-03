@@ -17,7 +17,9 @@ import {
   Activity,
   ShieldCheck,
   CalendarDays,
+  CalendarClock,
 } from "lucide-react";
+import { NotificationBell } from "@/components/NotificationBell";
 import { cn } from "@/lib/utils";
 import tidalLogo from "@/assets/tidal-logo.png";
 
@@ -83,6 +85,7 @@ export function AppShell() {
       {sectionLabel("Attendance")}
       {drawerItem("/dtr", "Attendance", Clock3)}
       {isHR && drawerItem("/holidays", "Holidays", CalendarDays)}
+      {isAdmin && drawerItem("/calendar", "Calendar Events", CalendarClock)}
 
       {sectionLabel("People")}
       {isHR && drawerItem("/employees", "Employees", Users)}
@@ -146,8 +149,9 @@ export function AppShell() {
             </nav>
           )}
 
-          {/* Right: email + sign out */}
+          {/* Right: notifications + email + sign out */}
           <div className="flex items-center gap-3">
+            {user && <NotificationBell />}
             <span className="hidden text-xs text-muted-foreground sm:inline">{user?.email}</span>
             <Button
               variant="ghost"

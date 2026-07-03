@@ -6,7 +6,7 @@ import {
   type User as FirebaseUser,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { fetchUserData, provisionUser } from "@/lib/user-functions";
+import { fetchUserData, provisionUser, revokeOwnSessions } from "@/lib/user-functions";
 import { clearSession } from "@/lib/session";
 
 type AppRole = "employee" | "hr" | "admin" | "group_head";
@@ -124,6 +124,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     clearSession();
+    // Best-effort server-side refresh-token revocation before the local sign-out,
+    // so a stolen refresh token can't outlive an explicit logout. Never block
+    // logout on it.
+    try {
+      await revokeOwnSessions();
+    } catch (e) {
+      console.warn("[useAuth] revokeOwnSessions failed", e);
+    }
     await fbSignOut(auth);
   };
 
