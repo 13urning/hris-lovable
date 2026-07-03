@@ -8,11 +8,17 @@ import {
   createEvent,
   updateEvent,
   deleteEvent,
+  deleteSeries,
   addReminder,
   deleteReminder,
   fetchProfilesForEventPicker,
   type CalendarEvent,
 } from "@/lib/calendar-functions";
+import {
+  generateOccurrenceDates,
+  MAX_OCCURRENCES_PER_SERIES,
+  type RecurrenceFrequency,
+} from "@/lib/recurrence";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -36,7 +42,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { TablePagination } from "@/components/TablePagination";
 import { usePagination } from "@/hooks/use-pagination";
-import { BellRing, CalendarClock, Pencil, Plus, Trash2, X } from "lucide-react";
+import { BellRing, CalendarClock, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/_admin/calendar")({
   component: CalendarPage,
@@ -101,6 +107,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   END_BEFORE_START: "The end must be after the start.",
   INVALID_RECIPIENT: "Pick a valid reminder recipient.",
   REMINDER_LIMIT: "An event can have at most 10 reminders.",
+  TOO_MANY_OCCURRENCES: `A repeat rule can create at most ${MAX_OCCURRENCES_PER_SERIES} occurrences — shorten the range.`,
+  HORIZON_EXCEEDED: "Repeats can extend at most 3 years from the start date.",
+  NO_OCCURRENCES: "The repeat end date is before the event date.",
   NOT_FOUND: "That record no longer exists — it may have been deleted.",
   FORBIDDEN: "Only admins can manage calendar events.",
   INTERNAL_ERROR: "Something went wrong. Try again.",
@@ -118,6 +127,9 @@ type EventForm = {
   date: string;
   time: string;
   allDay: boolean;
+  repeat: "none" | RecurrenceFrequency;
+  intervalN: number;
+  untilDate: string;
 };
 
 type PendingReminder = { notifyUserId?: string; offsetMinutes: number };
@@ -129,7 +141,23 @@ const emptyForm: EventForm = {
   date: "",
   time: "09:00",
   allDay: false,
+  repeat: "none",
+  intervalN: 1,
+  untilDate: "",
 };
+
+const FREQ_UNITS: Record<RecurrenceFrequency, string> = {
+  daily: "day",
+  weekly: "week",
+  monthly: "month",
+  yearly: "year",
+};
+
+function seriesLabel(freq: string, interval: number) {
+  const unit = FREQ_UNITS[freq as RecurrenceFrequency];
+  if (!unit) return freq;
+  return interval > 1 ? `every ${interval} ${unit}s` : `${unit}ly`.replace("dayly", "daily");
+}
 
 function CalendarPage() {
   const qc = useQueryClient();
@@ -179,6 +207,10 @@ function CalendarPage() {
       date,
       time,
       allDay: e.all_day,
+      // Recurrence isn't editable after creation (v1) — occurrence-only edits.
+      repeat: "none",
+      intervalN: 1,
+      untilDate: "",
     });
     setRemRecipient("me");
     setRemOffset("1440");
@@ -195,10 +227,29 @@ function CalendarPage() {
   });
 
   const create = useMutation({
-    mutationFn: () => createEvent({ data: { ...eventPayload(), reminders: pendingReminders } }),
-    onSuccess: () => {
-      toast.success("Event created");
+    mutationFn: () =>
+      createEvent({
+        data: {
+          ...eventPayload(),
+          reminders: pendingReminders,
+          recurrence:
+            form.repeat === "none"
+              ? undefined
+              : { frequency: form.repeat, intervalN: form.intervalN, untilDate: form.untilDate },
+        },
+      }),
+    onSuccess: (r) => {
+      toast.success(r.seriesId ? `Series created — ${r.count} occurrences` : "Event created");
       setDialogOpen(false);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(friendlyError(e)),
+  });
+
+  const removeSeries = useMutation({
+    mutationFn: (seriesId: string) => deleteSeries({ data: { seriesId } }),
+    onSuccess: () => {
+      toast.success("Series deleted");
       invalidate();
     },
     onError: (e: Error) => toast.error(friendlyError(e)),
@@ -241,6 +292,21 @@ function CalendarPage() {
 
   const personName = (id: string | undefined) =>
     id ? (people?.find((p) => p.id === id)?.full_name ?? "Selected user") : "Me";
+
+  // Live "creates N occurrences" preview, sharing the exact server generator so
+  // the dialog and createEvent can never disagree on the count or the caps.
+  const recurrencePreview = (() => {
+    if (isEditing || form.repeat === "none") return null;
+    if (!form.date || !form.untilDate) return { count: null as number | null, error: null };
+    try {
+      const dates = generateOccurrenceDates(form.date, form.repeat, form.intervalN, form.untilDate);
+      return { count: dates.length, error: null as string | null };
+    } catch (e) {
+      return { count: null, error: friendlyError(e as Error) };
+    }
+  })();
+  const recurrenceInvalid =
+    form.repeat !== "none" && (!form.untilDate || !!recurrencePreview?.error);
 
   const stageReminder = () => {
     setPendingReminders((prev) => [
@@ -332,6 +398,12 @@ function CalendarPage() {
                       {e.description && (
                         <p className="text-xs text-muted-foreground">{e.description}</p>
                       )}
+                      {e.series_id && e.series_frequency && (
+                        <span className="mt-1 inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground">
+                          <Repeat className="h-3 w-3" />
+                          {seriesLabel(e.series_frequency, e.series_interval ?? 1)}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-muted-foreground">{e.location ?? "—"}</td>
                     <td className="px-4 py-2">
@@ -361,10 +433,35 @@ function CalendarPage() {
                             size="sm"
                             variant="ghost"
                             className="text-destructive hover:bg-destructive/10"
+                            title={e.series_id ? "Delete this occurrence" : "Delete event"}
                             onClick={() => remove.mutate(e.id)}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
+                          {e.series_id && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:bg-destructive/10"
+                              title="Delete the whole series"
+                              disabled={removeSeries.isPending}
+                              onClick={() => {
+                                const count = events?.filter(
+                                  (x) => x.series_id === e.series_id,
+                                ).length;
+                                if (
+                                  window.confirm(
+                                    `Delete the whole “${e.title}” series (${count ?? "all"} occurrences) and its reminders? Notifications already delivered are kept.`,
+                                  )
+                                ) {
+                                  removeSeries.mutate(e.series_id!);
+                                }
+                              }}
+                            >
+                              <Repeat className="mr-0.5 h-3.5 w-3.5" />
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                         </>
                       )}
                     </td>
@@ -451,6 +548,89 @@ function CalendarPage() {
                 <Label className="text-xs text-muted-foreground">All day</Label>
               </div>
             </div>
+
+            {/* Recurrence — create mode only; rules aren't editable in v1 */}
+            {!isEditing && (
+              <div className="space-y-2 rounded-md border p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Repeat
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Select
+                    value={form.repeat}
+                    onValueChange={(v) => setForm({ ...form, repeat: v as EventForm["repeat"] })}
+                  >
+                    <SelectTrigger className="w-full sm:min-w-0 sm:flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Does not repeat</SelectItem>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {form.repeat !== "none" && (
+                    <>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-xs text-muted-foreground">Every</Label>
+                        <Input
+                          className="w-16"
+                          type="number"
+                          min={1}
+                          max={52}
+                          value={form.intervalN}
+                          onChange={(e) =>
+                            setForm({
+                              ...form,
+                              intervalN: Math.max(1, Math.min(52, Number(e.target.value) || 1)),
+                            })
+                          }
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {FREQ_UNITS[form.repeat]}
+                          {form.intervalN > 1 ? "s" : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Label className="text-xs text-muted-foreground">Until</Label>
+                        <Input
+                          className="w-40"
+                          type="date"
+                          value={form.untilDate}
+                          onChange={(e) => setForm({ ...form, untilDate: e.target.value })}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+                {form.repeat !== "none" && (
+                  <p
+                    className={`text-xs ${recurrencePreview?.error ? "text-destructive" : "text-muted-foreground"}`}
+                  >
+                    {recurrencePreview?.error
+                      ? recurrencePreview.error
+                      : recurrencePreview?.count
+                        ? `Creates ${recurrencePreview.count} occurrence${recurrencePreview.count === 1 ? "" : "s"}. Reminders apply to every occurrence.`
+                        : "Pick a date and an until-date. Repeats through that date (PH time)."}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Series banner — edit mode, occurrence of a series */}
+            {isEditing && editingEvent?.series_id && (
+              <div className="flex items-center gap-2 rounded-md border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+                <Repeat className="h-3.5 w-3.5 shrink-0" />
+                Part of a{" "}
+                {seriesLabel(
+                  editingEvent.series_frequency ?? "",
+                  editingEvent.series_interval ?? 1,
+                )}{" "}
+                series. Changes here affect this occurrence only.
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">Location (optional)</Label>
@@ -562,7 +742,13 @@ function CalendarPage() {
               Cancel
             </Button>
             <Button
-              disabled={!form.title.trim() || !form.date || create.isPending || update.isPending}
+              disabled={
+                !form.title.trim() ||
+                !form.date ||
+                (!isEditing && recurrenceInvalid) ||
+                create.isPending ||
+                update.isPending
+              }
               onClick={() => (isEditing ? update.mutate() : create.mutate())}
             >
               {isEditing ? "Save changes" : "Create event"}
