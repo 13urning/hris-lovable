@@ -20,6 +20,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { WhatsNewModal } from "@/components/WhatsNewModal";
 import { cn } from "@/lib/utils";
 import tidalLogo from "@/assets/tidal-logo.png";
 
@@ -169,6 +170,9 @@ export function AppShell() {
       <main className="mx-auto max-w-7xl px-6 py-8">
         <Outlet />
       </main>
+
+      {/* Announcements — renders only when the user has unseen major entries. */}
+      <WhatsNewModal />
     </div>
   );
 }
