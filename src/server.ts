@@ -42,7 +42,10 @@ const SECURITY_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  // geolocation=(self): the app's own top-level document may request location
+  // (audit-only clock-in tagging); third-party iframes still cannot. Camera and
+  // microphone remain fully disabled (unused).
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
 };
 
 // Content-Security-Policy for HTML document responses. Shipped in REPORT-ONLY mode

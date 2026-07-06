@@ -102,6 +102,24 @@ function computeAbsentDays(
   return out;
 }
 
+// Clock-in/out GPS coordinates are captured for HR audit ONLY and are surfaced
+// solely through the assertHR-gated activity log. The employee-facing queries
+// below fetch whole rows via SELECT *, so we strip the location columns in place
+// to keep this location PII off the employee dashboard/DTR payloads (nothing
+// there renders it). Mutating the row (rather than mapping to a new object)
+// keeps the rows loosely typed, so the server fn's serialized shape is
+// unchanged. Absence rows never carry these keys.
+function stripLocationColumns(row: Record<string, unknown>): void {
+  delete row.clock_in_lat;
+  delete row.clock_in_lon;
+  delete row.clock_in_accuracy;
+  delete row.clock_in_loc_status;
+  delete row.clock_out_lat;
+  delete row.clock_out_lon;
+  delete row.clock_out_accuracy;
+  delete row.clock_out_loc_status;
+}
+
 export const getTodayDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data: { date: string }) => data)
@@ -159,6 +177,7 @@ export const getRecentDTRsQuery = createServerFn({ method: "POST" })
     const absents = excluded
       ? []
       : computeAbsentDays(empId, startDate, today, dtrDates, leaves, joinDate, holidays);
+    for (const r of rows) stripLocationColumns(r);
     return [...rows, ...absents].sort((a, b) =>
       (b.work_date as string).localeCompare(a.work_date as string),
     );
@@ -202,14 +221,61 @@ export const getDTRsForMonth = createServerFn({ method: "POST" })
     const absents = excluded
       ? []
       : computeAbsentDays(empId, startDate, endDate, dtrDates, leaves, joinDate, holidays);
+    for (const r of rows) stripLocationColumns(r);
     return [...rows, ...absents].sort((a, b) =>
       (a.work_date as string).localeCompare(b.work_date as string),
     );
   });
 
+// A validated, storage-ready location. Coordinates only ever accompany the
+// "captured" status; every other status stores NULL coords.
+type StoredLocation = {
+  lat: number | null;
+  lon: number | null;
+  accuracy: number | null;
+  status: "captured" | "unavailable" | "not_captured";
+};
+
+// Location is self-reported by the browser Geolocation API and is validated
+// here before it touches the database — never trusted blindly. Anything
+// malformed or out of range is coerced to "unavailable" (NULL coords) rather
+// than throwing, so a bad payload can never block a legitimate clock-in. These
+// coordinates are advisory (audit-only) and are never used to allow/deny.
+function normalizeLocation(input: unknown): StoredLocation {
+  const NONE: StoredLocation = { lat: null, lon: null, accuracy: null, status: "not_captured" };
+  const UNAVAILABLE: StoredLocation = {
+    lat: null,
+    lon: null,
+    accuracy: null,
+    status: "unavailable",
+  };
+  if (input == null || typeof input !== "object") return NONE;
+  const o = input as Record<string, unknown>;
+  const s = o.status;
+  const status =
+    s === "captured" || s === "unavailable" || s === "not_captured" ? s : "unavailable";
+  // Non-captured statuses never carry coordinates.
+  if (status !== "captured") return status === "not_captured" ? NONE : UNAVAILABLE;
+
+  const { lat, lon, accuracy } = o;
+  const latOk = typeof lat === "number" && Number.isFinite(lat) && lat >= -90 && lat <= 90;
+  const lonOk = typeof lon === "number" && Number.isFinite(lon) && lon >= -180 && lon <= 180;
+  // Claimed "captured" but the coordinates are garbage → treat as unavailable.
+  if (!latOk || !lonOk) return UNAVAILABLE;
+
+  const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+  const acc =
+    typeof accuracy === "number" && Number.isFinite(accuracy) && accuracy >= 0
+      ? Math.round(accuracy * 10) / 10
+      : null;
+  return { lat: round6(lat), lon: round6(lon), accuracy: acc, status: "captured" };
+}
+
 export const clockInDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { workDate: string; timeIn: string; shiftLabel: string }) => data)
+  .inputValidator(
+    (data: { workDate: string; timeIn: string; shiftLabel: string; location?: unknown }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -225,10 +291,21 @@ export const clockInDTR = createServerFn({ method: "POST" })
       await assertOnOfficeNetwork(pool, resolveClientIp(getRequest()));
     }
     const lateMinutes = isOfficialBusiness ? 0 : lateMinutesFor(data.timeIn);
+    const loc = normalizeLocation(data.location);
     await pool.query(
-      `INSERT INTO daily_time_reports (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes, late_minutes)
-       VALUES ($1, $2, $3, $4, NULL, FALSE, 0, $5)`,
-      [context.user.dbUserId, data.workDate, data.timeIn, data.shiftLabel, lateMinutes],
+      `INSERT INTO daily_time_reports (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes, late_minutes, clock_in_lat, clock_in_lon, clock_in_accuracy, clock_in_loc_status)
+       VALUES ($1, $2, $3, $4, NULL, FALSE, 0, $5, $6, $7, $8, $9)`,
+      [
+        context.user.dbUserId,
+        data.workDate,
+        data.timeIn,
+        data.shiftLabel,
+        lateMinutes,
+        loc.lat,
+        loc.lon,
+        loc.accuracy,
+        loc.status,
+      ],
     );
   });
 
@@ -237,7 +314,7 @@ export const clockInDTR = createServerFn({ method: "POST" })
 // inflate their hours (which feed the payroll cutoff aggregation).
 export const clockOutDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { dtrId: string; timeOut: string }) => data)
+  .inputValidator((data: { dtrId: string; timeOut: string; location?: unknown }) => data)
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -259,12 +336,25 @@ export const clockOutDTR = createServerFn({ method: "POST" })
     const STANDARD = 9;
     const isUndertime = hoursWorked < STANDARD;
     const undertimeMins = isUndertime ? Math.max(0, Math.round(STANDARD * 60 - totalMins)) : 0;
+    const loc = normalizeLocation(data.location);
 
     await pool.query(
       `UPDATE daily_time_reports
-         SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4
-       WHERE id = $5 AND employee_id = $6`,
-      [data.timeOut, hoursWorked, isUndertime, undertimeMins, data.dtrId, context.user.dbUserId],
+         SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4,
+             clock_out_lat = $5, clock_out_lon = $6, clock_out_accuracy = $7, clock_out_loc_status = $8
+       WHERE id = $9 AND employee_id = $10`,
+      [
+        data.timeOut,
+        hoursWorked,
+        isUndertime,
+        undertimeMins,
+        loc.lat,
+        loc.lon,
+        loc.accuracy,
+        loc.status,
+        data.dtrId,
+        context.user.dbUserId,
+      ],
     );
 
     return { hoursWorked, isUndertime, undertimeMins };
@@ -288,6 +378,8 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
           `SELECT d.id, d.employee_id, d.work_date, d.time_in, d.time_out,
                   d.hours_worked, d.shift_label, d.is_undertime, d.undertime_minutes, d.late_minutes, d.created_at,
                   d.clockout_channel,
+                  d.clock_in_lat, d.clock_in_lon, d.clock_in_accuracy, d.clock_in_loc_status,
+                  d.clock_out_lat, d.clock_out_lon, d.clock_out_accuracy, d.clock_out_loc_status,
                   p.full_name, p.employee_code, p.department
            FROM daily_time_reports d
            LEFT JOIN profiles p ON p.id = d.employee_id
@@ -327,6 +419,14 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       late_minutes: number | null;
       created_at: string | null;
       clockout_channel: string | null;
+      clock_in_lat: number | null;
+      clock_in_lon: number | null;
+      clock_in_accuracy: number | null;
+      clock_in_loc_status: string | null;
+      clock_out_lat: number | null;
+      clock_out_lon: number | null;
+      clock_out_accuracy: number | null;
+      clock_out_loc_status: string | null;
       is_absent: boolean;
       profile: {
         full_name: string;
@@ -348,6 +448,14 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       late_minutes: r.late_minutes as number | null,
       created_at: r.created_at as string | null,
       clockout_channel: r.clockout_channel as string | null,
+      clock_in_lat: r.clock_in_lat as number | null,
+      clock_in_lon: r.clock_in_lon as number | null,
+      clock_in_accuracy: r.clock_in_accuracy as number | null,
+      clock_in_loc_status: r.clock_in_loc_status as string | null,
+      clock_out_lat: r.clock_out_lat as number | null,
+      clock_out_lon: r.clock_out_lon as number | null,
+      clock_out_accuracy: r.clock_out_accuracy as number | null,
+      clock_out_loc_status: r.clock_out_loc_status as string | null,
       is_absent: false,
       profile: r.full_name
         ? {
@@ -398,6 +506,14 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
           late_minutes: null,
           created_at: null,
           clockout_channel: null,
+          clock_in_lat: null,
+          clock_in_lon: null,
+          clock_in_accuracy: null,
+          clock_in_loc_status: null,
+          clock_out_lat: null,
+          clock_out_lon: null,
+          clock_out_accuracy: null,
+          clock_out_loc_status: null,
           is_absent: true,
           profile: {
             full_name: p.full_name as string,

@@ -16,6 +16,7 @@ import {
   ChevronsUpDown,
   CalendarClock,
   UserX,
+  MapPin,
 } from "lucide-react";
 import { exportRowsToCSV } from "@/lib/csv-export";
 
@@ -50,6 +51,14 @@ type LogEntry = {
   late_minutes: number | null;
   created_at: string | null;
   clockout_channel: string | null;
+  clock_in_lat: number | null;
+  clock_in_lon: number | null;
+  clock_in_accuracy: number | null;
+  clock_in_loc_status: string | null;
+  clock_out_lat: number | null;
+  clock_out_lon: number | null;
+  clock_out_accuracy: number | null;
+  clock_out_loc_status: string | null;
   is_absent?: boolean | null;
   profile: {
     full_name: string;
@@ -86,6 +95,41 @@ function formatTimestamp(iso: string | null) {
     minute: "2-digit",
     hour12: true,
   });
+}
+
+// Audit display for a captured clock-in/out location. When coordinates exist we
+// link out to Google Maps (client-side only — no server geocoding); when the
+// browser reported the location as unavailable we say so; legacy rows that
+// predate the feature (NULL status) render nothing.
+function LocationBadge({
+  lat,
+  lon,
+  accuracy,
+  status,
+}: {
+  lat: number | null;
+  lon: number | null;
+  accuracy: number | null;
+  status: string | null;
+}) {
+  if (lat != null && lon != null) {
+    return (
+      <a
+        href={`https://www.google.com/maps?q=${lat},${lon}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-0.5 inline-flex items-center gap-0.5 text-[11px] text-accent underline underline-offset-2"
+        title={`${lat}, ${lon}${accuracy != null ? ` (±${Math.round(accuracy)}m)` : ""}`}
+      >
+        <MapPin className="h-3 w-3" /> Map
+        {accuracy != null ? <span className="text-muted-foreground">±{Math.round(accuracy)}m</span> : null}
+      </a>
+    );
+  }
+  if (status === "unavailable") {
+    return <div className="mt-0.5 text-[11px] text-muted-foreground">No location</div>;
+  }
+  return null;
 }
 
 function SortHeader({
@@ -224,7 +268,13 @@ function ActivityLogPage() {
         { header: "Shift", value: (e) => e.shift_label ?? "" },
         { header: "Clock In", value: (e) => formatTime(e.time_in) },
         { header: "Clock In Timestamp", value: (e) => formatTimestamp(e.created_at) },
+        { header: "Clock In Lat", value: (e) => e.clock_in_lat ?? "" },
+        { header: "Clock In Lon", value: (e) => e.clock_in_lon ?? "" },
+        { header: "Clock In Location", value: (e) => e.clock_in_loc_status ?? "" },
         { header: "Clock Out", value: (e) => formatTime(e.time_out) },
+        { header: "Clock Out Lat", value: (e) => e.clock_out_lat ?? "" },
+        { header: "Clock Out Lon", value: (e) => e.clock_out_lon ?? "" },
+        { header: "Clock Out Location", value: (e) => e.clock_out_loc_status ?? "" },
         {
           header: "Hours",
           value: (e) => (e.hours_worked != null ? e.hours_worked.toFixed(2) : ""),
@@ -490,16 +540,28 @@ function ActivityLogPage() {
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    {/* Clock In (time + full timestamp subtitle) */}
+                    {/* Clock In (time + full timestamp subtitle + location) */}
                     <td className="whitespace-nowrap px-3 py-3">
                       <div className="tabular-nums">{formatTime(entry.time_in)}</div>
                       <div className="text-[11px] text-muted-foreground">
                         {formatTimestamp(entry.created_at)}
                       </div>
+                      <LocationBadge
+                        lat={entry.clock_in_lat}
+                        lon={entry.clock_in_lon}
+                        accuracy={entry.clock_in_accuracy}
+                        status={entry.clock_in_loc_status}
+                      />
                     </td>
-                    {/* Clock Out */}
-                    <td className="whitespace-nowrap px-3 py-3 tabular-nums">
-                      {formatTime(entry.time_out)}
+                    {/* Clock Out (time + location) */}
+                    <td className="whitespace-nowrap px-3 py-3">
+                      <div className="tabular-nums">{formatTime(entry.time_out)}</div>
+                      <LocationBadge
+                        lat={entry.clock_out_lat}
+                        lon={entry.clock_out_lon}
+                        accuracy={entry.clock_out_accuracy}
+                        status={entry.clock_out_loc_status}
+                      />
                     </td>
                     {/* Hours */}
                     <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
