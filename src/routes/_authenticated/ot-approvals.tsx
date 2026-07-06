@@ -28,6 +28,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/dtr";
+import { computeOtHours, formatOtRange } from "@/lib/ot-hours";
 import { exportRowsToCSV } from "@/lib/csv-export";
 import { toast } from "sonner";
 import { Clock3, CheckCircle2, XCircle, Send, CalendarClock, FileDown, Ban } from "lucide-react";
@@ -53,6 +54,8 @@ interface OTRequest {
   reviewed_at: string | null;
   review_notes: string | null;
   justification: string | null;
+  time_from: string | null;
+  time_to: string | null;
   created_at: string;
 }
 
@@ -63,6 +66,8 @@ interface PendingOTRow {
   requested_hours: number;
   target_month: string | null;
   work_date: string | null;
+  time_from: string | null;
+  time_to: string | null;
   approver_chain: string[];
   current_approver_index: number;
   review_notes: string | null;
@@ -131,7 +136,8 @@ function OTApprovalsPage() {
   const [fileForm, setFileForm] = useState({
     pre_approved_id: "",
     work_date: new Date().toISOString().slice(0, 10),
-    hours: 1,
+    time_from: "",
+    time_to: "",
     justification: "",
   });
 
@@ -198,6 +204,12 @@ function OTApprovalsPage() {
   const availableForSelected = selectedBudget
     ? Math.max(0, selectedBudget.requested_hours - approvedForSelected - pendingForSelected)
     : 0;
+
+  // Auto-computed OT hours from the entered window — null until both times form
+  // a valid, non-zero range. Drives the live preview, the budget-cap gate, and
+  // the submit-enabled state. The server recomputes this authoritatively.
+  const computedFile = computeOtHours(fileForm.time_from, fileForm.time_to);
+  const fileHours = computedFile?.hours ?? 0;
 
   const nextMonthIso = nextMonthValue() + "-01";
   const nextMonthBudget = useMemo(
@@ -283,7 +295,8 @@ function OTApprovalsPage() {
     mutationFn: async () => {
       if (!user) throw new Error("Not signed in");
       if (!selectedBudget) throw new Error("Select a budget first");
-      if (fileForm.hours > availableForSelected) {
+      if (!computedFile) throw new Error("Enter a valid start and end time.");
+      if (fileHours > availableForSelected) {
         throw new Error(
           pendingForSelected > 0
             ? `Hours exceed budget. ${availableForSelected}h available (${pendingForSelected}h already pending approval).`
@@ -294,7 +307,8 @@ function OTApprovalsPage() {
         data: {
           preApprovedId: selectedBudget.id,
           workDate: fileForm.work_date,
-          hours: fileForm.hours,
+          timeFrom: fileForm.time_from,
+          timeTo: fileForm.time_to,
           justification: fileForm.justification || null,
         },
       });
@@ -305,7 +319,8 @@ function OTApprovalsPage() {
       setFileForm({
         pre_approved_id: "",
         work_date: new Date().toISOString().slice(0, 10),
-        hours: 1,
+        time_from: "",
+        time_to: "",
         justification: "",
       });
       qc.invalidateQueries({ queryKey: ["ot-actuals-mine"] });
@@ -315,7 +330,9 @@ function OTApprovalsPage() {
       toast.error(
         e.message === "JUSTIFICATION_REQUIRED"
           ? "Please add a justification for these OT hours."
-          : e.message,
+          : e.message === "INVALID_TIME_RANGE"
+            ? "Enter a valid start and end time."
+            : e.message,
       ),
   });
 
@@ -483,7 +500,11 @@ function OTApprovalsPage() {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      setBudgetForm({ month: nextMonthValue(), requested_hours: 8, justification: "" });
+                      setBudgetForm({
+                        month: nextMonthValue(),
+                        requested_hours: 8,
+                        justification: "",
+                      });
                       setBudgetDialogOpen(true);
                     }}
                   >
@@ -630,7 +651,8 @@ function OTApprovalsPage() {
                 setFileForm({
                   pre_approved_id: approvedBudgets?.[0]?.id ?? "",
                   work_date: new Date().toISOString().slice(0, 10),
-                  hours: 1,
+                  time_from: "",
+                  time_to: "",
                   justification: "",
                 });
                 setFileDialogOpen(true);
@@ -668,7 +690,14 @@ function OTApprovalsPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
+                        <td className="px-4 py-2 text-right">
+                          {r.requested_hours}h
+                          {formatOtRange(r.time_from, r.time_to) && (
+                            <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                              {formatOtRange(r.time_from, r.time_to)}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-muted-foreground">
                           {budget
                             ? `${formatMonth(budget.target_month)} (${budget.requested_hours}h)`
@@ -773,7 +802,14 @@ function OTApprovalsPage() {
                         <td className="px-4 py-2">
                           {isBudget ? formatMonth(r.target_month) : formatDate(r.work_date)}
                         </td>
-                        <td className="px-4 py-2 text-right">{r.requested_hours}h</td>
+                        <td className="px-4 py-2 text-right">
+                          {r.requested_hours}h
+                          {!isBudget && formatOtRange(r.time_from, r.time_to) && (
+                            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                              {formatOtRange(r.time_from, r.time_to)}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-muted-foreground max-w-[280px]">
                           {r.justification ? (
                             <span className="line-clamp-2">{r.justification}</span>
@@ -912,20 +948,7 @@ function OTApprovalsPage() {
                 id="file-budget"
                 className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 value={fileForm.pre_approved_id}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  const budget = approvedBudgets?.find((b) => b.id === id);
-                  const approved = budget ? (approvedHoursById[budget.id] ?? 0) : 0;
-                  const pending = budget ? (pendingHoursById[budget.id] ?? 0) : 0;
-                  const available = budget
-                    ? Math.max(0, budget.requested_hours - approved - pending)
-                    : 0;
-                  setFileForm({
-                    ...fileForm,
-                    pre_approved_id: id,
-                    hours: Math.min(fileForm.hours, available || 1),
-                  });
-                }}
+                onChange={(e) => setFileForm({ ...fileForm, pre_approved_id: e.target.value })}
               >
                 <option value="">— choose a budget —</option>
                 {approvedBudgets?.map((b) => {
@@ -979,18 +1002,46 @@ function OTApprovalsPage() {
             </div>
 
             <div>
-              <Label htmlFor="file-hours">Hours to file</Label>
-              <Input
-                id="file-hours"
-                type="number"
-                min={0.5}
-                step={0.5}
-                max={availableForSelected || undefined}
-                className="mt-1"
-                value={fileForm.hours}
-                onChange={(e) => setFileForm({ ...fileForm, hours: Number(e.target.value) })}
-                disabled={!selectedBudget || availableForSelected === 0}
-              />
+              <Label>Time worked</Label>
+              <div className="mt-1 flex items-center gap-2">
+                <Input
+                  id="file-time-from"
+                  type="time"
+                  aria-label="Start time"
+                  className="flex-1"
+                  value={fileForm.time_from}
+                  onChange={(e) => setFileForm({ ...fileForm, time_from: e.target.value })}
+                  disabled={!selectedBudget || availableForSelected === 0}
+                />
+                <span className="text-sm text-muted-foreground">to</span>
+                <Input
+                  id="file-time-to"
+                  type="time"
+                  aria-label="End time"
+                  className="flex-1"
+                  value={fileForm.time_to}
+                  onChange={(e) => setFileForm({ ...fileForm, time_to: e.target.value })}
+                  disabled={!selectedBudget || availableForSelected === 0}
+                />
+              </div>
+
+              {/* Auto-computed hours preview */}
+              {computedFile ? (
+                <p className="mt-1.5 text-sm">
+                  = <span className="font-medium">{computedFile.hours}h</span>
+                  {computedFile.overnight && (
+                    <span className="ml-1 text-[11px] text-muted-foreground">(ends next day)</span>
+                  )}
+                </p>
+              ) : (
+                fileForm.time_from &&
+                fileForm.time_to && (
+                  <p className="mt-1 text-[11px] text-destructive">
+                    Start and end can’t be the same time.
+                  </p>
+                )
+              )}
+
               {selectedBudget && availableForSelected === 0 && (
                 <p className="mt-1 text-[11px] text-destructive">
                   {pendingForSelected > 0
@@ -998,14 +1049,12 @@ function OTApprovalsPage() {
                     : "This budget is fully used."}
                 </p>
               )}
-              {selectedBudget &&
-                availableForSelected > 0 &&
-                fileForm.hours > availableForSelected && (
-                  <p className="mt-1 text-[11px] text-destructive">
-                    Cannot exceed {availableForSelected}h
-                    {pendingForSelected > 0 && ` (${pendingForSelected}h already pending)`}.
-                  </p>
-                )}
+              {selectedBudget && availableForSelected > 0 && fileHours > availableForSelected && (
+                <p className="mt-1 text-[11px] text-destructive">
+                  Cannot exceed {availableForSelected}h
+                  {pendingForSelected > 0 && ` (${pendingForSelected}h already pending)`}.
+                </p>
+              )}
             </div>
 
             <div>
@@ -1032,8 +1081,8 @@ function OTApprovalsPage() {
                 fileActual.isPending ||
                 !fileForm.pre_approved_id ||
                 !fileForm.work_date ||
-                fileForm.hours <= 0 ||
-                fileForm.hours > availableForSelected ||
+                !computedFile ||
+                fileHours > availableForSelected ||
                 availableForSelected === 0 ||
                 !fileForm.justification.trim()
               }
@@ -1075,6 +1124,11 @@ function OTApprovalsPage() {
                 <div>
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Hours</p>
                   <p className="font-medium">{reviewing.requested_hours}h</p>
+                  {formatOtRange(reviewing.time_from, reviewing.time_to) && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {formatOtRange(reviewing.time_from, reviewing.time_to)}
+                    </p>
+                  )}
                 </div>
               </div>
 

@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware, assertUser } from "@/lib/auth-middleware";
+import { computeOtHours } from "@/lib/ot-hours";
 
 type OTRow = {
   id: string;
@@ -16,6 +17,8 @@ type OTRow = {
   reviewed_at: string | null;
   review_notes: string | null;
   justification: string | null;
+  time_from: string | null;
+  time_to: string | null;
   created_at: string;
 };
 
@@ -165,7 +168,8 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
     (data: {
       preApprovedId: string;
       workDate: string;
-      hours: number;
+      timeFrom: string;
+      timeTo: string;
       justification: string | null;
     }) => data,
   )
@@ -173,6 +177,11 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
     assertUser(context.user);
     const justification = data.justification?.trim() || null;
     if (!justification) throw new Error("JUSTIFICATION_REQUIRED");
+    // Authoritative hours from the time window — the client no longer sends an
+    // hours value, so it cannot be tampered to overrun the budget cap below.
+    const computed = computeOtHours(data.timeFrom, data.timeTo);
+    if (!computed) throw new Error("INVALID_TIME_RANGE");
+    const hours = computed.hours;
     const { pool } = await import("@/lib/db.server");
     const { resolveChain } = await import("@/lib/chain.server");
 
@@ -201,7 +210,7 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
           AND status IN ('approved', 'pending')`,
       [data.preApprovedId],
     );
-    if (Number(committedRow.committed) + Number(data.hours) > Number(budget.requested_hours)) {
+    if (Number(committedRow.committed) + Number(hours) > Number(budget.requested_hours)) {
       throw new Error("EXCEEDS_BUDGET");
     }
 
@@ -218,15 +227,17 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
       } = await client.query<{ id: string }>(
         `INSERT INTO ot_approval_requests
            (employee_id, request_type, pre_approved_id, work_date,
-            requested_hours, status, approver_chain, current_approver_index,
-            justification, reviewed_at)
-         VALUES ($1, 'actual', $2, $3, $4, $5, $6, 0, $7, $8)
+            requested_hours, time_from, time_to, status, approver_chain,
+            current_approver_index, justification, reviewed_at)
+         VALUES ($1, 'actual', $2, $3, $4, $5, $6, $7, $8, 0, $9, $10)
          RETURNING id`,
         [
           context.user.dbUserId,
           data.preApprovedId,
           data.workDate,
-          data.hours,
+          hours,
+          data.timeFrom,
+          data.timeTo,
           status,
           chain,
           justification,
@@ -246,7 +257,7 @@ export const fileActualOTHours = createServerFn({ method: "POST" })
           type: "ot_request",
           refId: inserted.id,
           title: `OT hours from ${me?.full_name ?? "an employee"}`,
-          body: `${data.hours}h · ${phDate(data.workDate)}`,
+          body: `${hours}h · ${phDate(data.workDate)}`,
         });
       }
       await client.query("COMMIT");
@@ -265,7 +276,7 @@ export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
       `SELECT r.id, r.employee_id, r.request_type, r.requested_hours,
-              r.target_month, r.work_date,
+              r.target_month, r.work_date, r.time_from, r.time_to,
               r.approver_chain, r.current_approver_index, r.review_notes, r.justification,
               r.created_at,
               p.full_name AS employee_full_name
@@ -283,6 +294,8 @@ export const fetchMyPendingOTApprovals = createServerFn({ method: "POST" })
       requested_hours: number;
       target_month: string | null;
       work_date: string | null;
+      time_from: string | null;
+      time_to: string | null;
       approver_chain: string[];
       current_approver_index: number;
       review_notes: string | null;
