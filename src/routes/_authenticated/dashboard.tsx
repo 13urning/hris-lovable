@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { getRecentDTRs } from "@/lib/queries";
 import { getTodayDTR, clockInDTR, clockOutDTR } from "@/lib/dtr-functions";
-import { captureLocation, type LocationCapture } from "@/lib/geolocation";
+import { captureLocation, describeLocationIssue, type LocationCapture } from "@/lib/geolocation";
 import { getOTBudgetsForDashboard, getFiledOTForDashboard } from "@/lib/ot-functions";
 import { fetchMyProfile, fetchMyLeaves } from "@/lib/leave-functions";
 import { getUpcomingHolidaysThisMonth } from "@/lib/holiday-functions";
@@ -106,7 +106,7 @@ function Dashboard() {
     onSuccess: (location) => {
       toast.success("Clocked in!");
       if (location.status !== "captured") {
-        toast.info("Location not shared — clock-in recorded without location.");
+        toast.info(describeLocationIssue(location.reason));
       }
       refetchToday();
       qc.invalidateQueries({ queryKey: ["recent-dtrs"] });
@@ -125,7 +125,7 @@ function Dashboard() {
     onSuccess: (result) => {
       toast.success("Clocked out!");
       if (result.location.status !== "captured") {
-        toast.info("Location not shared — clock-out recorded without location.");
+        toast.info(describeLocationIssue(result.location.reason));
       }
       refetchToday();
       qc.invalidateQueries({ queryKey: ["recent-dtrs"] });
