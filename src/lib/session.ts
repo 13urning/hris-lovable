@@ -14,6 +14,10 @@ export const SESSION_WARN_MS = 60 * 1000; // surface the "expiring soon" warning
 
 const START_KEY = "wave.session.start";
 const ACTIVITY_KEY = "wave.session.lastActivity";
+// Survives the hard reload we do on expiry so the reloaded login page can show
+// why the user was signed out. sessionStorage (not localStorage) so it's scoped
+// to the tab and auto-clears when the tab closes.
+const ENDED_MSG_KEY = "wave.session.endedMsg";
 
 function read(key: string): number | null {
   if (typeof window === "undefined") return null;
@@ -48,6 +52,28 @@ export function clearSession() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(START_KEY);
   window.localStorage.removeItem(ACTIVITY_KEY);
+}
+
+/** Stash a message to show after the post-expiry hard reload (see SessionGuard). */
+export function stashSessionEndedMessage(msg: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(ENDED_MSG_KEY, msg);
+  } catch {
+    /* storage unavailable — the message is a nicety, not load-bearing */
+  }
+}
+
+/** Read + clear the stashed post-expiry message (call once on the login page). */
+export function takeSessionEndedMessage(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const v = window.sessionStorage.getItem(ENDED_MSG_KEY);
+    if (v) window.sessionStorage.removeItem(ENDED_MSG_KEY);
+    return v;
+  } catch {
+    return null;
+  }
 }
 
 /** Milliseconds until the session expires (idle or absolute, whichever sooner).
