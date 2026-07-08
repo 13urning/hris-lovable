@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { getRecentDTRs } from "@/lib/queries";
 import { getTodayDTR, clockInDTR, clockOutDTR } from "@/lib/dtr-functions";
+import { captureLocation, describeLocationIssue, type LocationCapture } from "@/lib/geolocation";
 import { getOTBudgetsForDashboard, getFiledOTForDashboard } from "@/lib/ot-functions";
 import { fetchMyProfile, fetchMyLeaves } from "@/lib/leave-functions";
 import { getUpcomingHolidaysThisMonth } from "@/lib/holiday-functions";
@@ -87,14 +88,26 @@ function Dashboard() {
   });
 
   const [showShiftPicker, setShowShiftPicker] = useState(false);
+  // Location is captured best-effort for audit only and never blocks clock-in.
+  // We kick the GPS request off when the shift picker opens so a fix is usually
+  // ready by the time a shift is chosen; the mutation just awaits this promise.
+  const locPromiseRef = useRef<Promise<LocationCapture> | null>(null);
 
   const clockIn = useMutation({
     mutationFn: async (shiftLabel: ShiftValue) => {
       const timeIn = new Date().toTimeString().slice(0, 5);
-      await clockInDTR({ data: { workDate: today, timeIn, shiftLabel } });
+      // Reuse the fix started when the picker opened; fall back to a fresh
+      // capture. captureLocation never throws — worst case is "unavailable".
+      const location = await (locPromiseRef.current ?? captureLocation());
+      locPromiseRef.current = null;
+      await clockInDTR({ data: { workDate: today, timeIn, shiftLabel, location } });
+      return location;
     },
-    onSuccess: () => {
+    onSuccess: (location) => {
       toast.success("Clocked in!");
+      if (location.status !== "captured") {
+        toast.info(describeLocationIssue(location.reason));
+      }
       refetchToday();
       qc.invalidateQueries({ queryKey: ["recent-dtrs"] });
     },
@@ -104,11 +117,16 @@ function Dashboard() {
   const clockOut = useMutation({
     mutationFn: async () => {
       const timeOut = new Date().toTimeString().slice(0, 5);
+      const location = await captureLocation();
       // Hours/undertime are computed and returned by the server (authoritative).
-      return await clockOutDTR({ data: { dtrId: todayEntry!.id, timeOut } });
+      const result = await clockOutDTR({ data: { dtrId: todayEntry!.id, timeOut, location } });
+      return { ...result, location };
     },
     onSuccess: (result) => {
       toast.success("Clocked out!");
+      if (result.location.status !== "captured") {
+        toast.info(describeLocationIssue(result.location.reason));
+      }
       refetchToday();
       qc.invalidateQueries({ queryKey: ["recent-dtrs"] });
       if (result.isUndertime) {
@@ -187,14 +205,24 @@ function Dashboard() {
           {todayLoading && <Skeleton className="h-16 w-48" />}
 
           {!todayLoading && !clockedIn && (
-            <Button
-              size="lg"
-              className="h-16 w-48 text-lg font-semibold"
-              onClick={() => setShowShiftPicker(true)}
-              disabled={clockIn.isPending}
-            >
-              <Clock3 className="mr-2 h-5 w-5" /> Clock In
-            </Button>
+            <>
+              <Button
+                size="lg"
+                className="h-16 w-48 text-lg font-semibold"
+                onClick={() => {
+                  // Start the GPS request now so a fix is usually ready by the
+                  // time a shift is picked.
+                  locPromiseRef.current = captureLocation();
+                  setShowShiftPicker(true);
+                }}
+                disabled={clockIn.isPending}
+              >
+                <Clock3 className="mr-2 h-5 w-5" /> Clock In
+              </Button>
+              <p className="text-[11px] text-muted-foreground">
+                Your location is recorded for attendance audit.
+              </p>
+            </>
           )}
 
           {clockedIn && !clockedOut && (
