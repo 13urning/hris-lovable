@@ -61,6 +61,14 @@ const SECURITY_HEADERS: Record<string, string> = {
 // condition), so the policy is enforcement-ready.
 const CSP_ENFORCE = process.env.CSP_ENFORCE === "true";
 
+// The Firebase Auth web SDK loads a hidden helper iframe from the project's
+// firebaseapp.com auth domain (observed in prod via report-uri: frame-src
+// violations on /login and /dashboard). Allow exactly that origin, derived from
+// the same env the Admin SDK uses so staging's isolated project also works.
+const FIREBASE_AUTH_DOMAIN = `${
+  process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || "wave-hris-fb"
+}.firebaseapp.com`;
+
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
@@ -73,7 +81,7 @@ function buildCsp(nonce: string): string {
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev",
     "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.googleapis.com",
-    "frame-src 'self'",
+    `frame-src 'self' https://${FIREBASE_AUTH_DOMAIN}`,
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",
