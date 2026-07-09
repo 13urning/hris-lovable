@@ -48,27 +48,27 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
 };
 
-// Content-Security-Policy for HTML document responses. Shipped in REPORT-ONLY mode
-// first: violations are reported (browser console / a report endpoint) but nothing
-// is blocked, so a mis-scoped directive can't take the app down. Flip CSP_ENFORCE
-// to true to switch the header to enforcing "Content-Security-Policy" — only after
-// the report window is clean (see docs/soc-security-spec.md).
+// Content-Security-Policy for HTML document responses. With CSP_ENFORCE=true the
+// header is the blocking "Content-Security-Policy"; otherwise Report-Only (log via
+// report-uri, block nothing). See docs/soc-security-spec.md.
 //
 // 'strict-dynamic' + the per-request nonce trusts the SSR hydration bootstrap to
 // load the app's module chunks without host-allowlisting every asset path.
+//
 // Env-driven so enforcement is a Cloud Run env flip (CSP_ENFORCE=true), not a code
 // change/redeploy — and rollback is just as fast. Unset/anything-else = Report-Only
-// (the safe default). Flip to true only after the report window is clean.
+// (the safe default). The script-src 'https:' fallback is already dropped (gate
+// condition), so the policy is enforcement-ready.
 const CSP_ENFORCE = process.env.CSP_ENFORCE === "true";
 
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
-    // 'https:' and 'unsafe-inline' are CSP1/CSP2 fallbacks that modern browsers
-    // IGNORE when a nonce + 'strict-dynamic' are present. Drop 'https:' before
-    // flipping CSP_ENFORCE on (security-gate finding) — nonce + strict-dynamic is
-    // sufficient and 'https:' would otherwise loosen script-src on legacy browsers.
-    `script-src 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
+    // 'unsafe-inline' is a CSP1 fallback that browsers IGNORE when a nonce +
+    // 'strict-dynamic' are present. The 'https:' fallback was dropped ahead of
+    // enforcement (security-gate condition) — it would loosen script-src on
+    // legacy browsers; nonce + strict-dynamic is sufficient.
+    `script-src 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline'`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev",
@@ -84,7 +84,7 @@ function buildCsp(nonce: string): string {
 }
 
 // Applies the baseline headers, and — when a nonce is supplied (HTML SSR path) —
-// the (report-only) CSP built for that request's nonce.
+// the enforcing CSP built for that request's nonce.
 function withSecurityHeaders(response: Response, nonce?: string): Response {
   const headers: Record<string, string> = { ...SECURITY_HEADERS };
   if (nonce) {

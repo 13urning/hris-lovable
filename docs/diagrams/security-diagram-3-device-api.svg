@@ -1,0 +1,115 @@
+<svg viewBox="0 0 1000 600" width="1000" height="600" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&amp;display=swap');
+    text { font-family: 'Montserrat', sans-serif; }
+    .title { font-size: 15px; font-weight: 700; fill: #010101; }
+    .node-t { fill: #036A6B; }
+    .node-tl { fill: #15A6A1; }
+    .node-g { fill: #393939; }
+    .nlabel { font-size: 11.5px; font-weight: 700; fill: #FFFFFF; }
+    .nsub { font-size: 9px; font-weight: 400; fill: #c8eeee; }
+    .nsubg { font-size: 9px; font-weight: 400; fill: #cccccc; }
+    .elabel { font-size: 9px; font-weight: 600; fill: #036A6B; }
+    .elabel2 { font-size: 8.5px; font-weight: 400; fill: #393939; }
+    .reject { font-size: 9px; font-weight: 700; fill: #8A3A16; }
+    .edge { stroke: #036A6B; stroke-width: 1.6; fill: none; marker-end: url(#arrC); }
+    .edger { stroke: #8A3A16; stroke-width: 1.4; fill: none; marker-end: url(#arrR2); stroke-dasharray: 4 3; }
+    .gate { font-size: 10px; font-weight: 700; fill: #FFFFFF; }
+  </style>
+  <defs>
+    <marker id="arrC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#036A6B"/>
+    </marker>
+    <marker id="arrR2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8A3A16"/>
+    </marker>
+  </defs>
+
+  <text x="500" y="30" text-anchor="middle" class="title">FIGURE 3 — DEVICE ATTENDANCE API FLOW (CLOCK-IN / CLOCK-OUT STATE MACHINE)</text>
+  <line x1="200" y1="42" x2="800" y2="42" stroke="#036A6B" stroke-width="2"/>
+
+  <!-- Device -->
+  <rect x="40" y="90" width="200" height="90" rx="6" class="node-tl"/>
+  <text x="140" y="118" text-anchor="middle" class="nlabel">Attendance Device</text>
+  <text x="140" y="135" text-anchor="middle" class="nsub">NFC tap / biometric scan / kiosk</text>
+  <text x="140" y="148" text-anchor="middle" class="nsub">POST /api/attendance/clock-in</text>
+  <text x="140" y="161" text-anchor="middle" class="nsub">X-Device-Key header + employeeCode</text>
+
+  <!-- Gate chain -->
+  <rect x="310" y="70" width="180" height="56" rx="6" class="node-t"/>
+  <text x="400" y="93" text-anchor="middle" class="gate">GATE 1 · Rate limit</text>
+  <text x="400" y="108" text-anchor="middle" class="nsub">30 req / 10 s per client IP</text>
+  <text x="400" y="119" text-anchor="middle" class="nsub">(sliding window, per instance)</text>
+
+  <rect x="310" y="150" width="180" height="56" rx="6" class="node-t"/>
+  <text x="400" y="173" text-anchor="middle" class="gate">GATE 2 · Device key</text>
+  <text x="400" y="188" text-anchor="middle" class="nsub">SHA-256 + timingSafeEqual, fail-closed</text>
+  <text x="400" y="199" text-anchor="middle" class="nsub">channel scope: key:label:channel</text>
+
+  <rect x="310" y="230" width="180" height="56" rx="6" class="node-t"/>
+  <text x="400" y="253" text-anchor="middle" class="gate">GATE 3 · Input hardening</text>
+  <text x="400" y="268" text-anchor="middle" class="nsub">4 KB cap · JSON only · control chars</text>
+  <text x="400" y="279" text-anchor="middle" class="nsub">rejected · strict channel slug</text>
+
+  <rect x="310" y="310" width="180" height="56" rx="6" class="node-t"/>
+  <text x="400" y="333" text-anchor="middle" class="gate">GATE 4 · Geofence</text>
+  <text x="400" y="348" text-anchor="middle" class="nsub">office_networks CIDR check</text>
+  <text x="400" y="359" text-anchor="middle" class="nsub">same rules as web clock-in</text>
+
+  <!-- State machine -->
+  <rect x="580" y="70" width="380" height="300" rx="8" fill="none" stroke="#15A6A1" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="600" y="92" style="font-size:10px; font-weight:700; fill:#15A6A1; letter-spacing:1px;">SERVER-TIME STATE MACHINE (PH TIME, ANTI-TAMPER)</text>
+
+  <rect x="610" y="110" width="150" height="64" rx="6" class="node-g"/>
+  <text x="685" y="133" text-anchor="middle" class="nlabel">First tap of day</text>
+  <text x="685" y="149" text-anchor="middle" class="nsubg">INSERT … ON CONFLICT</text>
+  <text x="685" y="161" text-anchor="middle" class="nsubg">DO NOTHING → clocked in</text>
+
+  <rect x="785" y="110" width="150" height="64" rx="6" class="node-g"/>
+  <text x="860" y="133" text-anchor="middle" class="nlabel">Tap again too soon</text>
+  <text x="860" y="149" text-anchor="middle" class="nsubg">dwell &lt; MIN_DWELL_MINUTES</text>
+  <text x="860" y="161" text-anchor="middle" class="nsubg">CLOCKOUT_TOO_SOON · no-op</text>
+
+  <rect x="610" y="200" width="150" height="64" rx="6" class="node-g"/>
+  <text x="685" y="223" text-anchor="middle" class="nlabel">Clock-out tap</text>
+  <text x="685" y="239" text-anchor="middle" class="nsubg">UPDATE … SET time_out</text>
+  <text x="685" y="251" text-anchor="middle" class="nsubg">WHERE time_out IS NULL</text>
+
+  <rect x="785" y="200" width="150" height="64" rx="6" class="node-g"/>
+  <text x="860" y="223" text-anchor="middle" class="nlabel">Any later tap</text>
+  <text x="860" y="239" text-anchor="middle" class="nsubg">time_out already set</text>
+  <text x="860" y="251" text-anchor="middle" class="nsubg">ALREADY_CLOCKED_OUT · no-op</text>
+
+  <rect x="610" y="290" width="325" height="60" rx="6" fill="#E0F5F5"/>
+  <text x="772" y="313" text-anchor="middle" class="elabel" style="font-size:9.5px">WRITE-ONCE: UNIQUE(employee_id, work_date) + time_out IS NULL</text>
+  <text x="772" y="327" text-anchor="middle" class="elabel2">re-taps and device retries are idempotent, race-safe no-ops;</text>
+  <text x="772" y="339" text-anchor="middle" class="elabel2">hours_worked / undertime computed atomically in the same UPDATE</text>
+
+  <!-- Edges -->
+  <path class="edge" d="M 240 120 C 280 110, 280 98, 310 98"/>
+  <text x="303" y="82" text-anchor="end" class="elabel">HTTPS TLS 1.2+</text>
+  <path class="edge" d="M 400 126 L 400 150"/>
+  <path class="edge" d="M 400 206 L 400 230"/>
+  <path class="edge" d="M 400 286 L 400 310"/>
+  <path class="edge" d="M 490 338 C 540 338, 540 142, 610 142"/>
+  <text x="497" y="326" class="elabel2">all gates passed</text>
+
+  <path class="edge" d="M 685 174 L 685 200"/>
+  <text x="693" y="190" class="elabel2">2nd+ tap, dwell ok</text>
+
+  <!-- reject edges -->
+  <path class="edger" d="M 310 180 C 250 196, 195 194, 155 182"/>
+  <text x="60" y="212" class="reject">429 / 401 / 403 / 400</text>
+  <text x="60" y="224" class="elabel2">opaque errors — no stack traces,</text>
+  <text x="60" y="235" class="elabel2">no employee UUID/email disclosed</text>
+
+  <!-- Footnote -->
+  <rect x="40" y="420" width="920" height="150" rx="6" fill="#F5FAFA"/>
+  <text x="60" y="446" class="elabel" style="font-size:10.5px">KEY CONTROLS ON THIS PATH</text>
+  <text x="60" y="466" class="elabel2" style="font-size:9.5px">• Device-key auth is fail-closed: a missing or invalid key — or an unset DEVICE_API_KEYS env — returns 401 for every request.</text>
+  <text x="60" y="483" class="elabel2" style="font-size:9.5px">• Keys are compared in constant time across ALL configured keys, so response timing cannot reveal which key matched.</text>
+  <text x="60" y="500" class="elabel2" style="font-size:9.5px">• A key bound to one channel (e.g. nfc) cannot submit another (e.g. face) → 403 CHANNEL_NOT_ALLOWED — limits the blast radius of a leaked key.</text>
+  <text x="60" y="517" class="elabel2" style="font-size:9.5px">• work_date, time_in and lateness derive from SERVER PH time — a tampered device clock cannot backdate a punch or dodge the 09:00 lateness rule.</text>
+  <text x="60" y="534" class="elabel2" style="font-size:9.5px">• Responses expose only the employee display name — never UUIDs or emails — to limit what employee-code probing can enumerate.</text>
+  <text x="60" y="551" class="elabel2" style="font-size:9.5px">• GET|POST /api/attendance/verify follows the same gate chain and lets a device confirm an employee code without writing attendance data.</text>
+</svg>

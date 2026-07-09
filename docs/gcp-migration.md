@@ -168,7 +168,7 @@ gsutil cp gs://BUCKET_NAME/cloud-sql-schema.sql .
 gcloud sql connect INSTANCE_ID --user=postgres --database=DB_NAME < cloud-sql-schema.sql
 ```
 
-Expected output: a mix of `CREATE TABLE`, `CREATE FUNCTION`, `CREATE TRIGGER`, and a final `DO` for the payroll cutoff seed. "Already exists" errors are harmless if re-running.
+Expected output: a mix of `CREATE TABLE`, `CREATE FUNCTION`, `CREATE TRIGGER`, and a final `DO` for the cutoff-period seed. "Already exists" errors are harmless if re-running.
 
 ### Step 4.6 — Verify the schema
 
@@ -184,7 +184,7 @@ SELECT COUNT(*) FROM payroll_cutoffs;
 \q
 ```
 
-Expected: **10 tables**, **8 payroll cutoff rows**.
+Expected: **10 tables**, **8 cutoff-period rows** (in `payroll_cutoffs`).
 
 ### ✅ Phase 4 complete — verified 2026-06-10
 

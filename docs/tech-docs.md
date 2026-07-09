@@ -98,7 +98,6 @@ hris-lovable/
 │   │       ├── office-networks.tsx   # Office IP allowlist for clock-in (admin)
 │   │       └── performance-admin.tsx # Admin performance evaluations
 │   │
-│   ├── integrations/supabase/        # Legacy Supabase client (unused in prod)
 │   ├── styles.css                    # Global Tailwind CSS
 │   ├── router.tsx                    # Router + QueryClient setup
 │   ├── start.ts                      # TanStack Start app init
@@ -235,7 +234,7 @@ Custom type parsers in `db.server.ts` ensure:
 | `user_roles` | Role assignments (employee/hr/admin/group_head) |
 | `profiles` | Employee details: name, department, position, employee code, leave credits |
 | `daily_time_reports` | Individual DTR entries (time in/out, hours, absences, OT) |
-| `payroll_cutoffs` | Biweekly pay periods (10th/25th cycle) |
+| `payroll_cutoffs` | Time-report cutoff periods (10th/25th cycle). Historical table name — the app groups DTRs into these periods for review only and does **not** compute or disburse pay. |
 | `dtr_cutoff_submissions` | Aggregated DTR stats per employee per cutoff |
 | `dtr_approval_logs` | Audit trail for DTR approval actions |
 | `leave_requests` | Leave applications with hierarchical approval chain |
