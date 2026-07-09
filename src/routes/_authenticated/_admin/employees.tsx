@@ -231,7 +231,13 @@ const TEMPLATE_EXAMPLE: ImportRow = {
 
 function csvEscape(v: unknown): string {
   if (v === null || v === undefined) return "";
-  const s = String(v);
+  let s = String(v);
+  // CSV formula-injection guard (mirrors @/lib/csv-export.csvEscape): a STRING cell
+  // starting with = + - @ (or tab/CR) is prefixed with a single quote so a stored
+  // employee name/email can't execute as a formula when the CSV opens in Excel/Sheets.
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
   return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
