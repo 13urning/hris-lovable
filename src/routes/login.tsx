@@ -1,6 +1,7 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { takeSessionEndedMessage } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,13 @@ function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  // Surface the reason we were signed out (e.g. session expiry), stashed just
+  // before the hard reload that brought us here. Runs once on mount.
+  useEffect(() => {
+    const msg = takeSessionEndedMessage();
+    if (msg) toast.error(msg);
+  }, []);
 
   if (!loading && isAuthenticated) return <Navigate to="/dashboard" />;
 

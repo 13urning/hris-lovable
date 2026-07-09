@@ -18,6 +18,12 @@ function phTodayIso(): string {
   return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+// PH wall-clock time (UTC+8, no DST) as HH:MM. Server-authoritative "now" for the
+// clock-out moment — the client's submitted time is never trusted.
+function phNowHHMM(): string {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(11, 16);
+}
+
 function isoDateFrom(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -309,28 +315,52 @@ export const clockInDTR = createServerFn({ method: "POST" })
     );
   });
 
-// Hours worked / undertime are computed SERVER-SIDE from the stored time_in and
-// the submitted time_out — never trusted from the client — so an employee can't
-// inflate their hours (which feed the time-report cutoff aggregation).
+// Clock-out is WRITE-ONCE and SERVER-AUTHORITATIVE. Hours/undertime are computed
+// from the stored time_in and the SERVER's clock-out time (never the client's
+// submitted value), and the UPDATE is guarded by `time_out IS NULL` so a later
+// re-submit can't overwrite time_out to inflate hours or erase an undertime flag.
+// `timeOut` in the payload is accepted for backward-compat but IGNORED.
 export const clockOutDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { dtrId: string; timeOut: string; location?: unknown }) => data)
+  .inputValidator((data: { dtrId: string; timeOut?: string; location?: unknown }) => data)
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
 
-    // Load the caller's own record to get the authoritative time_in.
+    // Load the caller's own record: time_in drives the hours math; time_out is the
+    // write-once gate.
     const {
       rows: [row],
-    } = await pool.query<{ time_in: string | null }>(
-      `SELECT time_in FROM daily_time_reports WHERE id = $1 AND employee_id = $2`,
+    } = await pool.query<{
+      time_in: string | null;
+      time_out: string | null;
+      hours_worked: number | null;
+      is_undertime: boolean | null;
+      undertime_minutes: number | null;
+    }>(
+      `SELECT time_in, time_out, hours_worked, is_undertime, undertime_minutes
+         FROM daily_time_reports WHERE id = $1 AND employee_id = $2`,
       [data.dtrId, context.user.dbUserId],
     );
     if (!row) throw new Error("NOT_FOUND");
     if (!row.time_in) throw new Error("NOT_CLOCKED_IN");
 
+    // Already clocked out -> return the recorded punch unchanged (no overwrite).
+    if (row.time_out) {
+      return {
+        hoursWorked: row.hours_worked ?? 0,
+        isUndertime: row.is_undertime ?? false,
+        undertimeMins: row.undertime_minutes ?? 0,
+        timeOut: row.time_out.slice(0, 5),
+        alreadyClockedOut: true,
+      };
+    }
+
+    // SERVER-authoritative clock-out moment (PH). A crafted `data.timeOut` can't
+    // backdate or extend the punch.
+    const timeOut = phNowHHMM();
     const [ih, im] = row.time_in.split(":").map(Number);
-    const [oh, om] = data.timeOut.split(":").map(Number);
+    const [oh, om] = timeOut.split(":").map(Number);
     const totalMins = oh * 60 + om - (ih * 60 + im);
     const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
     const STANDARD = 9;
@@ -338,13 +368,15 @@ export const clockOutDTR = createServerFn({ method: "POST" })
     const undertimeMins = isUndertime ? Math.max(0, Math.round(STANDARD * 60 - totalMins)) : 0;
     const loc = normalizeLocation(data.location);
 
-    await pool.query(
+    // `AND time_out IS NULL` = write-once + race-safe (two concurrent clock-outs:
+    // exactly one wins; the loser sees 0 rows and reads back the stored punch).
+    const { rowCount } = await pool.query(
       `UPDATE daily_time_reports
          SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4,
              clock_out_lat = $5, clock_out_lon = $6, clock_out_accuracy = $7, clock_out_loc_status = $8
-       WHERE id = $9 AND employee_id = $10`,
+       WHERE id = $9 AND employee_id = $10 AND time_out IS NULL`,
       [
-        data.timeOut,
+        timeOut,
         hoursWorked,
         isUndertime,
         undertimeMins,
@@ -357,7 +389,30 @@ export const clockOutDTR = createServerFn({ method: "POST" })
       ],
     );
 
-    return { hoursWorked, isUndertime, undertimeMins };
+    if (rowCount === 0) {
+      // Race loser: another clock-out filled time_out first. Return the stored punch.
+      const {
+        rows: [fresh],
+      } = await pool.query<{
+        time_out: string | null;
+        hours_worked: number | null;
+        is_undertime: boolean | null;
+        undertime_minutes: number | null;
+      }>(
+        `SELECT time_out, hours_worked, is_undertime, undertime_minutes
+           FROM daily_time_reports WHERE id = $1 AND employee_id = $2`,
+        [data.dtrId, context.user.dbUserId],
+      );
+      return {
+        hoursWorked: fresh?.hours_worked ?? hoursWorked,
+        isUndertime: fresh?.is_undertime ?? isUndertime,
+        undertimeMins: fresh?.undertime_minutes ?? undertimeMins,
+        timeOut: fresh?.time_out?.slice(0, 5) ?? timeOut,
+        alreadyClockedOut: true,
+      };
+    }
+
+    return { hoursWorked, isUndertime, undertimeMins, timeOut, alreadyClockedOut: false };
   });
 
 export const getActivityLogDTRs = createServerFn({ method: "POST" })
@@ -379,6 +434,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
                   d.hours_worked, d.shift_label, d.is_undertime, d.undertime_minutes, d.late_minutes, d.created_at,
                   d.clock_in_lat, d.clock_in_lon, d.clock_in_accuracy, d.clock_in_loc_status,
                   d.clock_out_lat, d.clock_out_lon, d.clock_out_accuracy, d.clock_out_loc_status,
+                  d.clockout_channel,
                   p.full_name, p.employee_code, p.department
            FROM daily_time_reports d
            LEFT JOIN profiles p ON p.id = d.employee_id
@@ -425,6 +481,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       clock_out_lon: number | null;
       clock_out_accuracy: number | null;
       clock_out_loc_status: string | null;
+      clockout_channel: string | null;
       is_absent: boolean;
       profile: {
         full_name: string;
@@ -453,6 +510,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       clock_out_lon: r.clock_out_lon as number | null,
       clock_out_accuracy: r.clock_out_accuracy as number | null,
       clock_out_loc_status: r.clock_out_loc_status as string | null,
+      clockout_channel: r.clockout_channel as string | null,
       is_absent: false,
       profile: r.full_name
         ? {
@@ -510,6 +568,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
           clock_out_lon: null,
           clock_out_accuracy: null,
           clock_out_loc_status: null,
+          clockout_channel: null,
           is_absent: true,
           profile: {
             full_name: p.full_name as string,

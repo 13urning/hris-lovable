@@ -16,6 +16,7 @@ import {
   ensureSessionStarted,
   markActivity,
   msUntilExpiry,
+  stashSessionEndedMessage,
 } from "@/lib/session";
 
 const ACTIVITY_EVENTS = ["mousedown", "keydown", "touchstart", "scroll", "mousemove"];
@@ -51,13 +52,21 @@ export function SessionGuard() {
   }, [user]);
 
   const endSession = useCallback(
-    async (message?: string) => {
+    async (message?: string, opts?: { reload?: boolean }) => {
       if (expiringRef.current) return;
       expiringRef.current = true;
       setSecondsLeft(null);
       clearSession();
-      if (message) toast.error(message);
-      await signOut(); // flips isAuthenticated → auth gate redirects to /login
+      // On expiry we do a full-document reload to /login (not the SPA soft
+      // redirect) so the user picks up the latest deployed build on their next
+      // session. The toast wouldn't survive that reload, so stash it for the
+      // freshly-loaded login page to show instead.
+      if (opts?.reload && message) stashSessionEndedMessage(message);
+      else if (message) toast.error(message);
+      await signOut(); // clears Firebase auth (gate would otherwise redirect to /login)
+      if (opts?.reload && typeof window !== "undefined") {
+        window.location.replace("/login");
+      }
     },
     [signOut],
   );
@@ -73,7 +82,7 @@ export function SessionGuard() {
     const tick = () => {
       const msLeft = msUntilExpiry();
       if (msLeft <= 0) {
-        void endSession("Your session expired. Please sign in again.");
+        void endSession("Your session expired. Please sign in again.", { reload: true });
       } else if (msLeft <= SESSION_WARN_MS) {
         setSecondsLeft(Math.ceil(msLeft / 1000));
       } else {

@@ -48,22 +48,26 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
 };
 
-// Content-Security-Policy for HTML document responses. ENFORCING: anything not
-// allowed by the policy below is blocked by the browser. Set CSP_ENFORCE back to
-// false to fall back to "Content-Security-Policy-Report-Only" (log-only) if a
-// directive ever needs to be re-scoped safely (see docs/soc-security-spec.md).
+// Content-Security-Policy for HTML document responses. With CSP_ENFORCE=true the
+// header is the blocking "Content-Security-Policy"; otherwise Report-Only (log via
+// report-uri, block nothing). See docs/soc-security-spec.md.
 //
 // 'strict-dynamic' + the per-request nonce trusts the SSR hydration bootstrap to
 // load the app's module chunks without host-allowlisting every asset path.
-const CSP_ENFORCE = true;
+//
+// Env-driven so enforcement is a Cloud Run env flip (CSP_ENFORCE=true), not a code
+// change/redeploy — and rollback is just as fast. Unset/anything-else = Report-Only
+// (the safe default). The script-src 'https:' fallback is already dropped (gate
+// condition), so the policy is enforcement-ready.
+const CSP_ENFORCE = process.env.CSP_ENFORCE === "true";
 
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
     // 'unsafe-inline' is a CSP1 fallback that browsers IGNORE when a nonce +
-    // 'strict-dynamic' are present. 'https:' was dropped when enforcement was
-    // enabled (security-gate finding) — it would loosen script-src on legacy
-    // browsers; nonce + strict-dynamic is sufficient.
+    // 'strict-dynamic' are present. The 'https:' fallback was dropped ahead of
+    // enforcement (security-gate condition) — it would loosen script-src on
+    // legacy browsers; nonce + strict-dynamic is sufficient.
     `script-src 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline'`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
@@ -74,6 +78,8 @@ function buildCsp(nonce: string): string {
     "form-action 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
+    // Collect violations during the Report-Only window (see lib/csp-report.server).
+    "report-uri /api/csp-report",
   ].join("; ");
 }
 
@@ -161,6 +167,13 @@ export default {
           ? mod.handleDeviceVerify
           : mod.handleDeviceClockIn;
         return withSecurityHeaders(await handler(request));
+      }
+
+      // CSP violation report sink (unauthenticated; browsers POST here via the
+      // report-uri directive). Handled before SSR; no nonce/CSP needed on it.
+      if (pathname === "/api/csp-report") {
+        const { handleCspReport } = await import("./lib/csp-report.server");
+        return withSecurityHeaders(await handleCspReport(request));
       }
 
       // Per-request CSP nonce: generate it, run the SSR render inside the nonce

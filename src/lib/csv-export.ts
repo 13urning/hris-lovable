@@ -4,7 +4,14 @@
 
 export function csvEscape(v: unknown): string {
   if (v === null || v === undefined) return "";
-  const s = String(v);
+  let s = String(v);
+  // CSV formula-injection guard: a STRING cell beginning with = + - @ (or a tab/CR)
+  // is prefixed with a single quote so Excel/Sheets render it as text, not an
+  // executable formula. Numbers/booleans are exempt (they can't be a formula), so
+  // negative numeric columns are unaffected.
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
   return /[,"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
