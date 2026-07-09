@@ -2,7 +2,13 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/wif-keyless-deploy]   # branch entry is TEMPORARY — validates WIF, removed before merge
+  workflow_dispatch: {}
+
+# Keyless auth via GitHub OIDC -> Workload Identity Federation.
+permissions:
+  contents: read
+  id-token: write              # required to mint the OIDC token
 
 env:
   PROJECT_ID: wave-hris-498916
@@ -19,7 +25,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: projects/831274499203/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-deployer@wave-hris-498916.iam.gserviceaccount.com
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
