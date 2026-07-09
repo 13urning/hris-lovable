@@ -56,7 +56,10 @@ const SECURITY_HEADERS: Record<string, string> = {
 //
 // 'strict-dynamic' + the per-request nonce trusts the SSR hydration bootstrap to
 // load the app's module chunks without host-allowlisting every asset path.
-const CSP_ENFORCE = false;
+// Env-driven so enforcement is a Cloud Run env flip (CSP_ENFORCE=true), not a code
+// change/redeploy — and rollback is just as fast. Unset/anything-else = Report-Only
+// (the safe default). Flip to true only after the report window is clean.
+const CSP_ENFORCE = process.env.CSP_ENFORCE === "true";
 
 function buildCsp(nonce: string): string {
   return [
