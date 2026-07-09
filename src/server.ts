@@ -48,24 +48,23 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
 };
 
-// Content-Security-Policy for HTML document responses. Shipped in REPORT-ONLY mode
-// first: violations are reported (browser console / a report endpoint) but nothing
-// is blocked, so a mis-scoped directive can't take the app down. Flip CSP_ENFORCE
-// to true to switch the header to enforcing "Content-Security-Policy" — only after
-// the report window is clean (see docs/soc-security-spec.md).
+// Content-Security-Policy for HTML document responses. ENFORCING: anything not
+// allowed by the policy below is blocked by the browser. Set CSP_ENFORCE back to
+// false to fall back to "Content-Security-Policy-Report-Only" (log-only) if a
+// directive ever needs to be re-scoped safely (see docs/soc-security-spec.md).
 //
 // 'strict-dynamic' + the per-request nonce trusts the SSR hydration bootstrap to
 // load the app's module chunks without host-allowlisting every asset path.
-const CSP_ENFORCE = false;
+const CSP_ENFORCE = true;
 
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
-    // 'https:' and 'unsafe-inline' are CSP1/CSP2 fallbacks that modern browsers
-    // IGNORE when a nonce + 'strict-dynamic' are present. Drop 'https:' before
-    // flipping CSP_ENFORCE on (security-gate finding) — nonce + strict-dynamic is
-    // sufficient and 'https:' would otherwise loosen script-src on legacy browsers.
-    `script-src 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
+    // 'unsafe-inline' is a CSP1 fallback that browsers IGNORE when a nonce +
+    // 'strict-dynamic' are present. 'https:' was dropped when enforcement was
+    // enabled (security-gate finding) — it would loosen script-src on legacy
+    // browsers; nonce + strict-dynamic is sufficient.
+    `script-src 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline'`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev",
@@ -79,7 +78,7 @@ function buildCsp(nonce: string): string {
 }
 
 // Applies the baseline headers, and — when a nonce is supplied (HTML SSR path) —
-// the (report-only) CSP built for that request's nonce.
+// the enforcing CSP built for that request's nonce.
 function withSecurityHeaders(response: Response, nonce?: string): Response {
   const headers: Record<string, string> = { ...SECURITY_HEADERS };
   if (nonce) {
