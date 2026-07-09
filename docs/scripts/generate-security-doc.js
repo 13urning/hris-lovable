@@ -23,7 +23,7 @@ const YLW_BG = 'FFF8E0';
 const GRN_BG = 'E8F5EE';
 
 const pageDate = '07/09/2026';
-const DOC_VERSION = 'v1.1';
+const DOC_VERSION = 'v1.2';
 const DOC_MONTH = 'July 2026';
 
 const LOGO_PATH = path.join(__dirname, '../assets/tidal-logo.png');
@@ -300,7 +300,7 @@ const s5 = [
       ['At rest — Cloud SQL', 'AES-256 (Google-managed default encryption)', 'All databases, replicas, and backups on instance wave-hris'],
       ['Secrets', 'Secret Manager', 'DB_PASSWORD encrypted at rest, IAM-gated, injected as an env var at deploy — never baked into the image'],
       ['HTTP security headers', 'Set on every response (src/server.ts)', 'Strict-Transport-Security (max-age=31536000; includeSubDomains), X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Referrer-Policy: strict-origin-when-cross-origin, Permissions-Policy: camera=(), microphone=(), geolocation=(self) — (self) permits only the app’s own document to request location for the audit-only clock-in tagging'],
-      ['Content Security Policy', 'Nonce-based, strict-dynamic — ENFORCED', "Blocking Content-Security-Policy on every HTML response: per-request nonce, object-src 'none', base-uri 'self', frame-ancestors 'none'. The legacy https: fallback was removed from script-src at enforcement time. Rollback to Report-Only available via CSP_ENFORCE=false"],
+      ['Content Security Policy', 'Nonce-based, strict-dynamic — enforcement-ready, env-driven', "Per-request nonce, object-src 'none', base-uri 'self', frame-ancestors 'none'; violations POSTed to the in-app collector via report-uri /api/csp-report. The legacy https: fallback is removed from script-src (gate condition). Setting CSP_ENFORCE=true on the Cloud Run service switches Report-Only to the blocking header — no redeploy; rollback is the same flip"],
     ]),
   spacer(),
   h2('5.2 Authentication and Authorization'),
@@ -388,7 +388,7 @@ const s8 = [
   zebraTable(riskWidths,
     ['Risk', 'Likelihood', 'Impact', 'Status', 'Mitigation'],
     [
-      ['CSP was shipped in Report-Only mode — an XSS payload was logged but not blocked by policy', 'Low', 'Medium-High', '✅ Fixed', 'CSP is now ENFORCED: nonce + strict-dynamic on every HTML response, with the https: fallback dropped from script-src. Verified against the production build (login render, hydration, Firebase sign-in — zero violations). Rollback: CSP_ENFORCE=false.'],
+      ['CSP ships Report-Only until the CSP_ENFORCE env var is set — an XSS payload is logged (via /api/csp-report) but not blocked until then', 'Low', 'Medium-High', '✅ Ready', 'Policy is enforcement-ready: https: fallback dropped from script-src, violation collector live, and the build verified locally with CSP_ENFORCE=true (login render, hydration, Firebase sign-in — zero violations). Operational: set CSP_ENFORCE=true on the Cloud Run service after a clean report window; rollback is unsetting it.'],
       ['Clock-in geofence fails open when no office network is active', 'Config-dependent', 'Medium', 'Accepted (opt-in)', 'By design the restriction activates only once an admin adds a network. Confirm office_networks is populated in production if geofencing is required (Section 10, #2).'],
       ['Device rate limit is per Cloud Run instance, not global', 'Low', 'Low-Medium', 'Accepted', 'Effective limit scales with instance count — kept low (prod max 3). UNIQUE(employee_id, work_date) is the correctness backstop. Central limiter (Redis/Memorystore) is a future candidate.'],
       ['Cloud Run ingress is --allow-unauthenticated (public at the platform layer)', 'By design', 'Medium', 'Accepted', 'Required for a public web app. All data operations are authenticated and authorized at the application layer; device endpoints are fail-closed.'],
@@ -400,7 +400,7 @@ const s8 = [
       ['Employee PII stored in a US region (cross-border under RA 10173)', 'N/A (compliance)', 'DPA consideration', 'Open', 'Permissible with safeguards; name the location in the privacy notice (Section 7.4). Consider an APAC region on a future migration.'],
     ],
     [
-      { fill: GRN_BG }, { fill: YLW_BG }, {}, {}, {}, { fill: GRN_BG }, { fill: YLW_BG }, {}, {}, { fill: YLW_BG },
+      { fill: YLW_BG }, { fill: YLW_BG }, {}, {}, {}, { fill: GRN_BG }, { fill: YLW_BG }, {}, {}, { fill: YLW_BG },
     ]),
 ];
 
@@ -429,7 +429,7 @@ const s10 = [
   zebraTable(actWidths,
     ['#', 'Action', 'Priority', 'Status', 'Owner'],
     [
-      ['1', 'Flip CSP from Report-Only to enforce (CSP_ENFORCE=true) — https: fallback dropped from script-src per the security-gate condition; verified locally against the production build (zero violations)', 'COMPLETED', '✅ Done', 'Tidal Solutions — Dev'],
+      ['1', 'Enforce CSP: policy is enforcement-ready (https: dropped per the gate condition, report collector live, verified locally with CSP_ENFORCE=true). Remaining step is operational — set CSP_ENFORCE=true on the Cloud Run service after a clean report window', 'HIGH', 'Env flip pending', 'Tidal Solutions — DevOps'],
       ['2', 'Confirm office_networks is populated in production if clock-in geofencing must be active (the check fails open with zero active networks)', 'HIGH', 'Open', 'Wave HR + Tidal Solutions'],
       ['3', 'Provision VAPT test accounts on staging — one employee role, one admin role — and issue a scoped test X-Device-Key; share over a secure channel with the SOC team', 'HIGH', 'Open', 'Tidal Solutions'],
       ['4', 'Define and document a data retention policy with Wave (recommended 12–36 months) and implement a scheduled purge job (pg_cron)', 'MEDIUM', 'Open', 'Wave (CISO) + Tidal Solutions'],
@@ -442,7 +442,7 @@ const s10 = [
       ['11', 'Ship HTTP security headers on every response + nonce-based CSP in Report-Only mode', 'COMPLETED', '✅ Done', 'Tidal Solutions'],
     ],
     [
-      { fill: GRN_BG }, { fill: YLW_BG }, { fill: YLW_BG }, {}, {}, {}, {}, {}, { fill: GRN_BG }, { fill: GRN_BG }, { fill: GRN_BG },
+      { fill: YLW_BG }, { fill: YLW_BG }, { fill: YLW_BG }, {}, {}, {}, {}, {}, { fill: GRN_BG }, { fill: GRN_BG }, { fill: GRN_BG },
     ]),
 ];
 

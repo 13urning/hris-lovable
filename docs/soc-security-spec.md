@@ -156,7 +156,7 @@ gates access until changed. Admin-initiated temp passwords use a **CSPRNG** (`no
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
 - `Permissions-Policy: camera=(), microphone=(), geolocation=(self)` — `(self)` lets the app's own document request location for the audit-only clock-in tagging; third-party iframes still cannot
-- ✅ **Content-Security-Policy** now **ENFORCED** (`Content-Security-Policy`), nonce-based (`'nonce-…' 'strict-dynamic'`), per-request nonce, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`. The legacy `https:` fallback was removed from `script-src` at enforcement time (gate condition). Set `CSP_ENFORCE=false` in `src/server.ts` to fall back to Report-Only if a directive ever needs re-scoping — see §7 #1.
+- ✅ **Content-Security-Policy** — nonce-based (`'nonce-…' 'strict-dynamic'`), per-request nonce, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`, violations POSTed to the in-app collector via `report-uri /api/csp-report`. The legacy `https:` fallback has been removed from `script-src` (gate condition), so the policy is **enforcement-ready**. Enforcement is **env-driven**: set `CSP_ENFORCE=true` on the Cloud Run service to switch from Report-Only to the blocking header — no redeploy needed, and rollback is the same flip — see §7 #1.
 
 **Injection (SQLi/OWASP A03):** all queries are parameterized (`$1`, `$2`, …) via `pg`; no
 ORM, no string-interpolated SQL, including on the device path.
@@ -200,7 +200,7 @@ in code; #3–#6 are **accepted-by-design** with the rationale below.
 
 | # | Item | Risk | Status / mitigation |
 |---|---|---|---|
-| 1 | **CSP** | XSS impact not contained by policy | ✅ **FIXED (Enforcing).** Nonce + `'strict-dynamic'` CSP enforced on every HTML response (`CSP_ENFORCE=true`, 2026-07-09); `https:` dropped from `script-src` per the gate condition. Verified against the production build locally (login render + hydration + Firebase sign-in — zero violations). Rollback: `CSP_ENFORCE=false` returns to Report-Only. |
+| 1 | **CSP** | XSS impact not contained by policy | ✅ **FIXED (enforcement-ready).** Nonce + `'strict-dynamic'` CSP on every HTML response with `report-uri /api/csp-report` collection; `https:` dropped from `script-src` per the gate condition (2026-07-09). Verified against the production build locally with `CSP_ENFORCE=true` (login render + hydration + Firebase sign-in — zero violations). **Operational:** set `CSP_ENFORCE=true` on the Cloud Run service after a clean report window; rollback is unsetting it. |
 | 2 | **Session lifetime is client-side only** | A captured/ revoked ID token remained usable up to its ~1h TTL | ✅ **FIXED.** Sensitive admin ops now verify `checkRevoked` (`strictAuthMiddleware`); explicit logout revokes the caller's refresh tokens. Hot path stays JWKS-local (~1h TTL) by design. |
 | 3 | **Geofence fails open** | Clock-in unrestricted until an admin adds ≥1 active network | Accepted (opt-in by design). Confirm networks are configured in prod if geofencing is required. |
 | 4 | **Device rate-limit is per-instance** | Effective limit scales with instance count | Accepted. Keep max-instances low; `UNIQUE(employee_id, work_date)` is the correctness backstop. Central rate-limit (Redis) is a future candidate. |
