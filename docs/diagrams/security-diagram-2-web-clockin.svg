@@ -1,0 +1,110 @@
+<svg viewBox="0 0 1000 570" width="1000" height="570" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&amp;display=swap');
+    text { font-family: 'Montserrat', sans-serif; }
+    .title { font-size: 15px; font-weight: 700; fill: #010101; }
+    .node-t { fill: #036A6B; }
+    .node-tl { fill: #15A6A1; }
+    .node-g { fill: #393939; }
+    .nlabel { font-size: 11.5px; font-weight: 700; fill: #FFFFFF; }
+    .nsub { font-size: 9px; font-weight: 400; fill: #c8eeee; }
+    .nsubg { font-size: 9px; font-weight: 400; fill: #cccccc; }
+    .elabel { font-size: 9px; font-weight: 600; fill: #036A6B; }
+    .elabel2 { font-size: 8.5px; font-weight: 400; fill: #393939; }
+    .reject { font-size: 9px; font-weight: 700; fill: #8A3A16; }
+    .edge { stroke: #036A6B; stroke-width: 1.6; fill: none; marker-end: url(#arrB); }
+    .edger { stroke: #8A3A16; stroke-width: 1.4; fill: none; marker-end: url(#arrR); stroke-dasharray: 4 3; }
+    .step { font-size: 10px; font-weight: 700; fill: #FFFFFF; }
+  </style>
+  <defs>
+    <marker id="arrB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#036A6B"/>
+    </marker>
+    <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8A3A16"/>
+    </marker>
+  </defs>
+
+  <text x="500" y="30" text-anchor="middle" class="title">FIGURE 2 — WEB CLOCK-IN / ATTENDANCE FLOW</text>
+  <line x1="270" y1="42" x2="730" y2="42" stroke="#036A6B" stroke-width="2"/>
+
+  <!-- Step 1: sign-in -->
+  <rect x="40" y="80" width="215" height="88" rx="6" class="node-tl"/>
+  <circle cx="62" cy="102" r="11" fill="#036A6B"/><text x="62" y="106" text-anchor="middle" class="step">1</text>
+  <text x="147" y="106" text-anchor="middle" class="nlabel">Employee signs in</text>
+  <text x="147" y="123" text-anchor="middle" class="nsub">Firebase email/password</text>
+  <text x="147" y="136" text-anchor="middle" class="nsub">forced password change on first login</text>
+  <text x="147" y="149" text-anchor="middle" class="nsub">session: 1h idle / 12h absolute cap</text>
+
+  <!-- Step 2: GPS capture -->
+  <rect x="40" y="220" width="215" height="88" rx="6" class="node-tl"/>
+  <circle cx="62" cy="242" r="11" fill="#036A6B"/><text x="62" y="246" text-anchor="middle" class="step">2</text>
+  <text x="147" y="246" text-anchor="middle" class="nlabel">Browser captures GPS</text>
+  <text x="147" y="263" text-anchor="middle" class="nsub">Geolocation API — user permission prompt</text>
+  <text x="147" y="276" text-anchor="middle" class="nsub">optional: denial never blocks clock-in</text>
+  <text x="147" y="289" text-anchor="middle" class="nsub">specific unavailable reason recorded</text>
+
+  <!-- Step 3: RPC -->
+  <rect x="392" y="150" width="216" height="88" rx="6" class="node-t"/>
+  <circle cx="414" cy="172" r="11" fill="#15A6A1"/><text x="414" y="176" text-anchor="middle" class="step">3</text>
+  <text x="512" y="176" text-anchor="middle" class="nlabel">clockInDTR server function</text>
+  <text x="500" y="193" text-anchor="middle" class="nsub">verify Firebase ID token (Admin SDK)</text>
+  <text x="500" y="206" text-anchor="middle" class="nsub">resolve internal user + roles from DB</text>
+  <text x="500" y="219" text-anchor="middle" class="nsub">Zod-validated input</text>
+
+  <!-- Step 4: geofence -->
+  <rect x="392" y="290" width="216" height="96" rx="6" class="node-t"/>
+  <circle cx="414" cy="312" r="11" fill="#15A6A1"/><text x="414" y="316" text-anchor="middle" class="step">4</text>
+  <text x="500" y="316" text-anchor="middle" class="nlabel">Office-network geofence</text>
+  <text x="500" y="333" text-anchor="middle" class="nsub">client IP = rightmost X-Forwarded-For entry</text>
+  <text x="500" y="346" text-anchor="middle" class="nsub">must match active office_networks CIDR</text>
+  <text x="500" y="359" text-anchor="middle" class="nsub">OB (official business) shift skips geofence</text>
+  <text x="500" y="372" text-anchor="middle" class="nsub">fails open if no networks configured (opt-in)</text>
+
+  <!-- Step 5: write -->
+  <rect x="745" y="150" width="215" height="110" rx="6" class="node-g"/>
+  <circle cx="767" cy="172" r="11" fill="#15A6A1"/><text x="767" y="176" text-anchor="middle" class="step">5</text>
+  <text x="864" y="176" text-anchor="middle" class="nlabel">INSERT daily_time_reports</text>
+  <text x="852" y="193" text-anchor="middle" class="nsubg">work_date + time from PH local time</text>
+  <text x="852" y="206" text-anchor="middle" class="nsubg">late_minutes computed server-side (09:00)</text>
+  <text x="852" y="219" text-anchor="middle" class="nsubg">GPS lat/lon/accuracy/status stored</text>
+  <text x="852" y="232" text-anchor="middle" class="nsubg">audit-only location columns</text>
+  <text x="852" y="245" text-anchor="middle" class="nsubg">parameterized SQL ($1, $2, …)</text>
+
+  <!-- Step 6: read-back -->
+  <rect x="745" y="310" width="215" height="88" rx="6" class="node-g"/>
+  <circle cx="767" cy="332" r="11" fill="#15A6A1"/><text x="767" y="336" text-anchor="middle" class="step">6</text>
+  <text x="852" y="336" text-anchor="middle" class="nlabel">Read-back &amp; display</text>
+  <text x="852" y="353" text-anchor="middle" class="nsubg">location columns STRIPPED from employee</text>
+  <text x="852" y="366" text-anchor="middle" class="nsubg">dashboard / DTR payloads</text>
+  <text x="852" y="379" text-anchor="middle" class="nsubg">visible to HR/admin audit views only</text>
+
+  <!-- Edges -->
+  <path class="edge" d="M 147 168 L 147 220"/>
+  <text x="157" y="198" class="elabel2">dashboard clock-in card</text>
+
+  <path class="edge" d="M 255 264 C 330 264, 330 194, 392 194"/>
+  <text x="250" y="220" class="elabel">HTTPS RPC</text>
+  <text x="250" y="232" class="elabel2">ID token + location payload</text>
+
+  <path class="edge" d="M 500 238 L 500 290"/>
+  <text x="510" y="268" class="elabel2">shift ≠ OB</text>
+
+  <path class="edge" d="M 608 338 C 680 338, 680 205, 745 205"/>
+  <text x="626" y="300" class="elabel">on-network → accept</text>
+
+  <path class="edge" d="M 852 260 L 852 310"/>
+  <text x="862" y="290" class="elabel2">React Query refetch</text>
+
+  <!-- reject path -->
+  <path class="edger" d="M 392 338 C 320 338, 300 300, 255 264"/>
+  <text x="290" y="398" class="reject">OFF_NETWORK — clock-in rejected</text>
+  <text x="290" y="410" class="elabel2">shown to user, nothing written</text>
+
+  <!-- Footnote -->
+  <rect x="40" y="450" width="920" height="86" rx="6" fill="#F5FAFA"/>
+  <text x="60" y="476" class="elabel" style="font-size:10.5px">SECURITY PROPERTIES</text>
+  <text x="60" y="494" class="elabel2" style="font-size:9.5px">• Authorization is enforced server-side on every call — client route gates are UX only.  • Times and lateness derive from server PH time; the browser clock is never trusted.</text>
+  <text x="60" y="510" class="elabel2" style="font-size:9.5px">• GPS location is self-reported, validated (range/precision), audit-only, and never gates the punch. Clock-out follows the same path via clockOutDTR (dwell + location tagged).</text>
+  <text x="60" y="526" class="elabel2" style="font-size:9.5px">• The leftmost X-Forwarded-For entries are client-spoofable and are ignored; only the Cloud Run-appended rightmost entry is used for the geofence.</text>
+</svg>
