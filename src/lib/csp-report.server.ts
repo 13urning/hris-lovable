@@ -13,6 +13,14 @@ export async function handleCspReport(request: Request): Promise<Response> {
   if (request.method !== "POST") {
     return new Response(null, { status: 405, headers: { allow: "POST" } });
   }
+  // Cap body size BEFORE buffering. A genuine report is < 2 KB; reject oversized
+  // posts early (413) so an unauthenticated caller can't amplify memory by making us
+  // buffer up to the platform ceiling. A chunked body with absent/untruthful
+  // Content-Length still slips past here, but is bounded by Cloud Run's 32 MiB cap.
+  const MAX_BODY_BYTES = 64 * 1024;
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) {
+    return new Response(null, { status: 413 });
+  }
   try {
     const raw = await request.text();
     if (raw.length > 0) {
