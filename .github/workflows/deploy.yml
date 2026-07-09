@@ -2,7 +2,7 @@ name: Deploy to Cloud Run
 
 on:
   push:
-    branches: [main, ci/wif-keyless-deploy]   # branch entry is TEMPORARY — validates WIF, removed before merge
+    branches: [main]
   workflow_dispatch: {}
 
 # Keyless auth via GitHub OIDC -> Workload Identity Federation.
