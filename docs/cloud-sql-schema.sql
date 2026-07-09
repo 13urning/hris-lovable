@@ -97,7 +97,10 @@ CREATE TABLE public.user_roles (
 
 
 -- =============================================================================
--- PAYROLL CUTOFFS
+-- CUTOFF PERIODS  (table: payroll_cutoffs)
+-- The table name is historical. These are time-report cutoff periods that DTR
+-- submissions are grouped and approved against. Wave HRIS does NOT compute or
+-- disburse pay; payout_date/status are period metadata only.
 -- =============================================================================
 
 CREATE TABLE public.payroll_cutoffs (

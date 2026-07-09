@@ -311,7 +311,7 @@ export const clockInDTR = createServerFn({ method: "POST" })
 
 // Hours worked / undertime are computed SERVER-SIDE from the stored time_in and
 // the submitted time_out — never trusted from the client — so an employee can't
-// inflate their hours (which feed the payroll cutoff aggregation).
+// inflate their hours (which feed the time-report cutoff aggregation).
 export const clockOutDTR = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .inputValidator((data: { dtrId: string; timeOut: string; location?: unknown }) => data)
