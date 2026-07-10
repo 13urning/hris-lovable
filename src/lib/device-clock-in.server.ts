@@ -168,8 +168,10 @@ function hasControlChars(s: string): boolean {
 
 // `channel` is a short source slug (e.g. "nfc", "face", "biometric", "kiosk")
 // used for audit attribution AND per-key scoping. Kept to a strict slug so it's
-// log-safe and can never be the "*" wildcard sentinel.
-const CHANNEL_RE = /^[A-Za-z0-9_-]{1,32}$/;
+// log-safe and can never be the "*" wildcard sentinel. The first char must be
+// alphanumeric/underscore (no leading "-"), so a channel can never be read as a
+// spreadsheet-formula lead if it later reaches a CSV export.
+const CHANNEL_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/;
 
 // -- Response helper -----------------------------------------------------------
 function json(

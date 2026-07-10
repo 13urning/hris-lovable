@@ -1,0 +1,51 @@
+<mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    <mxCell id="title" value="FIGURE 2 &#8212; WEB CLOCK-IN / ATTENDANCE FLOW" style="text;strokeColor=none;fillColor=none;align=center;fontFamily=Montserrat;fontSize=13;fontStyle=1;fontColor=#010101;" vertex="1" parent="1">
+      <mxGeometry x="284" y="20" width="600" height="30" as="geometry" />
+    </mxCell>
+    <mxCell id="titleRule" value="" style="line;strokeColor=#036A6B;fillColor=none;strokeWidth=2;" vertex="1" parent="1">
+      <mxGeometry x="384" y="52" width="400" height="8" as="geometry" />
+    </mxCell>
+    <mxCell id="s1" value="1 &#183; Employee signs in&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;Firebase email/password&lt;br&gt;forced password change on first login&lt;br&gt;session: 1h idle / 12h absolute cap&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#15A6A1;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="60" y="90" width="240" height="90" as="geometry" />
+    </mxCell>
+    <mxCell id="s2" value="2 &#183; Browser captures GPS&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;Geolocation API &#8212; user permission prompt&lt;br&gt;optional: denial never blocks clock-in&lt;br&gt;specific unavailable reason recorded&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#15A6A1;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="60" y="240" width="240" height="90" as="geometry" />
+    </mxCell>
+    <mxCell id="s3" value="3 &#183; clockInDTR server function&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;verify Firebase ID token (Admin SDK)&lt;br&gt;resolve internal user + roles from DB&lt;br&gt;Zod-validated input&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#036A6B;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="440" y="160" width="250" height="90" as="geometry" />
+    </mxCell>
+    <mxCell id="s4" value="4 &#183; Office-network geofence&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;client IP = rightmost X-Forwarded-For&lt;br&gt;must match active office_networks CIDR&lt;br&gt;OB shift skips geofence&lt;br&gt;fails open if no networks configured&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#036A6B;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="440" y="320" width="250" height="100" as="geometry" />
+    </mxCell>
+    <mxCell id="s5" value="5 &#183; INSERT daily_time_reports&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#cccccc'&gt;work_date + time from PH local server time&lt;br&gt;late_minutes computed server-side (09:00)&lt;br&gt;GPS lat/lon/accuracy/status &#8212; audit-only&lt;br&gt;parameterized SQL&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#393939;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="830" y="160" width="250" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="s6" value="6 &#183; Read-back &amp;amp; display&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#cccccc'&gt;location columns STRIPPED from employee&lt;br&gt;dashboard / DTR payloads&lt;br&gt;visible to HR/admin audit views only&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#393939;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="830" y="330" width="250" height="90" as="geometry" />
+    </mxCell>
+    <mxCell id="e1" value="dashboard clock-in card" style="endArrow=block;html=1;strokeColor=#036A6B;fontFamily=Montserrat;fontSize=9;fontColor=#036A6B;" edge="1" parent="1" source="s1" target="s2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e2" value="HTTPS RPC &#183; ID token + location payload" style="endArrow=block;html=1;strokeColor=#036A6B;fontFamily=Montserrat;fontSize=9;fontColor=#036A6B;" edge="1" parent="1" source="s2" target="s3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e3" value="shift &#8800; OB" style="endArrow=block;html=1;strokeColor=#036A6B;fontFamily=Montserrat;fontSize=9;fontColor=#036A6B;" edge="1" parent="1" source="s3" target="s4">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e4" value="on-network &#8594; accept" style="endArrow=block;html=1;strokeColor=#036A6B;fontFamily=Montserrat;fontSize=9;fontColor=#036A6B;" edge="1" parent="1" source="s4" target="s5">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e5" value="React Query refetch" style="endArrow=block;html=1;strokeColor=#036A6B;fontFamily=Montserrat;fontSize=9;fontColor=#036A6B;" edge="1" parent="1" source="s5" target="s6">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e6" value="OFF_NETWORK &#8212; clock-in rejected, nothing written" style="endArrow=block;html=1;strokeColor=#8A3A16;dashed=1;fontFamily=Montserrat;fontSize=9;fontColor=#8A3A16;" edge="1" parent="1" source="s4" target="s2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="note" value="SECURITY PROPERTIES: authorization enforced server-side on every call (route gates are UX only) &#183; times and lateness derive from server PH time &#183; GPS is self-reported, validated, audit-only, never gates the punch &#183; leftmost X-Forwarded-For entries are ignored (client-spoofable)" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=9;fontColor=#393939;fillColor=#F5FAFA;align=left;spacing=10;" vertex="1" parent="1">
+      <mxGeometry x="60" y="480" width="1020" height="70" as="geometry" />
+    </mxCell>
+  </root>
+</mxGraphModel>

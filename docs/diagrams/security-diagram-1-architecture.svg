@@ -1,0 +1,146 @@
+<svg viewBox="0 0 1000 700" width="1000" height="700" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&amp;display=swap');
+    text { font-family: 'Montserrat', sans-serif; }
+    .title { font-size: 15px; font-weight: 700; fill: #010101; }
+    .node-t { fill: #036A6B; }
+    .node-tl { fill: #15A6A1; }
+    .node-g { fill: #393939; }
+    .nlabel { font-size: 12px; font-weight: 700; fill: #FFFFFF; }
+    .nsub { font-size: 9px; font-weight: 400; fill: #c8eeee; }
+    .nsubg { font-size: 9px; font-weight: 400; fill: #cccccc; }
+    .elabel { font-size: 9px; font-weight: 600; fill: #036A6B; }
+    .elabel2 { font-size: 8.5px; font-weight: 400; fill: #393939; }
+    .edge { stroke: #036A6B; stroke-width: 1.6; fill: none; marker-end: url(#arr); }
+    .edge2 { stroke: #15A6A1; stroke-width: 1.6; fill: none; marker-end: url(#arr2); stroke-dasharray: 5 3; }
+    .zone { fill: none; stroke: #15A6A1; stroke-width: 1.2; stroke-dasharray: 6 4; rx: 8; }
+    .zlabel { font-size: 10px; font-weight: 700; fill: #15A6A1; letter-spacing: 1px; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#036A6B"/>
+    </marker>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#15A6A1"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="30" text-anchor="middle" class="title">FIGURE 1 — WAVE HRIS SYSTEM ARCHITECTURE &amp; DATA FLOW</text>
+  <line x1="240" y1="42" x2="760" y2="42" stroke="#036A6B" stroke-width="2"/>
+
+  <!-- Users / clients -->
+  <rect x="40" y="80" width="200" height="70" rx="6" class="node-tl"/>
+  <text x="140" y="107" text-anchor="middle" class="nlabel">Employee Browser</text>
+  <text x="140" y="122" text-anchor="middle" class="nsub">React 19 SSR-hydrated client</text>
+  <text x="140" y="134" text-anchor="middle" class="nsub">Firebase Auth SDK + React Query</text>
+
+  <rect x="40" y="190" width="200" height="70" rx="6" class="node-tl"/>
+  <text x="140" y="217" text-anchor="middle" class="nlabel">Attendance Devices</text>
+  <text x="140" y="232" text-anchor="middle" class="nsub">NFC / biometric / kiosk terminals</text>
+  <text x="140" y="244" text-anchor="middle" class="nsub">unattended, no user session</text>
+
+  <!-- GCP zone -->
+  <rect x="330" y="66" width="640" height="470" class="zone"/>
+  <text x="350" y="88" class="zlabel">GOOGLE CLOUD — PROJECT wave-hris-498916 (us-central1)</text>
+
+  <!-- Cloud Run -->
+  <rect x="380" y="110" width="250" height="120" rx="6" class="node-t"/>
+  <text x="505" y="136" text-anchor="middle" class="nlabel">Cloud Run — wave-hris</text>
+  <text x="505" y="153" text-anchor="middle" class="nsub">TanStack Start / Nitro SSR, port 8080</text>
+  <text x="505" y="166" text-anchor="middle" class="nsub">Server functions (RPC) + device endpoints</text>
+  <text x="505" y="179" text-anchor="middle" class="nsub">Auth middleware: verifyIdToken + role assertions</text>
+  <text x="505" y="192" text-anchor="middle" class="nsub">Security headers + enforced CSP on every response</text>
+  <text x="505" y="210" text-anchor="middle" class="nsub">staging: wave-hris-staging (max 2) · prod max 3</text>
+
+  <!-- Cloud SQL -->
+  <rect x="720" y="110" width="210" height="120" rx="6" class="node-g"/>
+  <text x="825" y="140" text-anchor="middle" class="nlabel">Cloud SQL — PostgreSQL 17</text>
+  <text x="825" y="157" text-anchor="middle" class="nsubg">instance: wave-hris (zonal)</text>
+  <text x="825" y="170" text-anchor="middle" class="nsubg">wave_hris (prod)</text>
+  <text x="825" y="183" text-anchor="middle" class="nsubg">wave_hris_staging (staging)</text>
+  <text x="825" y="200" text-anchor="middle" class="nsubg">18 tables · encrypted at rest</text>
+
+  <!-- Firebase -->
+  <rect x="380" y="300" width="250" height="90" rx="6" class="node-g"/>
+  <text x="505" y="328" text-anchor="middle" class="nlabel">Firebase Authentication</text>
+  <text x="505" y="345" text-anchor="middle" class="nsubg">prod project: wave-hris-fb</text>
+  <text x="505" y="358" text-anchor="middle" class="nsubg">staging project: wave-hris-staging-fb</text>
+  <text x="505" y="371" text-anchor="middle" class="nsubg">email/password · ID tokens (JWT)</text>
+
+  <!-- Secret Manager -->
+  <rect x="720" y="300" width="210" height="70" rx="6" class="node-g"/>
+  <text x="825" y="328" text-anchor="middle" class="nlabel">Secret Manager</text>
+  <text x="825" y="345" text-anchor="middle" class="nsubg">DB_PASSWORD</text>
+  <text x="825" y="358" text-anchor="middle" class="nsubg">injected at deploy, never in image</text>
+
+  <!-- CI/CD -->
+  <rect x="380" y="430" width="250" height="80" rx="6" class="node-g"/>
+  <text x="505" y="458" text-anchor="middle" class="nlabel">Cloud Build + Artifact Registry</text>
+  <text x="505" y="475" text-anchor="middle" class="nsubg">Docker (Node 22-alpine) → app image</text>
+  <text x="505" y="488" text-anchor="middle" class="nsubg">trigger: staging-deploy (branch ^staging$)</text>
+
+  <!-- Nager.Date -->
+  <rect x="720" y="430" width="210" height="80" rx="6" class="node-tl"/>
+  <text x="825" y="458" text-anchor="middle" class="nlabel">Nager.Date API</text>
+  <text x="825" y="475" text-anchor="middle" class="nsub">PH holiday sync (public, no key)</text>
+  <text x="825" y="488" text-anchor="middle" class="nsub">no PII sent outbound</text>
+
+  <!-- Developer -->
+  <rect x="40" y="440" width="200" height="80" rx="6" class="node-t"/>
+  <text x="140" y="468" text-anchor="middle" class="nlabel">Developer Workstation</text>
+  <text x="140" y="485" text-anchor="middle" class="nsub">Cloud SQL Auth Proxy · manual</text>
+  <text x="140" y="497" text-anchor="middle" class="nsub">migrations (apply-migration.mjs)</text>
+
+  <!-- Edges -->
+  <!-- Browser -> Cloud Run -->
+  <path class="edge" d="M 240 115 L 380 140"/>
+  <text x="252" y="106" class="elabel">HTTPS TLS 1.2+ · RPC server functions</text>
+  <text x="252" y="117" class="elabel2">Firebase ID token per call</text>
+
+  <!-- Browser -> Firebase -->
+  <path class="edge2" d="M 140 150 C 140 330, 260 340, 380 340"/>
+  <text x="164" y="330" class="elabel">HTTPS · signInWithEmailAndPassword</text>
+  <text x="164" y="341" class="elabel2">returns ID token (JWT, ~1h TTL)</text>
+
+  <!-- Devices -> Cloud Run -->
+  <path class="edge" d="M 240 225 L 380 200"/>
+  <text x="248" y="242" class="elabel">HTTPS · POST /api/attendance/*</text>
+  <text x="248" y="253" class="elabel2">X-Device-Key (channel-scoped) · rate-limited</text>
+
+  <!-- Cloud Run -> Cloud SQL -->
+  <path class="edge" d="M 630 170 L 720 170"/>
+  <text x="675" y="160" text-anchor="middle" class="elabel">Unix socket</text>
+  <text x="675" y="185" text-anchor="middle" class="elabel2">no public IP path</text>
+
+  <!-- Cloud Run -> Firebase -->
+  <path class="edge" d="M 505 230 L 505 300"/>
+  <text x="515" y="262" class="elabel">Admin SDK verifyIdToken</text>
+  <text x="515" y="274" class="elabel2">ADC — runtime service account</text>
+
+  <!-- Secret Manager -> Cloud Run -->
+  <path class="edge" d="M 720 320 C 680 300, 660 260, 620 230"/>
+  <text x="648" y="292" class="elabel2">env injection at deploy</text>
+
+  <!-- Cloud Build -> Cloud Run -->
+  <path class="edge" d="M 505 430 L 505 390"/>
+  <text x="515" y="415" class="elabel2">deploy revision</text>
+
+  <!-- Cloud Run -> Nager -->
+  <path class="edge" d="M 630 220 C 700 260, 760 360, 810 430"/>
+  <text x="700" y="390" class="elabel2">HTTPS GET · holiday sync</text>
+
+  <!-- Dev -> Cloud SQL -->
+  <path class="edge2" d="M 240 490 C 520 600, 945 560, 945 400 C 945 300, 945 260, 928 225"/>
+  <text x="400" y="572" class="elabel">Cloud SQL Auth Proxy / Authorized Networks (single office IP)</text>
+
+  <!-- Legend -->
+  <rect x="40" y="600" width="920" height="70" rx="6" fill="#F5FAFA"/>
+  <rect x="60" y="622" width="16" height="16" rx="3" class="node-t"/>
+  <text x="84" y="634" class="elabel2" style="font-size:10px">Tidal-built / core application</text>
+  <rect x="280" y="622" width="16" height="16" rx="3" class="node-tl"/>
+  <text x="304" y="634" class="elabel2" style="font-size:10px">External clients / third-party feeds</text>
+  <rect x="530" y="622" width="16" height="16" rx="3" class="node-g"/>
+  <text x="554" y="634" class="elabel2" style="font-size:10px">Google-managed infrastructure</text>
+  <text x="60" y="658" class="elabel2" style="font-size:9.5px">All public channels are HTTPS (TLS 1.2+, Google-managed certificates). The database is reachable only via the Cloud Run Unix socket or the developer Auth Proxy.</text>
+</svg>

@@ -3,7 +3,7 @@
 **Prepared for:** SOC / VAPT team
 **System:** Wave HRIS (Human Resource Information System)
 **Environment of record:** Production, `main` branch
-**Doc date:** 2026-07-02
+**Doc date:** 2026-07-09
 **Owner:** Engineering (Wave HRIS)
 
 > Scope note: this document describes the **production build on `main`**. Where staging
@@ -155,8 +155,8 @@ gates access until changed. Admin-initiated temp passwords use a **CSPRNG** (`no
 - `X-Frame-Options: DENY`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
-- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
-- ✅ **Content-Security-Policy** now shipped in **Report-Only** mode (`Content-Security-Policy-Report-Only`), nonce-based (`'nonce-…' 'strict-dynamic'`), per-request nonce, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`. Flip `CSP_ENFORCE` in `src/server.ts` to enforce after a clean monitoring window — see §7 #1.
+- `Permissions-Policy: camera=(), microphone=(), geolocation=(self)` — `(self)` lets the app's own document request location for the audit-only clock-in tagging; third-party iframes still cannot
+- ✅ **Content-Security-Policy** — nonce-based (`'nonce-…' 'strict-dynamic'`), per-request nonce, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`, violations POSTed to the in-app collector via `report-uri /api/csp-report`. The legacy `https:` fallback has been removed from `script-src` (gate condition), so the policy is **enforcement-ready**. Enforcement is **env-driven**: set `CSP_ENFORCE=true` on the Cloud Run service to switch from Report-Only to the blocking header — no redeploy needed, and rollback is the same flip — see §7 #1.
 
 **Injection (SQLi/OWASP A03):** all queries are parameterized (`$1`, `$2`, …) via `pg`; no
 ORM, no string-interpolated SQL, including on the device path.
@@ -200,7 +200,7 @@ in code; #3–#6 are **accepted-by-design** with the rationale below.
 
 | # | Item | Risk | Status / mitigation |
 |---|---|---|---|
-| 1 | **CSP** | XSS impact not contained by policy | ✅ **FIXED (Report-Only).** Nonce + `'strict-dynamic'` CSP now emitted (`src/server.ts`). **Operational:** monitor reports, drop `https:` from `script-src`, then set `CSP_ENFORCE=true` to enforce. |
+| 1 | **CSP** | XSS impact not contained by policy | ✅ **FIXED (enforcement-ready).** Nonce + `'strict-dynamic'` CSP on every HTML response with `report-uri /api/csp-report` collection; `https:` dropped from `script-src` per the gate condition (2026-07-09). Verified against the production build locally with `CSP_ENFORCE=true` (login render + hydration + Firebase sign-in — zero violations). **Operational:** set `CSP_ENFORCE=true` on the Cloud Run service after a clean report window; rollback is unsetting it. |
 | 2 | **Session lifetime is client-side only** | A captured/ revoked ID token remained usable up to its ~1h TTL | ✅ **FIXED.** Sensitive admin ops now verify `checkRevoked` (`strictAuthMiddleware`); explicit logout revokes the caller's refresh tokens. Hot path stays JWKS-local (~1h TTL) by design. |
 | 3 | **Geofence fails open** | Clock-in unrestricted until an admin adds ≥1 active network | Accepted (opt-in by design). Confirm networks are configured in prod if geofencing is required. |
 | 4 | **Device rate-limit is per-instance** | Effective limit scales with instance count | Accepted. Keep max-instances low; `UNIQUE(employee_id, work_date)` is the correctness backstop. Central rate-limit (Redis) is a future candidate. |
@@ -239,4 +239,5 @@ employee data; the build is identical.
 *Sources: `src/server.ts`, `src/lib/auth-middleware.ts`, `src/lib/firebase.ts`,
 `src/lib/firebase-admin.server.ts`, `src/lib/device-clock-in.server.ts`, `src/lib/db.server.ts`,
 `src/lib/employee-functions.ts`, `Dockerfile`, `cloudbuild.yaml`, `docs/tech-docs.md`,
-`docs/gcp-migration.md`, verified against `main` on 2026-07-02.*
+`docs/gcp-migration.md`, verified against `main` on 2026-07-02; CSP enforcement (§6, §7 #1)
+updated from `feat/clockin-location-tagging` on 2026-07-09.*

@@ -48,38 +48,51 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(self)",
 };
 
-// Content-Security-Policy for HTML document responses. Shipped in REPORT-ONLY mode
-// first: violations are reported (browser console / a report endpoint) but nothing
-// is blocked, so a mis-scoped directive can't take the app down. Flip CSP_ENFORCE
-// to true to switch the header to enforcing "Content-Security-Policy" — only after
-// the report window is clean (see docs/soc-security-spec.md).
+// Content-Security-Policy for HTML document responses. With CSP_ENFORCE=true the
+// header is the blocking "Content-Security-Policy"; otherwise Report-Only (log via
+// report-uri, block nothing). See docs/soc-security-spec.md.
 //
 // 'strict-dynamic' + the per-request nonce trusts the SSR hydration bootstrap to
 // load the app's module chunks without host-allowlisting every asset path.
-const CSP_ENFORCE = false;
+//
+// Env-driven so enforcement is a Cloud Run env flip (CSP_ENFORCE=true), not a code
+// change/redeploy — and rollback is just as fast. Unset/anything-else = Report-Only
+// (the safe default). The script-src 'https:' fallback is already dropped (gate
+// condition), so the policy is enforcement-ready.
+const CSP_ENFORCE = process.env.CSP_ENFORCE === "true";
+
+// The Firebase Auth web SDK loads a hidden helper iframe from the project's
+// firebaseapp.com auth domain (observed in prod via report-uri: frame-src
+// violations on /login and /dashboard). Allow exactly that origin, derived from
+// the same env the Admin SDK uses so staging's isolated project also works.
+const FIREBASE_AUTH_DOMAIN = `${
+  process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || "wave-hris-fb"
+}.firebaseapp.com`;
 
 function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
-    // 'https:' and 'unsafe-inline' are CSP1/CSP2 fallbacks that modern browsers
-    // IGNORE when a nonce + 'strict-dynamic' are present. Drop 'https:' before
-    // flipping CSP_ENFORCE on (security-gate finding) — nonce + strict-dynamic is
-    // sufficient and 'https:' would otherwise loosen script-src on legacy browsers.
-    `script-src 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
+    // 'unsafe-inline' is a CSP1 fallback that browsers IGNORE when a nonce +
+    // 'strict-dynamic' are present. The 'https:' fallback was dropped ahead of
+    // enforcement (security-gate condition) — it would loosen script-src on
+    // legacy browsers; nonce + strict-dynamic is sufficient.
+    `script-src 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline'`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev",
     "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.googleapis.com",
-    "frame-src 'self'",
+    `frame-src 'self' https://${FIREBASE_AUTH_DOMAIN}`,
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
+    // Collect violations during the Report-Only window (see lib/csp-report.server).
+    "report-uri /api/csp-report",
   ].join("; ");
 }
 
 // Applies the baseline headers, and — when a nonce is supplied (HTML SSR path) —
-// the (report-only) CSP built for that request's nonce.
+// the enforcing CSP built for that request's nonce.
 function withSecurityHeaders(response: Response, nonce?: string): Response {
   const headers: Record<string, string> = { ...SECURITY_HEADERS };
   if (nonce) {
@@ -162,6 +175,13 @@ export default {
           ? mod.handleDeviceVerify
           : mod.handleDeviceClockIn;
         return withSecurityHeaders(await handler(request));
+      }
+
+      // CSP violation report sink (unauthenticated; browsers POST here via the
+      // report-uri directive). Handled before SSR; no nonce/CSP needed on it.
+      if (pathname === "/api/csp-report") {
+        const { handleCspReport } = await import("./lib/csp-report.server");
+        return withSecurityHeaders(await handleCspReport(request));
       }
 
       // Per-request CSP nonce: generate it, run the SSR render inside the nonce
