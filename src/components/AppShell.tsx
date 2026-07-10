@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   CalendarDays,
   CalendarClock,
+  FileSpreadsheet,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
@@ -96,6 +97,9 @@ export function AppShell() {
 
       {sectionLabel("Overtime")}
       {drawerItem("/ot-approvals", "OT Approvals", Timer)}
+
+      {isHR && sectionLabel("Reports")}
+      {isHR && drawerItem("/reports", "Data Export", FileSpreadsheet)}
 
       {sectionLabel("Performance")}
       {isHR && drawerItem("/kpi-builder", "KPI Builder", Target)}

@@ -18,6 +18,7 @@ import { Route as AuthenticatedLeavesRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedDtrRouteImport } from './routes/_authenticated/dtr'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/_admin'
+import { Route as AuthenticatedAdminReportsRouteImport } from './routes/_authenticated/_admin/reports'
 import { Route as AuthenticatedAdminPerformanceAdminRouteImport } from './routes/_authenticated/_admin/performance-admin'
 import { Route as AuthenticatedAdminOrgChartRouteImport } from './routes/_authenticated/_admin/org-chart'
 import { Route as AuthenticatedAdminOfficeNetworksRouteImport } from './routes/_authenticated/_admin/office-networks'
@@ -72,6 +73,12 @@ const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/_admin',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedAdminReportsRoute =
+  AuthenticatedAdminReportsRouteImport.update({
+    id: '/reports',
+    path: '/reports',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 const AuthenticatedAdminPerformanceAdminRoute =
   AuthenticatedAdminPerformanceAdminRouteImport.update({
     id: '/performance-admin',
@@ -137,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
+  '/reports': typeof AuthenticatedAdminReportsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -154,6 +162,7 @@ export interface FileRoutesByTo {
   '/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
+  '/reports': typeof AuthenticatedAdminReportsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -174,6 +183,7 @@ export interface FileRoutesById {
   '/_authenticated/_admin/office-networks': typeof AuthenticatedAdminOfficeNetworksRoute
   '/_authenticated/_admin/org-chart': typeof AuthenticatedAdminOrgChartRoute
   '/_authenticated/_admin/performance-admin': typeof AuthenticatedAdminPerformanceAdminRoute
+  '/_authenticated/_admin/reports': typeof AuthenticatedAdminReportsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
     | '/office-networks'
     | '/org-chart'
     | '/performance-admin'
+    | '/reports'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -210,6 +221,7 @@ export interface FileRouteTypes {
     | '/office-networks'
     | '/org-chart'
     | '/performance-admin'
+    | '/reports'
   id:
     | '__root__'
     | '/'
@@ -229,6 +241,7 @@ export interface FileRouteTypes {
     | '/_authenticated/_admin/office-networks'
     | '/_authenticated/_admin/org-chart'
     | '/_authenticated/_admin/performance-admin'
+    | '/_authenticated/_admin/reports'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -302,6 +315,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/_admin/reports': {
+      id: '/_authenticated/_admin/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthenticatedAdminReportsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
     '/_authenticated/_admin/performance-admin': {
       id: '/_authenticated/_admin/performance-admin'
       path: '/performance-admin'
@@ -370,6 +390,7 @@ interface AuthenticatedAdminRouteChildren {
   AuthenticatedAdminOfficeNetworksRoute: typeof AuthenticatedAdminOfficeNetworksRoute
   AuthenticatedAdminOrgChartRoute: typeof AuthenticatedAdminOrgChartRoute
   AuthenticatedAdminPerformanceAdminRoute: typeof AuthenticatedAdminPerformanceAdminRoute
+  AuthenticatedAdminReportsRoute: typeof AuthenticatedAdminReportsRoute
 }
 
 const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
@@ -382,6 +403,7 @@ const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
   AuthenticatedAdminOrgChartRoute: AuthenticatedAdminOrgChartRoute,
   AuthenticatedAdminPerformanceAdminRoute:
     AuthenticatedAdminPerformanceAdminRoute,
+  AuthenticatedAdminReportsRoute: AuthenticatedAdminReportsRoute,
 }
 
 const AuthenticatedAdminRouteWithChildren =
