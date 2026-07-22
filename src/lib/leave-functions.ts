@@ -1,5 +1,54 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { PoolClient } from "pg";
 import { authMiddleware, assertUser, assertHR } from "@/lib/auth-middleware";
+import {
+  enforceRateLimit,
+  LEAVE_WRITE_RATE_LIMIT,
+  LEAVE_ONBEHALF_RATE_LIMIT,
+} from "@/lib/rate-limit.server";
+
+// Reject a new leave whose dates overlap an existing ACTIVE (pending or approved)
+// leave for the same employee — the duplicate/overlapping filings this guards
+// against. Cancelled and rejected leaves are ignored so a re-file after a rejection
+// still works. Two HALF-days on the same day with different AM/PM periods do NOT
+// conflict (together they make one full day), so that legitimate case is allowed.
+//
+// Runs inside the caller's transaction so the check and the insert commit
+// atomically. NOTE: under READ COMMITTED this can't see a concurrent uncommitted
+// insert, so two truly simultaneous identical filings could still both pass; the
+// per-user write rate limit shrinks that window to near-zero. A DB EXCLUDE
+// constraint (daterange GiST) would make it airtight — tracked as a follow-up.
+async function assertNoOverlappingLeave(
+  client: PoolClient,
+  employeeId: string,
+  startDate: string,
+  endDate: string,
+  halfDay: boolean,
+  halfDayPeriod: "AM" | "PM" | null,
+): Promise<void> {
+  const { rowCount } = await client.query(
+    `SELECT 1
+       FROM leave_requests
+      WHERE employee_id = $1
+        AND status IN ('pending', 'approved')
+        AND start_date <= $3::date
+        AND end_date   >= $2::date
+        AND NOT (
+          -- both are half-days on the same single day but different AM/PM periods
+          $4::boolean = true
+          AND half_day = true
+          AND start_date = end_date
+          AND start_date = $2::date
+          AND $2::date = $3::date
+          AND half_day_period IS NOT NULL
+          AND $5 IS NOT NULL
+          AND half_day_period IS DISTINCT FROM $5::text
+        )
+      LIMIT 1`,
+    [employeeId, startDate, endDate, halfDay, halfDayPeriod],
+  );
+  if (rowCount && rowCount > 0) throw new Error("OVERLAPPING_LEAVE");
+}
 
 export const fetchMyProfile = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
@@ -105,6 +154,10 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
+    // Tight write throttle on top of the global baseline: a user filing their own
+    // leave does so a handful of times at most; rapid repeats are the scripted
+    // spam this guards against. Keyed per user so it can't affect anyone else.
+    enforceRateLimit(`leave:file:u:${context.user.dbUserId}`, LEAVE_WRITE_RATE_LIMIT);
     const { pool } = await import("@/lib/db.server");
 
     // A half-day leave always covers exactly one day, so collapse the range and
@@ -149,6 +202,14 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await assertNoOverlappingLeave(
+        client,
+        context.user.dbUserId,
+        startDate,
+        endDate,
+        halfDay,
+        halfDayPeriod,
+      );
       const {
         rows: [inserted],
       } = await client.query<{ id: string }>(
@@ -233,6 +294,9 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     assertHR(context.user);
+    // Looser than self-service filing (HR may process a small batch) but still
+    // caps runaway automation. Keyed per HR/admin filer, not the target employee.
+    enforceRateLimit(`leave:onbehalf:u:${context.user.dbUserId}`, LEAVE_ONBEHALF_RATE_LIMIT);
     if (!data.employeeId) throw new Error("EMPLOYEE_REQUIRED");
     const { pool } = await import("@/lib/db.server");
     const { resolveChain } = await import("@/lib/chain.server");
@@ -265,6 +329,14 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      await assertNoOverlappingLeave(
+        client,
+        data.employeeId,
+        startDate,
+        endDate,
+        halfDay,
+        halfDayPeriod,
+      );
       const {
         rows: [inserted],
       } = await client.query<{ id: string }>(
