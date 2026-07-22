@@ -1,4 +1,5 @@
 import { createMiddleware } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 
 export type AuthRole = "employee" | "hr" | "admin" | "group_head";
 
@@ -77,6 +78,32 @@ async function resolveAuthUser(
   };
 }
 
+// Baseline rate limit enforced for EVERY server function at this shared choke
+// point (all createServerFn calls run one of these middlewares). Keyed per
+// authenticated user, falling back to the client IP for the rare pre-auth call
+// (e.g. provisionUser on first login) so one caller can't starve others. Throws
+// the shared RATE_LIMIT_MESSAGE, which the client surfaces as an error toast.
+// Dynamic imports keep the auth -> office-network -> auth module cycle from
+// forming at load time (the established pattern in this file).
+async function enforceBaselineRateLimit(user: AuthUserContext): Promise<void> {
+  const { enforceRateLimit, GLOBAL_RATE_LIMIT } = await import("@/lib/rate-limit.server");
+  let identity = "ip:unknown";
+  if (user.firebaseUid) {
+    identity = `u:${user.firebaseUid}`;
+  } else {
+    // Pre-auth call (e.g. provisionUser on first login). Resolve the client IP,
+    // but never let a request-context hiccup here block sign-in — fall back to the
+    // shared "unknown" bucket instead of throwing.
+    try {
+      const { resolveClientIp } = await import("@/lib/office-network-functions");
+      identity = `ip:${resolveClientIp(getRequest())}`;
+    } catch {
+      identity = "ip:unknown";
+    }
+  }
+  enforceRateLimit(`global:${identity}`, GLOBAL_RATE_LIMIT);
+}
+
 // Server half: verify the token, resolve the DB user + roles, attach to context.
 // Each handler decides what to do with a null user via the assertXxx helpers below.
 export const authMiddleware = createMiddleware({ type: "function" })
@@ -84,6 +111,7 @@ export const authMiddleware = createMiddleware({ type: "function" })
   .server(async ({ next, context }) => {
     const idToken = (context as { idToken: string | null }).idToken;
     const user = await resolveAuthUser(idToken);
+    await enforceBaselineRateLimit(user);
     return next({ context: { user } });
   });
 
@@ -96,6 +124,7 @@ export const strictAuthMiddleware = createMiddleware({ type: "function" })
   .server(async ({ next, context }) => {
     const idToken = (context as { idToken: string | null }).idToken;
     const user = await resolveAuthUser(idToken, true);
+    await enforceBaselineRateLimit(user);
     return next({ context: { user } });
   });
 

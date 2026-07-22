@@ -325,7 +325,9 @@ function LeavesPage() {
       toast.error(
         e.message === "INSUFFICIENT_BALANCE"
           ? `Not enough ${formTypeLabel} balance for ${formDays} day(s). File Leave without Pay instead.`
-          : e.message,
+          : e.message === "OVERLAPPING_LEAVE"
+            ? "You already have a leave request covering those dates."
+            : e.message,
       ),
   });
 
@@ -378,7 +380,9 @@ function LeavesPage() {
       toast.error(
         e.message === "NO_ORG_NODE"
           ? "This employee isn't in the org chart, so it can't be routed for approval. Turn on \"Approve immediately\" to file it anyway."
-          : e.message,
+          : e.message === "OVERLAPPING_LEAVE"
+            ? "This employee already has a leave request covering those dates."
+            : e.message,
       ),
   });
 
