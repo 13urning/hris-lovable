@@ -50,6 +50,24 @@ async function assertNoOverlappingLeave(
   if (rowCount && rowCount > 0) throw new Error("OVERLAPPING_LEAVE");
 }
 
+// A concurrent insert that races past assertNoOverlappingLeave can still trip the
+// DB-level `leave_requests_no_overlap` EXCLUDE constraint, which Postgres reports
+// as exclusion_violation (SQLSTATE 23P01). Translate that into the same friendly
+// code the app-level check throws, so the client sees one consistent message
+// rather than a raw driver error. Any other error is returned unchanged (and is
+// a no-op on non-insert paths, which can't trip this constraint).
+function asLeaveClientError(err: unknown): unknown {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: string }).code === "23P01" &&
+    (err as { constraint?: string }).constraint === "leave_requests_no_overlap"
+  ) {
+    return new Error("OVERLAPPING_LEAVE");
+  }
+  return err;
+}
+
 export const fetchMyProfile = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -256,7 +274,7 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
-      throw err;
+      throw asLeaveClientError(err);
     } finally {
       client.release();
     }
@@ -384,7 +402,7 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
-      throw err;
+      throw asLeaveClientError(err);
     } finally {
       client.release();
     }
@@ -540,7 +558,7 @@ export const rejectLeaveStep = createServerFn({ method: "POST" })
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});
-      throw err;
+      throw asLeaveClientError(err);
     } finally {
       client.release();
     }
