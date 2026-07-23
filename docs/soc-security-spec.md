@@ -83,15 +83,15 @@ Cloud SQL — PostgreSQL 17   (instance: wave-hris)
 | Cloud SQL instance | `wave-hris-498916:us-central1:wave-hris` (PostgreSQL 17, `db-f1-micro`, zonal) |
 | Databases | `wave_hris` (prod), `wave_hris_staging` (staging) — same instance |
 | Artifact Registry | `us-central1-docker.pkg.dev/wave-hris-498916/wave-hris/app` |
-| CI/CD | Cloud Build — `cloudbuild.yaml` (prod), `cloudbuild-staging.yaml` (staging); trigger `staging-deploy` on branch `^staging$` |
+| CI/CD | **Prod:** GitHub Actions `.github/workflows/deploy.yml` on push to `main` (keyless via Workload Identity Federation) → deploys `wave-hris`. **Staging:** manual `gcloud builds submit --config=cloudbuild-staging.yaml --substitutions=COMMIT_SHA=<sha>` → deploys `wave-hris-staging`. No Cloud Build push triggers are configured. |
 | Secrets | Secret Manager (`DB_PASSWORD`) |
 | Runtime service account | `831274499203-compute@developer.gserviceaccount.com` (granted `roles/firebaseauth.admin`) |
 | Firebase (auth) | `wave-hris-fb` |
 
 ### Deployment pipeline
 - **Container:** two-stage Dockerfile (Node 22-alpine builder → runner), `NITRO_PRESET=node-server`, listens on `PORT=8080` (Cloud Run injected). Runs as the default node user in Alpine.
-- **Staging:** auto-deploys on push to `staging` branch (Cloud Build trigger).
-- **Production:** promoted from `staging` → `main`; image built and deployed via `cloudbuild.yaml` (`gcloud builds submit ... --substitutions=COMMIT_SHA=...`).
+- **Staging:** **manual deploy** — `gcloud builds submit --config=cloudbuild-staging.yaml --substitutions=COMMIT_SHA=<sha>` builds the image (`app:staging-<sha>`) and deploys `wave-hris-staging`. Pushing the `staging` branch does **not** auto-deploy — there is no Cloud Build trigger.
+- **Production:** GitHub Actions `.github/workflows/deploy.yml` runs on push to `main` (or manual `workflow_dispatch`) — it builds/pushes the image and deploys `wave-hris`, authenticating keylessly via GitHub OIDC → Workload Identity Federation. A `cloudbuild.yaml` also exists for a manual `gcloud builds submit` fallback.
 - **DB connection:** Cloud Run → Cloud SQL over the **Unix socket** (no public DB IP path in prod). Local dev uses the Cloud SQL Auth Proxy; direct connections require the developer IP to be in the instance's Authorized Networks.
 - **Migrations:** SQL files under `supabase/migrations/` are applied **manually per database** (`scripts/apply-migration.mjs`), not by the pipeline. Ordering rule: migrate before deploying code that reads new objects.
 
