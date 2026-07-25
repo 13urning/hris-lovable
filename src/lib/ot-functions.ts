@@ -85,11 +85,16 @@ export const getFiledOTForDashboard = createServerFn({ method: "POST" })
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(
-      `SELECT id, requested_hours, pre_approved_id FROM ot_approval_requests
+      `SELECT id, requested_hours, pre_approved_id, status FROM ot_approval_requests
        WHERE employee_id = $1 AND request_type = 'actual'`,
       [context.user.dbUserId],
     );
-    return rows as { id: string; requested_hours: number; pre_approved_id: string | null }[];
+    return rows as {
+      id: string;
+      requested_hours: number;
+      pre_approved_id: string | null;
+      status: "pending" | "approved" | "rejected" | "cancelled";
+    }[];
   });
 
 // File a monthly OT budget request — chain resolved at file time. Group Head
