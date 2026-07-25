@@ -44,8 +44,11 @@ function Dashboard() {
 
   const totalApprovedOT = (otBudgets ?? []).reduce((s, b) => s + Number(b.requested_hours), 0);
   const budgetIds = new Set((otBudgets ?? []).map((b) => b.id));
+  // Only APPROVED filed OT counts as "used" against the budget — pending awaits a
+  // decision and cancelled/rejected were never consumed. This mirrors the budget
+  // remaining shown here and the design note in ot-functions.ts (fileActualOTHours).
   const totalFiledOT = (otFiled ?? [])
-    .filter((f) => f.pre_approved_id && budgetIds.has(f.pre_approved_id))
+    .filter((f) => f.status === "approved" && f.pre_approved_id && budgetIds.has(f.pre_approved_id))
     .reduce((s, f) => s + Number(f.requested_hours), 0);
   const remainingOT = Math.max(0, totalApprovedOT - totalFiledOT);
 
