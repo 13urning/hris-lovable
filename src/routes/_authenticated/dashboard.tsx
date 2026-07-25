@@ -44,8 +44,11 @@ function Dashboard() {
 
   const totalApprovedOT = (otBudgets ?? []).reduce((s, b) => s + Number(b.requested_hours), 0);
   const budgetIds = new Set((otBudgets ?? []).map((b) => b.id));
+  // Only APPROVED filed OT counts as "used" against the budget — pending awaits a
+  // decision and cancelled/rejected were never consumed. This mirrors the budget
+  // remaining shown here and the design note in ot-functions.ts (fileActualOTHours).
   const totalFiledOT = (otFiled ?? [])
-    .filter((f) => f.pre_approved_id && budgetIds.has(f.pre_approved_id))
+    .filter((f) => f.status === "approved" && f.pre_approved_id && budgetIds.has(f.pre_approved_id))
     .reduce((s, f) => s + Number(f.requested_hours), 0);
   const remainingOT = Math.max(0, totalApprovedOT - totalFiledOT);
 
@@ -141,6 +144,9 @@ function Dashboard() {
   const leavesAll = myLeaves ?? [];
   const leavesApproved = leavesAll.filter((l) => l.status === "approved");
   const leavesPending = leavesAll.filter((l) => l.status === "pending");
+  // "Total filed" excludes user-cancelled requests — a withdrawn request shouldn't
+  // count as filed. Rejected requests were genuinely filed, so they still count.
+  const leavesFiledCount = leavesAll.filter((l) => l.status !== "cancelled").length;
   const totalApprovedDays = leavesApproved.reduce(
     (s, l) => s + leaveDays(l.start_date, l.end_date),
     0,
@@ -448,7 +454,7 @@ function Dashboard() {
                 <Stat
                   icon={<AlertCircle className="h-4 w-4" />}
                   label="Total filed"
-                  value={leavesAll.length}
+                  value={leavesFiledCount}
                 />
               </div>
               {upcomingLeaves.length > 0 && (
