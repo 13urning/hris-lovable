@@ -41,7 +41,11 @@ async function assertNoOverlappingLeave(
           AND start_date = $2::date
           AND $2::date = $3::date
           AND half_day_period IS NOT NULL
-          AND $5 IS NOT NULL
+          -- $5 must be cast here too: an UNcast parameter reference leaves the
+          -- type unresolved at parse time, and Postgres then rejects the whole
+          -- statement with 42P08 "could not determine data type of parameter $5"
+          -- once the cast below resolves it to text (ambiguous_parameter).
+          AND $5::text IS NOT NULL
           AND half_day_period IS DISTINCT FROM $5::text
         )
       LIMIT 1`,
