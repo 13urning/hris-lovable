@@ -33,6 +33,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "@/lib/db.server";
 import { resolveClientIp, assertOnOfficeNetwork } from "@/lib/office-network-functions";
+// Day GRADING (lateness + undertime, and how an approved leave relaxes both) IS
+// shared with the interactive flow, unlike the PH time helpers below which are
+// deliberately duplicated. A device tap and a web punch must never disagree about
+// whether the same day was late or undertime — that divergence is a payroll
+// defect, not isolation.
+import { computeDayFlags, leaveCoverageFor } from "@/lib/work-hours";
 
 // -- PH time -------------------------------------------------------------------
 // Cloud Run runs in UTC; the business operates in PH (UTC+8, no DST). These mirror
@@ -41,17 +47,6 @@ import { resolveClientIp, assertOnOfficeNetwork } from "@/lib/office-network-fun
 function phNow(): Date {
   return new Date(Date.now() + 8 * 60 * 60 * 1000);
 }
-// Company-wide tardiness rule: any clock-in after 09:00 PH is late. Identical to
-// dtr-functions.ts (LATE_CUTOFF_MINUTES) - duplicated intentionally (see above).
-const LATE_CUTOFF_MINUTES = 9 * 60;
-function lateMinutesFor(timeIn: string): number {
-  const [h, m] = timeIn.split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
-  return Math.max(0, h * 60 + m - LATE_CUTOFF_MINUTES);
-}
-
-// Standard workday length for undertime; mirrors clockOutDTR's STANDARD (9h).
-const STANDARD_HOURS = 9;
 
 // Minimum minutes between clock-IN and clock-OUT on the same daily row. A 2nd tap
 // sooner than this is treated as an accidental re-tap (NFC bounce / unsure user)
@@ -63,22 +58,6 @@ const MIN_DWELL_MINUTES = 5;
 function minutesOfDay(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
-}
-
-// Server-side hours computation, mirroring clockOutDTR in dtr-functions.ts. Same
-// same-day assumption; Math.max(0, ...) clamps out-before-in to 0 (overnight
-// shifts are unsupported here, exactly as in the interactive web flow).
-function computeHours(
-  timeIn: string,
-  timeOut: string,
-): { hoursWorked: number; isUndertime: boolean; undertimeMinutes: number } {
-  const totalMins = minutesOfDay(timeOut) - minutesOfDay(timeIn);
-  const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
-  const isUndertime = hoursWorked < STANDARD_HOURS;
-  const undertimeMinutes = isUndertime
-    ? Math.max(0, Math.round(STANDARD_HOURS * 60 - totalMins))
-    : 0;
-  return { hoursWorked, isUndertime, undertimeMinutes };
 }
 
 // -- Device authentication -----------------------------------------------------
@@ -321,7 +300,11 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     const now = phNow();
     const workDate = now.toISOString().slice(0, 10); // YYYY-MM-DD (PH)
     const timeIn = now.toISOString().slice(11, 16); // HH:MM (PH)
-    const lateMinutes = lateMinutesFor(timeIn);
+    // An approved leave on this date relaxes BOTH bars: an AM half-day (or a full
+    // day) waives the 09:00 late cutoff, and a half-day halves the 9h undertime
+    // bar used at clock-out below. Devices carry no shift, so OB never applies.
+    const coverage = await leaveCoverageFor(pool, employee.id, workDate);
+    const { lateMinutes } = computeDayFlags({ timeIn, coverage });
 
     // First tap inserts the clock-in (race-safe: exactly one of two concurrent
     // first-taps wins the ON CONFLICT). A 2nd+ tap inserts nothing (0 rows) and
@@ -388,7 +371,11 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       // server-side and time_out is filled ONCE - the `time_out IS NULL` guard
       // makes two concurrent 2nd-taps race-safe (exactly one wins).
       const timeOut = timeIn;
-      const { hoursWorked, isUndertime, undertimeMinutes } = computeHours(row.time_in, timeOut);
+      const {
+        hoursWorked,
+        isUndertime,
+        undertimeMins: undertimeMinutes,
+      } = computeDayFlags({ timeIn: row.time_in, timeOut, coverage });
       const { rows: updated } = await pool.query<{ time_out: string }>(
         `UPDATE daily_time_reports
             SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4,
