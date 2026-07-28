@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { randomInt } from "node:crypto";
 import { authMiddleware, strictAuthMiddleware, assertHR, assertAdmin } from "@/lib/auth-middleware";
+import { logError } from "@/lib/log.server";
 
 type EmployeeRow = {
   id: string;
@@ -223,7 +224,9 @@ export const deleteEmployee = createServerFn({ method: "POST" })
         const { adminAuth } = await import("@/lib/firebase-admin.server");
         await adminAuth.deleteUser(user.firebase_uid);
       } catch (err) {
-        console.warn("[deleteEmployee] Firebase Auth delete failed for", user.firebase_uid, err);
+        // Swallowed deliberately (the DB row still goes), but it leaves an
+        // orphaned Firebase account behind — worth an ERROR, not a warning.
+        logError("firebase_auth_delete_failed", err, { firebaseUid: user.firebase_uid });
       }
     }
 
@@ -260,7 +263,7 @@ export const resetEmployeePassword = createServerFn({ method: "POST" })
     try {
       await adminAuth.revokeRefreshTokens(user.firebase_uid);
     } catch (err) {
-      console.warn("[resetEmployeePassword] revokeRefreshTokens failed", err);
+      logError("revoke_refresh_tokens_failed", err, { firebaseUid: user.firebase_uid });
     }
 
     await pool.query(`UPDATE profiles SET must_change_password = TRUE WHERE id = $1`, [data.id]);

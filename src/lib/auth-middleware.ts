@@ -1,11 +1,17 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+// Observability is composed here rather than at each server function because
+// this file is the choke point: every one of the 106 createServerFn calls in the
+// app runs authMiddleware or strictAuthMiddleware. Listing it FIRST makes it the
+// outermost wrapper, so it also observes a failure inside token verification or
+// the baseline rate limiter — not just failures in the handler below.
+import { observabilityMiddleware } from "@/lib/observability-middleware";
 
 export type AuthRole = "employee" | "hr" | "admin" | "group_head";
 
 export type AuthUserContext = {
   firebaseUid: string;
-  dbUserId: string | null;          // null on first login, before provisionUser runs
+  dbUserId: string | null; // null on first login, before provisionUser runs
   email: string | null;
   roles: AuthRole[];
   isHR: boolean;
@@ -15,19 +21,18 @@ export type AuthUserContext = {
 // Client half: pull the current Firebase ID token and ship it to the server in
 // sendContext. Returns null when no one is signed in — the server half decides
 // whether to allow that (provisionUser allows it; everything else doesn't).
-const clientAuth = createMiddleware({ type: "function" })
-  .client(async ({ next }) => {
-    let idToken: string | null = null;
-    if (typeof window !== "undefined") {
-      const { auth } = await import("@/lib/firebase");
-      try {
-        idToken = (await auth.currentUser?.getIdToken()) ?? null;
-      } catch {
-        idToken = null;
-      }
+const clientAuth = createMiddleware({ type: "function" }).client(async ({ next }) => {
+  let idToken: string | null = null;
+  if (typeof window !== "undefined") {
+    const { auth } = await import("@/lib/firebase");
+    try {
+      idToken = (await auth.currentUser?.getIdToken()) ?? null;
+    } catch {
+      idToken = null;
     }
-    return next({ sendContext: { idToken } });
-  });
+  }
+  return next({ sendContext: { idToken } });
+});
 
 // Verify the token, resolve the DB user + roles. Anonymous (no token) resolves to
 // an empty user so handlers like provisionUser can still run on first login.
@@ -104,13 +109,27 @@ async function enforceBaselineRateLimit(user: AuthUserContext): Promise<void> {
   enforceRateLimit(`global:${identity}`, GLOBAL_RATE_LIMIT);
 }
 
+// Attribute every subsequent log record in this request to the resolved actor.
+// UUIDs only — the email sitting in `user` is deliberately never passed on.
+// Dynamically imported for the same reason db.server is: log.server reaches for
+// node:async_hooks, and this module is part of the client bundle.
+async function attributeActor(user: AuthUserContext): Promise<void> {
+  try {
+    const { setRequestActor } = await import("@/lib/log.server");
+    setRequestActor(user.dbUserId, user.firebaseUid || null);
+  } catch {
+    // Attribution is a nicety; never let it block authentication.
+  }
+}
+
 // Server half: verify the token, resolve the DB user + roles, attach to context.
 // Each handler decides what to do with a null user via the assertXxx helpers below.
 export const authMiddleware = createMiddleware({ type: "function" })
-  .middleware([clientAuth])
+  .middleware([observabilityMiddleware, clientAuth])
   .server(async ({ next, context }) => {
     const idToken = (context as { idToken: string | null }).idToken;
     const user = await resolveAuthUser(idToken);
+    await attributeActor(user);
     await enforceBaselineRateLimit(user);
     return next({ context: { user } });
   });
@@ -120,10 +139,11 @@ export const authMiddleware = createMiddleware({ type: "function" })
 // so the extra Firebase round-trip only happens where account takeover / privilege
 // escalation is the risk — not on every authenticated request.
 export const strictAuthMiddleware = createMiddleware({ type: "function" })
-  .middleware([clientAuth])
+  .middleware([observabilityMiddleware, clientAuth])
   .server(async ({ next, context }) => {
     const idToken = (context as { idToken: string | null }).idToken;
     const user = await resolveAuthUser(idToken, true);
+    await attributeActor(user);
     await enforceBaselineRateLimit(user);
     return next({ context: { user } });
   });
@@ -132,21 +152,29 @@ export const strictAuthMiddleware = createMiddleware({ type: "function" })
 // Each handler calls the assertion it needs. Throws on failure with a stable
 // error message; the client surfaces these as toast errors.
 
-export function assertAuthenticated(user: AuthUserContext): asserts user is AuthUserContext & { firebaseUid: string } {
+export function assertAuthenticated(
+  user: AuthUserContext,
+): asserts user is AuthUserContext & { firebaseUid: string } {
   if (!user.firebaseUid) throw new Error("UNAUTHENTICATED");
 }
 
-export function assertUser(user: AuthUserContext): asserts user is AuthUserContext & { firebaseUid: string; dbUserId: string } {
+export function assertUser(
+  user: AuthUserContext,
+): asserts user is AuthUserContext & { firebaseUid: string; dbUserId: string } {
   assertAuthenticated(user);
   if (!user.dbUserId) throw new Error("NO_PROFILE");
 }
 
-export function assertHR(user: AuthUserContext): asserts user is AuthUserContext & { firebaseUid: string; dbUserId: string } {
+export function assertHR(
+  user: AuthUserContext,
+): asserts user is AuthUserContext & { firebaseUid: string; dbUserId: string } {
   assertUser(user);
   if (!user.isHR) throw new Error("FORBIDDEN");
 }
 
-export function assertAdmin(user: AuthUserContext): asserts user is AuthUserContext & { firebaseUid: string; dbUserId: string } {
+export function assertAdmin(
+  user: AuthUserContext,
+): asserts user is AuthUserContext & { firebaseUid: string; dbUserId: string } {
   assertUser(user);
   if (!user.isAdmin) throw new Error("FORBIDDEN");
 }

@@ -36,5 +36,21 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // Server-side code must go through lib/log.server, never console. A bare
+  // console call on Cloud Run produces an unstructured line with no severity,
+  // no trace correlation and — critically — no redaction, so an employee
+  // identifier could reach the log store without passing the RA 10173 control
+  // in lib/log-redact. The emitter itself is exempt: it IS the writer.
+  //
+  // Client-side console calls are untouched. They run in the browser, never
+  // reach Cloud Logging, and routing them to a server sink is a separate scope
+  // decision (deferred at the design gate).
+  {
+    files: ["src/server.ts", "src/start.ts", "src/lib/**/*.server.ts", "src/lib/*-functions.ts"],
+    ignores: ["src/lib/log.server.ts"],
+    rules: {
+      "no-console": "error",
+    },
+  },
   eslintPluginPrettier,
 );

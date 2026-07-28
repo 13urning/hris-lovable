@@ -5,6 +5,21 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { SSR_NONCE_STORAGE_KEY } from "./lib/ssr-nonce";
+import {
+  installProcessHandlers,
+  logError,
+  logHttpRequest,
+  logStartup,
+  parseTraceContext,
+  runWithRequestContext,
+} from "./lib/log.server";
+
+// Attach the process-level fault handlers as early as possible — before the
+// server entry is even resolved — so a failure during startup is captured
+// rather than lost. error-capture.ts alone never did this: its
+// globalThis.addEventListener guard is false under Node.
+installProcessHandlers();
+logStartup();
 
 // Per-request CSP nonce store, published on a shared global symbol so the
 // isomorphic reader in lib/ssr-nonce can pull it during SSR without importing
@@ -156,49 +171,87 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
     return response;
   }
 
-  console.error(consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`));
+  logError(
+    "ssr_error_swallowed_by_h3",
+    consumeLastCapturedError() ?? new Error(`h3 swallowed SSR error: ${body}`),
+  );
   return brandedErrorResponse();
+}
+
+// Paths served outside the server-function pipeline, so the observability
+// middleware never sees them. These get their own access record; everything
+// else is already timed and logged per function, and emitting a second line for
+// every static asset would only inflate ingestion.
+function needsAccessRecord(pathname: string): boolean {
+  return pathname.startsWith("/api/");
 }
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
-    try {
-      // Device-facing attendance endpoints are raw HTTP routes that bypass the
-      // Firebase-token auth used by the SSR app (an unattended device — NFC, face,
-      // biometric — has no session). Intercept here, before delegating to
-      // TanStack, and still apply the baseline security headers. Imported lazily
-      // so the pg pool isn't spun up unless such a request actually arrives.
-      const { pathname } = new URL(request.url);
-      if (pathname === "/api/attendance/clock-in" || pathname === "/api/attendance/verify") {
-        const mod = await import("./lib/device-clock-in.server");
-        const handler = pathname.endsWith("/verify")
-          ? mod.handleDeviceVerify
-          : mod.handleDeviceClockIn;
-        return withSecurityHeaders(await handler(request));
-      }
-
-      // CSP violation report sink (unauthenticated; browsers POST here via the
-      // report-uri directive). Handled before SSR; no nonce/CSP needed on it.
-      if (pathname === "/api/csp-report") {
-        const { handleCspReport } = await import("./lib/csp-report.server");
-        return withSecurityHeaders(await handleCspReport(request));
-      }
-
-      // Per-request CSP nonce: generate it, run the SSR render inside the nonce
-      // AsyncLocalStorage so router.tsx + __root.tsx can read it back (via
-      // lib/ssr-nonce), and emit a matching CSP. We do NOT touch the request —
-      // reconstructing it (`new Request`) throws in this Nitro/h3 runtime because
-      // the incoming request isn't an undici Request.
-      const nonce = randomBytes(16).toString("base64");
-      const handler = await getServerEntry();
-      const response = await nonceStorage.run(nonce, async () => {
-        const res = await handler.fetch(request, env, ctx);
-        return normalizeCatastrophicSsrResponse(res);
-      });
-      return withSecurityHeaders(response, nonce);
-    } catch (error) {
-      console.error(error);
-      return withSecurityHeaders(brandedErrorResponse());
-    }
+    // Cloud Run puts the trace on every inbound request. Parsing it here, at the
+    // edge, is what lets one user action read as a single thread in Log Explorer
+    // instead of a scatter of unrelated lines.
+    const requestCtx = parseTraceContext(request.headers.get("x-cloud-trace-context"));
+    return runWithRequestContext(requestCtx, () => handleRequest(request, env, ctx));
   },
 };
+
+async function handleRequest(request: Request, env: unknown, ctx: unknown) {
+  const startedAt = Date.now();
+  const { pathname } = new URL(request.url);
+  try {
+    const response = await route(request, env, ctx);
+    if (needsAccessRecord(pathname)) {
+      logHttpRequest({
+        method: request.method,
+        path: pathname,
+        status: response.status,
+        latencyMs: Date.now() - startedAt,
+      });
+    }
+    return response;
+  } catch (error) {
+    // The outermost net. Previously a bare console.error, which on Cloud Run
+    // produced an unstructured line with no trace, no severity and no grouping.
+    logError("request_failed", error, {
+      method: request.method,
+      path: pathname,
+      latencyMs: Date.now() - startedAt,
+    });
+    return withSecurityHeaders(brandedErrorResponse());
+  }
+}
+
+async function route(request: Request, env: unknown, ctx: unknown): Promise<Response> {
+  // Device-facing attendance endpoints are raw HTTP routes that bypass the
+  // Firebase-token auth used by the SSR app (an unattended device — NFC, face,
+  // biometric — has no session). Intercept here, before delegating to
+  // TanStack, and still apply the baseline security headers. Imported lazily
+  // so the pg pool isn't spun up unless such a request actually arrives.
+  const { pathname } = new URL(request.url);
+  if (pathname === "/api/attendance/clock-in" || pathname === "/api/attendance/verify") {
+    const mod = await import("./lib/device-clock-in.server");
+    const handler = pathname.endsWith("/verify") ? mod.handleDeviceVerify : mod.handleDeviceClockIn;
+    return withSecurityHeaders(await handler(request));
+  }
+
+  // CSP violation report sink (unauthenticated; browsers POST here via the
+  // report-uri directive). Handled before SSR; no nonce/CSP needed on it.
+  if (pathname === "/api/csp-report") {
+    const { handleCspReport } = await import("./lib/csp-report.server");
+    return withSecurityHeaders(await handleCspReport(request));
+  }
+
+  // Per-request CSP nonce: generate it, run the SSR render inside the nonce
+  // AsyncLocalStorage so router.tsx + __root.tsx can read it back (via
+  // lib/ssr-nonce), and emit a matching CSP. We do NOT touch the request —
+  // reconstructing it (`new Request`) throws in this Nitro/h3 runtime because
+  // the incoming request isn't an undici Request.
+  const nonce = randomBytes(16).toString("base64");
+  const handler = await getServerEntry();
+  const response = await nonceStorage.run(nonce, async () => {
+    const res = await handler.fetch(request, env, ctx);
+    return normalizeCatastrophicSsrResponse(res);
+  });
+  return withSecurityHeaders(response, nonce);
+}
