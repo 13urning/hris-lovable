@@ -292,4 +292,43 @@ describe("fail-open — the logger must never break a request", () => {
     expect(stack.length).toBeLessThan(8_100);
     expect(stack).toContain("[truncated]");
   });
+
+  // ReDoS regression. Every sweep pattern must stay LINEAR in input length. The
+  // email pattern was once `[A-Za-z0-9._%+-]+@…`: a long run of email-legal
+  // characters that never reaches an `@` made it consume the run, fail, give back
+  // one character at a time, then restart one position right — O(n²), seconds of
+  // CPU on a 50 KB string, in code whose whole contract is that it cannot stall a
+  // request. The test above only caught it indirectly, as a timeout; this pins the
+  // property itself.
+  //
+  // Asserting a RATIO rather than a wall-clock budget keeps it meaningful on slow
+  // CI: 4x the input must not cost anywhere near 16x the time. Measured here,
+  // linear scores ~4x and the old quadratic pattern ~10-20x, so 6x separates them
+  // decisively. Each sample is the BEST of several runs — a scheduler hiccup can
+  // only ever inflate a measurement, so the minimum is the least noisy estimate
+  // of the real cost.
+  it("sweeps in linear time on input engineered to force backtracking", () => {
+    const best = (n: number) => {
+      const s = "x".repeat(n); // email-legal, digit-free, and never an "@"
+      let min = Infinity;
+      for (let i = 0; i < 5; i++) {
+        const t = performance.now();
+        scrubString(s);
+        min = Math.min(min, performance.now() - t);
+      }
+      return min;
+    };
+    best(4_000); // warm up, so JIT compilation isn't billed to the first sample
+    const small = Math.max(best(4_000), 0.05); // floor guards a 0ms divisor
+    const large = best(16_000);
+    expect(large / small).toBeLessThan(6);
+  });
+
+  it("stays fast on a long digit run, the other bounded-quantifier sweep", () => {
+    // `\d[\d\s-]{6,}\d` walks the same shape. Guards the sibling pattern against
+    // the regression that bit the email one.
+    const t = performance.now();
+    scrubString("1234567890 ".repeat(5_000));
+    expect(performance.now() - t).toBeLessThan(1_000);
+  });
 });

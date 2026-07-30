@@ -80,7 +80,17 @@ const MAX_STRING = 2_000;
 // exactly like a government ID. Actor UUIDs are the whole point of pseudonymous
 // logging, so they are protected before the sweep and restored after.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// EVERY quantifier here is BOUNDED, and that is load-bearing rather than
+// cosmetic. With an unbounded `+` on the local part, a long run of email-legal
+// characters that never reaches an `@` costs O(n²): the run is consumed, the `@`
+// fails, the engine gives back one character at a time, then restarts the whole
+// walk one position to the right. A 50 KB stack of such characters took seconds
+// and could stall the request this module promises never to break.
+//
+// The bounds are the RFC 5321 limits (local part ≤ 64 octets, domain ≤ 255), so
+// no real address is missed — and each start position now costs at most 64
+// attempts instead of n, which makes the sweep linear.
+const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,255}\.[A-Za-z]{2,24}/g;
 // Candidate runs of digits with optional spaces/dashes. The replacer counts the
 // actual digits and only redacts at 9+, which is the shortest PH government ID
 // shape (TIN 9–12, SSS 10, PhilHealth 12, Pag-IBIG 12).
