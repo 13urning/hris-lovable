@@ -21,6 +21,7 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
+import { CalendarEventBanner } from "@/components/CalendarEventBanner";
 import { WhatsNewModal } from "@/components/WhatsNewModal";
 import { cn } from "@/lib/utils";
 import tidalLogo from "@/assets/tidal-logo.png";
@@ -172,6 +173,9 @@ export function AppShell() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
+        {/* Upcoming calendar events — above the page content, on every route.
+            Renders nothing when there's nothing due. */}
+        {user && <CalendarEventBanner />}
         <Outlet />
       </main>
 

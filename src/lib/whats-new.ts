@@ -42,6 +42,18 @@ export type WhatsNewEntry = {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "calendar-event-banner",
+    publishedAt: "2026-07-30",
+    title: "Event reminders moved out of the bell",
+    highlights: [
+      "Upcoming calendar events now appear as a banner at the top of the page.",
+      "The notification bell is approvals only — leave, overtime, and attendance disputes.",
+      "Dismiss a banner when you've seen it, or clear them all at once.",
+    ],
+    roles: "all",
+    major: true,
+  },
+  {
     id: "whats-new-launch",
     publishedAt: "2026-07-06",
     title: "Introducing “What’s New”",

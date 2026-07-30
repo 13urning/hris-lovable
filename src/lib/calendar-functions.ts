@@ -43,6 +43,35 @@ export type AppNotification = {
   created_at: string;
 };
 
+// An UNREAD calendar reminder, surfaced as a page banner instead of a bell item —
+// an upcoming event is ambient context, not an item to action and clear like an
+// approval. `id` is the notification id, which is also the dismiss key.
+export type EventBanner = {
+  id: string;
+  event_id: string | null;
+  title: string;
+  body: string | null;
+  location: string | null;
+  created_at: string;
+};
+
+// Banner rows returned per poll. A recipient with many due reminders sees the
+// soonest few plus a "+N more" hint rather than a wall of banners.
+const MAX_EVENT_BANNERS = 5;
+
+// A banner is for an event that is UPCOMING or IN PROGRESS. Past events are
+// noise, so a reminder stops bannering once its event is over:
+//   - explicit ends_at  -> that instant
+//   - all-day           -> end of that PH day
+//   - timed, no end     -> start + this grace, so a "Happening now" ping (offset
+//                          0) doesn't vanish the moment the meeting begins
+// A reminder whose event row was deleted (event_id SET NULL) has no start to
+// judge, so it falls back to a short window on when the reminder landed. That
+// fallback also keeps a pre-existing backlog of old unread reminders from
+// erupting as banners the first time a user loads this build.
+const BANNER_GRACE_AFTER_START = "2 hours";
+const BANNER_ORPHAN_WINDOW = "7 days";
+
 // ── Input schemas ─────────────────────────────────────────────────────────────
 // Bounds mirror the CHECK constraints in 20260703150000_calendar_events_reminders.sql
 // so bad input fails fast with a stable error code instead of a raw pg error.
@@ -431,6 +460,11 @@ export const fetchProfilesForEventPicker = createServerFn({ method: "POST" })
 // desired inbox behavior. The partial unique index on notifications(reminder_id)
 // makes the INSERT the atomic claim — concurrent polls (or the 3 prod Cloud Run
 // instances) can race freely and at most one insert wins per reminder.
+//
+// TWO AUDIENCES, ONE CALL. Calendar reminders are split out of `items`/`unreadCount`
+// and returned as `events` for the page banner (see CalendarEventBanner); the bell
+// carries only actionable approval traffic — leave, OT, disputes. Both consumers
+// share this one query, so the split costs no extra round-trip.
 export const getMyNotifications = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
@@ -461,9 +495,12 @@ export const getMyNotifications = createServerFn({ method: "POST" })
       [me],
     );
 
-    const [countRes, listRes] = await Promise.all([
+    const [countRes, listRes, bannerRes] = await Promise.all([
+      // Bell counts/lists only actionable traffic. Reminders are excluded here so
+      // an upcoming event never leaves an unread badge the user can't clear from
+      // the bell — the banner owns them.
       pool.query<{ unread: number }>(
-        `SELECT count(*) FILTER (WHERE read_at IS NULL)::int AS unread
+        `SELECT count(*) FILTER (WHERE read_at IS NULL AND type <> 'event_reminder')::int AS unread
            FROM notifications WHERE user_id = $1`,
         [me],
       ),
@@ -471,14 +508,48 @@ export const getMyNotifications = createServerFn({ method: "POST" })
         `SELECT id, type, event_id, ref_id, title, body, read_at, created_at
            FROM notifications
           WHERE user_id = $1
+            AND type <> 'event_reminder'
           ORDER BY created_at DESC
           LIMIT 50`,
         [me],
       ),
+      // Soonest-first: an event still ahead is more useful at the top than the
+      // most recently materialized one. `count(*) OVER ()` is evaluated before
+      // LIMIT, so it yields the FULL number of live banners — that's what makes
+      // the "+N more" hint accurate rather than a guess.
+      pool.query<EventBanner & { total: number }>(
+        `SELECT n.id, n.event_id, n.title, n.body, e.location, n.created_at,
+                count(*) OVER ()::int AS total
+           FROM notifications n
+           LEFT JOIN calendar_events e ON e.id = n.event_id
+          WHERE n.user_id = $1
+            AND n.type = 'event_reminder'
+            AND n.read_at IS NULL
+            AND CASE
+                  -- Event deleted: no start to judge against, so age it out.
+                  WHEN e.id IS NULL THEN n.created_at >= now() - $4::interval
+                  -- Otherwise: still upcoming or in progress?
+                  ELSE COALESCE(
+                         e.ends_at,
+                         CASE WHEN e.all_day THEN e.starts_at + interval '1 day'
+                              ELSE e.starts_at + $3::interval END
+                       ) >= now()
+                END
+          ORDER BY COALESCE(e.starts_at, n.created_at)
+          LIMIT $2`,
+        [me, MAX_EVENT_BANNERS, BANNER_GRACE_AFTER_START, BANNER_ORPHAN_WINDOW],
+      ),
     ]);
+    const eventsUnread = bannerRes.rows[0]?.total ?? 0;
+    // Drop the window-function column — it's a per-row echo of one total, not
+    // part of the banner payload.
+    const events: EventBanner[] = bannerRes.rows.map(({ total: _total, ...b }) => b);
     return {
       unreadCount: countRes.rows[0]?.unread ?? 0,
       items: listRes.rows as AppNotification[],
+      events,
+      // How many are NOT shown, so the banner can say "+N more" honestly.
+      eventsHidden: Math.max(0, eventsUnread - events.length),
     };
   });
 
@@ -497,13 +568,30 @@ export const markNotificationRead = createServerFn({ method: "POST" })
     );
   });
 
+// "Mark all read" in the BELL clears only what the bell shows. Calendar reminders
+// are deliberately untouched — they live in the banner and are dismissed there, so
+// clearing the inbox can't silently wipe an event heads-up the user never saw.
 export const markAllNotificationsRead = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
     await pool.query(
-      `UPDATE notifications SET read_at = now() WHERE user_id = $1 AND read_at IS NULL`,
+      `UPDATE notifications SET read_at = now()
+        WHERE user_id = $1 AND read_at IS NULL AND type <> 'event_reminder'`,
+      [context.user.dbUserId],
+    );
+  });
+
+// The banner's "Dismiss all" — the mirror image of the above, scoped to reminders.
+export const dismissAllEventBanners = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    assertUser(context.user);
+    const { pool } = await import("@/lib/db.server");
+    await pool.query(
+      `UPDATE notifications SET read_at = now()
+        WHERE user_id = $1 AND read_at IS NULL AND type = 'event_reminder'`,
       [context.user.dbUserId],
     );
   });

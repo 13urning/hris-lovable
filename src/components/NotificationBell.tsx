@@ -10,15 +10,17 @@ import {
 } from "@/lib/calendar-functions";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Bell, CalendarClock, CheckCheck, Clock3, Plane, Timer } from "lucide-react";
+import { Bell, CheckCheck, Clock3, Plane, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // type → icon + deep-link. Icons match the nav (Plane = leaves, Timer = OT,
-// Clock3 = attendance). route null = mark-read only (event reminders have no
-// destination page). Requests and decisions share a route: each page already
+// Clock3 = attendance). Requests and decisions share a route: each page already
 // shows the approver queue and the requester's own history side by side.
+//
+// Calendar reminders are NOT here: the server excludes them from this inbox and
+// surfaces them in CalendarEventBanner instead. Everything the bell shows is
+// actionable and has somewhere to go.
 const NOTIF_META: Record<string, { icon: typeof Bell; route: string | null }> = {
-  event_reminder: { icon: CalendarClock, route: null },
   leave_request: { icon: Plane, route: "/leaves" },
   leave_decision: { icon: Plane, route: "/leaves" },
   ot_request: { icon: Timer, route: "/ot-approvals" },
@@ -27,10 +29,11 @@ const NOTIF_META: Record<string, { icon: typeof Bell; route: string | null }> = 
   dispute_decision: { icon: Clock3, route: "/dtr" },
 };
 
-// Bell + unread badge for the app header. Polls the inbox once a minute while
-// the tab is focused — the server materializes any due event reminders for the
-// caller inside this same call; approval notifications are inserted eagerly by
-// the leave/OT/dispute mutations and just show up on the next poll.
+// Bell + unread badge for the app header: approval traffic only (leave, OT,
+// attendance disputes), inserted eagerly by those mutations and picked up on the
+// next poll. Polls once a minute while the tab is focused. The same call also
+// materializes due calendar reminders and returns them separately for
+// CalendarEventBanner, which shares this query key — one poll feeds both.
 export function NotificationBell() {
   const qc = useQueryClient();
   const navigate = useNavigate();
