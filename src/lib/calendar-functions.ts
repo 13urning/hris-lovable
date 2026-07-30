@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { authMiddleware, assertUser, assertAdmin } from "@/lib/auth-middleware";
 import { generateOccurrenceDates, MAX_OCCURRENCES_PER_SERIES } from "@/lib/recurrence";
+import { logError } from "@/lib/log.server";
 
 export type EventReminder = {
   id: string;
@@ -169,7 +170,7 @@ const KNOWN_ERRORS = new Set([
 function rethrowMapped(err: unknown): never {
   if (isRecipientFkError(err)) throw new Error("INVALID_RECIPIENT");
   if (err instanceof Error && KNOWN_ERRORS.has(err.message)) throw err;
-  console.error("calendar-functions:", err);
+  logError("calendar_functions_internal_error", err);
   throw new Error("INTERNAL_ERROR");
 }
 

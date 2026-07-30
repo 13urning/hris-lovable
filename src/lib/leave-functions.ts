@@ -6,6 +6,11 @@ import {
   LEAVE_WRITE_RATE_LIMIT,
   LEAVE_ONBEHALF_RATE_LIMIT,
 } from "@/lib/rate-limit.server";
+// Approving a leave changes how the covered dates are GRADED (a half-day halves
+// the undertime bar; an AM half-day waives the 09:00 late cutoff). If the
+// employee already punched those dates — they clocked in, then the approval
+// landed — the stored flags are stale and must be re-derived.
+import { recomputeLeaveRangeFlags } from "@/lib/work-hours";
 
 // Reject a new leave whose dates overlap an existing ACTIVE (pending or approved)
 // leave for the same employee — the duplicate/overlapping filings this guards
@@ -255,6 +260,11 @@ export const fileLeaveRequest = createServerFn({ method: "POST" })
           halfDayPeriod,
         ],
       );
+      // Auto-approved on filing (Group Head, no one above) — the leave is live
+      // immediately, so re-grade any day they've already punched in this range.
+      if (isAutoApproved) {
+        await recomputeLeaveRangeFlags(client, context.user.dbUserId, startDate, endDate);
+      }
       // Nudge the first approver's inbox. Auto-approved filings skip it — the
       // filer is the actor and sees the approved state immediately.
       if (!isAutoApproved) {
@@ -383,6 +393,11 @@ export const fileLeaveOnBehalf = createServerFn({ method: "POST" })
           halfDayPeriod,
         ],
       );
+      // HR filed it already-approved: re-grade any day the employee has already
+      // punched in this range, since the leave is live from this moment.
+      if (autoApprove) {
+        await recomputeLeaveRangeFlags(client, data.employeeId, startDate, endDate);
+      }
       // Routed on-behalf filing: the TARGET employee is the requester, so their
       // first approver gets the nudge, named after the employee (not the HR filer).
       if (!autoApprove) {
@@ -434,11 +449,18 @@ export const approveLeaveStep = createServerFn({ method: "POST" })
         leave_type: string;
         start_date: string;
         end_date: string;
+        start_iso: string;
+        end_iso: string;
         half_day: boolean;
         half_day_period: string | null;
       }>(
+        // start_iso/end_iso are the plain calendar dates (the driver hands back
+        // start_date/end_date as Date objects, which round-trip through timezones
+        // badly); the recompute below needs exact YYYY-MM-DD bounds.
         `SELECT approver_chain, current_approver_index, status,
-                employee_id, leave_type, start_date, end_date, half_day, half_day_period
+                employee_id, leave_type, start_date, end_date, half_day, half_day_period,
+                to_char(start_date, 'YYYY-MM-DD') AS start_iso,
+                to_char(end_date,   'YYYY-MM-DD') AS end_iso
          FROM leave_requests WHERE id = $1 FOR UPDATE`,
         [data.id],
       );
@@ -467,6 +489,9 @@ export const approveLeaveStep = createServerFn({ method: "POST" })
             WHERE id = $5`,
           [nextIndex, context.user.dbUserId, new Date().toISOString(), data.notes ?? null, data.id],
         );
+        // Now that the leave is live, re-grade any covered day the employee has
+        // already punched — the flags written at clock-in/out assumed no leave.
+        await recomputeLeaveRangeFlags(client, req.employee_id, req.start_iso, req.end_iso);
         await notifyUser(client, {
           userId: req.employee_id,
           type: "leave_decision",
@@ -614,14 +639,29 @@ export const deleteLeaveRequest = createServerFn({ method: "POST" })
     const { pool } = await import("@/lib/db.server");
     const {
       rows: [req],
-    } = await pool.query<{ employee_id: string; status: string }>(
-      `SELECT employee_id, status FROM leave_requests WHERE id = $1`,
+    } = await pool.query<{
+      employee_id: string;
+      status: string;
+      start_iso: string;
+      end_iso: string;
+    }>(
+      `SELECT employee_id, status,
+              to_char(start_date, 'YYYY-MM-DD') AS start_iso,
+              to_char(end_date,   'YYYY-MM-DD') AS end_iso
+         FROM leave_requests WHERE id = $1`,
       [data.id],
     );
     if (!req) throw new Error("NOT_FOUND");
     const isOwner = req.employee_id === context.user.dbUserId;
     if (!isOwner && !context.user.isHR) throw new Error("FORBIDDEN");
     await pool.query(`DELETE FROM leave_requests WHERE id = $1`, [data.id]);
+    // Deleting an APPROVED leave puts the full 9h day and the 09:00 cutoff back,
+    // so the days it was covering have to be re-graded — otherwise they keep the
+    // relaxed flags of a leave that no longer exists. (Cancel/reject can't reach
+    // here: both refuse anything that isn't still pending.)
+    if (req.status === "approved") {
+      await recomputeLeaveRangeFlags(pool, req.employee_id, req.start_iso, req.end_iso);
+    }
   });
 
 // Soft-cancel a leave request: owner can cancel their own pending request,

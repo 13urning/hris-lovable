@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware, assertUser } from "@/lib/auth-middleware";
 import { WHATS_NEW } from "@/lib/whats-new";
 import { visibleEntries } from "@/lib/whats-new-select";
+import { logError } from "@/lib/log.server";
 
 // Stable error codes assertUser can throw; anything else is masked to
 // INTERNAL_ERROR so raw pg/runtime internals never reach a client toast.
@@ -9,7 +10,7 @@ const KNOWN_ERRORS = new Set(["UNAUTHENTICATED", "NO_PROFILE", "FORBIDDEN"]);
 
 function rethrowMapped(err: unknown): never {
   if (err instanceof Error && KNOWN_ERRORS.has(err.message)) throw err;
-  console.error("whats-new-functions:", err);
+  logError("whats_new_functions_internal_error", err);
   throw new Error("INTERNAL_ERROR");
 }
 

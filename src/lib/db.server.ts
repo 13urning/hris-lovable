@@ -31,4 +31,17 @@ const pool = new Pool(
       },
 );
 
+// DEFECT FIX, not only an observability gap. `pg` emits 'error' on an idle
+// client that dies out from under the pool — a Cloud SQL restart, a reaped
+// connection, a network blip. An EventEmitter 'error' with NO listener does not
+// warn: it throws, and an uncaught throw here terminates the Node process. With
+// prod and staging sharing one db-f1-micro, that is a live way to lose a
+// container silently. Attaching a listener both fixes the crash and gives us the
+// first visibility we have ever had into pool faults.
+pool.on("error", (err) => {
+  void import("@/lib/log.server").then(({ logError }) => {
+    logError("pg_pool_idle_client_error", err);
+  });
+});
+
 export { pool };

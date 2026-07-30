@@ -9,6 +9,7 @@ const DIAGRAMS = [
   { svg: 'security-diagram-1-architecture.svg', png: 'security-diagram-1-architecture.png', w: 1000, h: 700 },
   { svg: 'security-diagram-2-web-clockin.svg', png: 'security-diagram-2-web-clockin.png', w: 1000, h: 570 },
   { svg: 'security-diagram-3-device-api.svg', png: 'security-diagram-3-device-api.png', w: 1000, h: 600 },
+  { svg: 'security-diagram-4-observability.svg', png: 'security-diagram-4-observability.png', w: 1000, h: 690 },
 ];
 
 const CHROME_PATHS = [

@@ -1,31 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware, assertUser, assertAdmin } from "@/lib/auth-middleware";
-
-// ── Shared time math (kept in sync with dtr-functions.ts) ──────────────────────
-// Company-wide tardiness rule: any clock-in after 09:00 is late. Returns minutes
-// past 09:00 (0 = on time). Official Business ("OB") days are never late-flagged.
-const LATE_CUTOFF_MINUTES = 9 * 60;
-const STANDARD_HOURS = 9;
-
-function lateMinutesFor(timeIn: string): number {
-  const [h, m] = timeIn.split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
-  return Math.max(0, h * 60 + m - LATE_CUTOFF_MINUTES);
-}
-
-function minutesOf(time: string): number {
-  const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
-}
-
-// Hours worked / undertime from a time_in/time_out pair, matching clockOutDTR.
-function computeWorked(timeIn: string, timeOut: string) {
-  const totalMins = minutesOf(timeOut) - minutesOf(timeIn);
-  const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
-  const isUndertime = hoursWorked < STANDARD_HOURS;
-  const undertimeMins = isUndertime ? Math.max(0, Math.round(STANDARD_HOURS * 60 - totalMins)) : 0;
-  return { hoursWorked, isUndertime, undertimeMins };
-}
+// Lateness / hours / undertime come from the shared workday rule, so an approved
+// dispute grades the day exactly like a live punch does — including the OB and
+// approved-leave exemptions.
+import { computeDayFlags, leaveCoverageFor, minutesOfDay } from "@/lib/work-hours";
 
 // Normalize a "HH:MM" / "HH:MM:SS" string to "HH:MM" (or null).
 function normTime(t: string | null | undefined): string | null {
@@ -102,7 +80,7 @@ export const fileAttendanceDispute = createServerFn({ method: "POST" })
     const reqTimeOut = normTime(data.timeOut);
     const reqShift = data.shiftLabel || null;
     if (!reqTimeIn) throw new Error("TIME_IN_REQUIRED");
-    if (reqTimeOut && minutesOf(reqTimeOut) <= minutesOf(reqTimeIn)) {
+    if (reqTimeOut && minutesOfDay(reqTimeOut) <= minutesOfDay(reqTimeIn)) {
       throw new Error("TIME_OUT_BEFORE_IN");
     }
 
@@ -214,7 +192,7 @@ async function applyDisputeToDTR(
     requested_time_out: string | null;
     requested_shift_label: string | null;
   }>(
-    `SELECT employee_id, dtr_id, work_date,
+    `SELECT employee_id, dtr_id, to_char(work_date, 'YYYY-MM-DD') AS work_date,
             requested_time_in, requested_time_out, requested_shift_label
        FROM attendance_disputes WHERE id = $1`,
     [disputeId],
@@ -224,16 +202,19 @@ async function applyDisputeToDTR(
   const timeIn = d.requested_time_in;
   const timeOut = d.requested_time_out;
   const shift = d.requested_shift_label;
-  const isOB = shift === "OB";
 
   // No clock-in means nothing meaningful to apply.
   if (!timeIn) return;
 
-  const lateMinutes = isOB ? 0 : lateMinutesFor(timeIn);
-  const worked = timeOut ? computeWorked(timeIn, timeOut) : null;
-  const hoursWorked = worked?.hoursWorked ?? 0;
-  const isUndertime = worked?.isUndertime ?? false;
-  const undertimeMins = worked?.undertimeMins ?? 0;
+  // An approved leave covering this date relaxes the day's bars: an AM half-day
+  // (or full day) waives the 09:00 cutoff, and a half-day halves the 9h standard.
+  const coverage = await leaveCoverageFor(db, d.employee_id, d.work_date);
+  const { lateMinutes, hoursWorked, isUndertime, undertimeMins } = computeDayFlags({
+    timeIn,
+    timeOut,
+    shiftLabel: shift,
+    coverage,
+  });
 
   if (d.dtr_id) {
     await db.query(

@@ -1,0 +1,73 @@
+<mxGraphModel dx="1169" dy="827" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <mxCell id="title" value="FIGURE 4 — OBSERVABILITY AND LOG PIPELINE" style="text;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontFamily=Montserrat;fontSize=13;fontStyle=1;fontColor=#010101;" vertex="1" parent="1">
+      <mxGeometry x="380" y="14" width="400" height="26" as="geometry" />
+    </mxCell>
+    <mxCell id="titleRule" value="" style="line;strokeColor=#036A6B;fillColor=none;strokeWidth=2;" vertex="1" parent="1">
+      <mxGeometry x="290" y="40" width="580" height="10" as="geometry" />
+    </mxCell>
+
+    <mxCell id="zone" value="CLOUD RUN — wave-hris (Nitro node-server)" style="rounded=1;arcSize=4;whiteSpace=wrap;html=1;fillColor=#F5FAFA;strokeColor=#15A6A1;dashed=1;dashPattern=5 3;verticalAlign=top;fontFamily=Montserrat;fontSize=10;fontStyle=1;fontColor=#036A6B;" vertex="1" parent="1">
+      <mxGeometry x="288" y="80" width="384" height="344" as="geometry" />
+    </mxCell>
+
+    <mxCell id="srcBrowser" value="Browser — RPC / SSR&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;106 server functions&lt;br&gt;Firebase ID token per call&lt;br&gt;X-Cloud-Trace-Context header&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#15A6A1;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="70" y="120" width="188" height="76" as="geometry" />
+    </mxCell>
+    <mxCell id="srcDevice" value="Attendance device&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;X-Device-Key, raw HTTP&lt;br&gt;no human session&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#15A6A1;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="70" y="220" width="188" height="66" as="geometry" />
+    </mxCell>
+    <mxCell id="srcProc" value="Process-level faults&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#cccccc'&gt;process.on uncaughtException&lt;br&gt;process.on unhandledRejection&lt;br&gt;pool.on error (pg idle client)&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#393939;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="70" y="310" width="188" height="80" as="geometry" />
+    </mxCell>
+
+    <mxCell id="l1" value="1 · src/server.ts — request context (AsyncLocalStorage)&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;traceId parsed from X-Cloud-Trace-Context, requestId, method, path, APP_ENV&lt;br&gt;one user action becomes one correlated thread in Log Explorer&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#036A6B;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="306" y="114" width="348" height="66" as="geometry" />
+    </mxCell>
+    <mxCell id="l2" value="2 · auth-middleware.ts — observability wrapper&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;try { await next() } catch { logError(...); throw err } — rethrows unchanged&lt;br&gt;adds serverFn name, dbUserId / firebaseUid, latency, outcome&lt;br&gt;single choke point: 102 authMiddleware + 4 strictAuthMiddleware&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#036A6B;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="306" y="196" width="348" height="80" as="geometry" />
+    </mxCell>
+    <mxCell id="l3" value="3 · log-redact.ts — ALLOWLIST GATE (RA 10173)&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;emits only: err.name, code (SQLSTATE), constraint, severity, routine, stack&lt;br&gt;hard-drops: detail, hint, where, internalQuery, parameters, request bodies&lt;br&gt;final sweep: email + long digit-run scrub (TIN / SSS / PhilHealth / Pag-IBIG)&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#15A6A1;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="306" y="292" width="348" height="72" as="geometry" />
+    </mxCell>
+    <mxCell id="l4" value="stdout — one Cloud Logging JSON object per line" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#393939;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="306" y="380" width="348" height="34" as="geometry" />
+    </mxCell>
+
+    <mxCell id="clIngest" value="Cloud Logging — ingest and parse&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;severity, trace, spanId, labels, httpRequest&lt;br&gt;no agent, no sidecar, no second service&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#036A6B;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="704" y="114" width="306" height="72" as="geometry" />
+    </mxCell>
+    <mxCell id="clRouter" value="Log Router — retention and access&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#cccccc'&gt;prod bucket — 90 days, restricted Log View&lt;br&gt;staging _Default — 30 days&lt;br&gt;security-audit view — 400 days (narrow scope)&lt;br&gt;reader: wave-hris-log-readers group (IAM)&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#393939;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="704" y="204" width="306" height="98" as="geometry" />
+    </mxCell>
+    <mxCell id="clErr" value="Error Reporting&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;groups by signature via the ReportedErrorEvent @type&lt;br&gt;notifies on a NEW error signature&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#15A6A1;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="704" y="320" width="306" height="66" as="geometry" />
+    </mxCell>
+    <mxCell id="clMetrics" value="Log-based metrics&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;server_fn_calls / server_fn_errors, labelled by fn + env&lt;br&gt;enables per-function failure alerting&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#15A6A1;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="704" y="404" width="306" height="66" as="geometry" />
+    </mxCell>
+
+    <mxCell id="alerts" value="Cloud Monitoring alert policies  →  Email + Google Chat webhook (business-hours response)&lt;br&gt;&lt;font style='font-size:9px;font-weight:400;color:#c8eeee'&gt;new error signature · any single server function ≥5 errors / 10 min · error ratio &amp;gt;5% / 10 min · Cloud Run 5xx class&lt;br&gt;uptime check on prod / · Cloud SQL CPU &amp;gt;80% and disk &amp;gt;85% · log ingestion &amp;gt;25 GiB per month (cost guard)&lt;br&gt;all policies filtered by APP_ENV so production pages and staging does not&lt;/font&gt;" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;strokeColor=none;fontFamily=Montserrat;fontSize=11;fontStyle=1;fillColor=#036A6B;fontColor=#FFFFFF;" vertex="1" parent="1">
+      <mxGeometry x="288" y="490" width="722" height="72" as="geometry" />
+    </mxCell>
+
+    <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="srcBrowser" target="l1"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="srcDevice" target="l1"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#393939;strokeWidth=1.3;dashed=1;dashPattern=4 3;endArrow=block;endFill=1;" edge="1" parent="1" source="srcProc" target="l3"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="l1" target="l2"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="l2" target="l3"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="l3" target="l4"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e7" value="stdout capture (Cloud Run native)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;fontFamily=Montserrat;fontSize=9;fontColor=#036A6B;" edge="1" parent="1" source="l4" target="clIngest"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="clIngest" target="clRouter"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="clRouter" target="clErr"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="clErr" target="clMetrics"><mxGeometry relative="1" as="geometry" /></mxCell>
+    <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#036A6B;strokeWidth=1.6;endArrow=block;endFill=1;" edge="1" parent="1" source="clMetrics" target="alerts"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+    <mxCell id="note" value="WHY THIS CLOSES THE 23 JULY 2026 BLIND SPOT&#10;• A server-function throw is serialized to the client by the TanStack Start transport and never reaches the request middleware in start.ts or the fetch catch in server.ts, so a Postgres 42P08 broke all leave filing for four days with zero log entries.&#10;• Layer 2 sits INSIDE the server-function boundary, which is the only place the throw is observable. It logs stack + SQLSTATE, then rethrows the original error unchanged so control flow is untouched.&#10;• Every logging call is individually try-caught and fails open: a fault in the logger degrades a log line, never a request. Layer 3 is allowlist-based, so a new PII field is excluded by default rather than leaked by default.&#10;• Detection target: under 15 minutes from first occurrence, versus 4 days by employee email report." style="text;whiteSpace=wrap;html=1;rounded=1;arcSize=4;fillColor=#F5FAFA;strokeColor=none;align=left;verticalAlign=top;fontFamily=Montserrat;fontSize=9;fontColor=#393939;spacingLeft=10;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="70" y="582" width="940" height="94" as="geometry" />
+    </mxCell>
+  </root>
+</mxGraphModel>

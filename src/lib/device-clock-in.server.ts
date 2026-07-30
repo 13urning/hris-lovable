@@ -33,6 +33,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { pool } from "@/lib/db.server";
 import { resolveClientIp, assertOnOfficeNetwork } from "@/lib/office-network-functions";
+// Day GRADING (lateness + undertime, and how an approved leave relaxes both) IS
+// shared with the interactive flow, unlike the PH time helpers below which are
+// deliberately duplicated. A device tap and a web punch must never disagree about
+// whether the same day was late or undertime — that divergence is a payroll
+// defect, not isolation.
+import { computeDayFlags, leaveCoverageFor } from "@/lib/work-hours";
+import { logError, logInfo, logWarn } from "@/lib/log.server";
 
 // -- PH time -------------------------------------------------------------------
 // Cloud Run runs in UTC; the business operates in PH (UTC+8, no DST). These mirror
@@ -41,17 +48,6 @@ import { resolveClientIp, assertOnOfficeNetwork } from "@/lib/office-network-fun
 function phNow(): Date {
   return new Date(Date.now() + 8 * 60 * 60 * 1000);
 }
-// Company-wide tardiness rule: any clock-in after 09:00 PH is late. Identical to
-// dtr-functions.ts (LATE_CUTOFF_MINUTES) - duplicated intentionally (see above).
-const LATE_CUTOFF_MINUTES = 9 * 60;
-function lateMinutesFor(timeIn: string): number {
-  const [h, m] = timeIn.split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
-  return Math.max(0, h * 60 + m - LATE_CUTOFF_MINUTES);
-}
-
-// Standard workday length for undertime; mirrors clockOutDTR's STANDARD (9h).
-const STANDARD_HOURS = 9;
 
 // Minimum minutes between clock-IN and clock-OUT on the same daily row. A 2nd tap
 // sooner than this is treated as an accidental re-tap (NFC bounce / unsure user)
@@ -63,22 +59,6 @@ const MIN_DWELL_MINUTES = 5;
 function minutesOfDay(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
-}
-
-// Server-side hours computation, mirroring clockOutDTR in dtr-functions.ts. Same
-// same-day assumption; Math.max(0, ...) clamps out-before-in to 0 (overnight
-// shifts are unsupported here, exactly as in the interactive web flow).
-function computeHours(
-  timeIn: string,
-  timeOut: string,
-): { hoursWorked: number; isUndertime: boolean; undertimeMinutes: number } {
-  const totalMins = minutesOfDay(timeOut) - minutesOfDay(timeIn);
-  const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
-  const isUndertime = hoursWorked < STANDARD_HOURS;
-  const undertimeMinutes = isUndertime
-    ? Math.max(0, Math.round(STANDARD_HOURS * 60 - totalMins))
-    : 0;
-  return { hoursWorked, isUndertime, undertimeMinutes };
 }
 
 // -- Device authentication -----------------------------------------------------
@@ -205,13 +185,16 @@ export async function handleDeviceVerify(request: Request): Promise<Response> {
 
   const device = authenticateDevice(request.headers.get("x-device-key"));
   if (!device) {
-    console.warn(`[device-verify] unauthorized ip=${ip}`);
+    logWarn("device_verify_unauthorized", { ip });
     return json(401, { ok: false, code: "UNAUTHORIZED" });
   }
 
-  console.log(
-    `[device-verify] ok keyId=${keyId(device.key)} label=${device.label} channel=${device.channel} ip=${ip}`,
-  );
+  logInfo("device_verify_ok", {
+    keyId: keyId(device.key),
+    label: device.label,
+    channel: device.channel,
+    ip,
+  });
   return json(200, {
     ok: true,
     code: "KEY_VALID",
@@ -240,7 +223,7 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
   // Device auth - fail closed.
   const device = authenticateDevice(request.headers.get("x-device-key"));
   if (!device) {
-    console.warn(`[device-clockin] unauthorized ip=${ip}`);
+    logWarn("device_clockin_unauthorized", { ip });
     return json(401, { ok: false, code: "UNAUTHORIZED" });
   }
 
@@ -279,9 +262,12 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     channel = device.channel === ANY_CHANNEL ? device.label : device.channel;
   }
   if (device.channel !== ANY_CHANNEL && channel !== device.channel) {
-    console.warn(
-      `[device-clockin] channel_not_allowed keyId=${keyId(device.key)} bound=${device.channel} requested=${channel} ip=${ip}`,
-    );
+    logWarn("device_clockin_channel_not_allowed", {
+      keyId: keyId(device.key),
+      label: device.label,
+      channel,
+      ip,
+    });
     return json(403, { ok: false, code: "CHANNEL_NOT_ALLOWED" });
   }
 
@@ -291,9 +277,7 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     try {
       await assertOnOfficeNetwork(pool, ip);
     } catch {
-      console.warn(
-        `[device-clockin] off_network label=${device.label} channel=${channel} ip=${ip}`,
-      );
+      logWarn("device_clockin_off_network", { label: device.label, channel, ip });
       return json(403, { ok: false, code: "OFF_NETWORK" });
     }
 
@@ -305,15 +289,14 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       [employeeCode],
     );
     if (matches.length === 0) {
-      console.warn(
-        `[device-clockin] not_found label=${device.label} channel=${channel} code=${employeeCode}`,
-      );
+      // The scanned employeeCode is a DIRECT identifier and is deliberately not
+      // logged. The label and channel are enough to locate the device that
+      // produced an unmatched scan.
+      logWarn("device_clockin_employee_not_found", { label: device.label, channel });
       return json(404, { ok: false, code: "EMPLOYEE_NOT_FOUND" });
     }
     if (matches.length > 1) {
-      console.warn(
-        `[device-clockin] ambiguous label=${device.label} channel=${channel} code=${employeeCode}`,
-      );
+      logWarn("device_clockin_ambiguous_employee", { label: device.label, channel });
       return json(409, { ok: false, code: "AMBIGUOUS_EMPLOYEE" });
     }
     const employee = matches[0];
@@ -321,7 +304,11 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
     const now = phNow();
     const workDate = now.toISOString().slice(0, 10); // YYYY-MM-DD (PH)
     const timeIn = now.toISOString().slice(11, 16); // HH:MM (PH)
-    const lateMinutes = lateMinutesFor(timeIn);
+    // An approved leave on this date relaxes BOTH bars: an AM half-day (or a full
+    // day) waives the 09:00 late cutoff, and a half-day halves the 9h undertime
+    // bar used at clock-out below. Devices carry no shift, so OB never applies.
+    const coverage = await leaveCoverageFor(pool, employee.id, workDate);
+    const { lateMinutes } = computeDayFlags({ timeIn, coverage });
 
     // First tap inserts the clock-in (race-safe: exactly one of two concurrent
     // first-taps wins the ON CONFLICT). A 2nd+ tap inserts nothing (0 rows) and
@@ -347,9 +334,12 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
 
       // State (c): already clocked out -> read-only no-op.
       if (row?.time_out) {
-        console.log(
-          `[device-clockin] already_out label=${device.label} channel=${channel} emp=${employee.id} date=${workDate}`,
-        );
+        logInfo("device_clockin_already_out", {
+          label: device.label,
+          channel,
+          employeeId: employee.id,
+          workDate,
+        });
         return json(200, {
           ok: true,
           code: "ALREADY_CLOCKED_OUT",
@@ -367,9 +357,13 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       const dwellMins = row?.time_in ? minutesOfDay(timeIn) - minutesOfDay(row.time_in) : 0;
       if (dwellMins < MIN_DWELL_MINUTES) {
         const retryAfterMinutes = Math.max(1, MIN_DWELL_MINUTES - dwellMins);
-        console.log(
-          `[device-clockin] too_soon label=${device.label} channel=${channel} emp=${employee.id} date=${workDate} dwell=${dwellMins}m`,
-        );
+        logInfo("device_clockin_too_soon", {
+          label: device.label,
+          channel,
+          employeeId: employee.id,
+          workDate,
+          dwellMins,
+        });
         return json(200, {
           ok: true,
           code: "CLOCKOUT_TOO_SOON",
@@ -388,7 +382,11 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       // server-side and time_out is filled ONCE - the `time_out IS NULL` guard
       // makes two concurrent 2nd-taps race-safe (exactly one wins).
       const timeOut = timeIn;
-      const { hoursWorked, isUndertime, undertimeMinutes } = computeHours(row.time_in, timeOut);
+      const {
+        hoursWorked,
+        isUndertime,
+        undertimeMins: undertimeMinutes,
+      } = computeDayFlags({ timeIn: row.time_in, timeOut, coverage });
       const { rows: updated } = await pool.query<{ time_out: string }>(
         `UPDATE daily_time_reports
             SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4,
@@ -414,9 +412,14 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
         });
       }
 
-      console.log(
-        `[device-clockin] clocked_out label=${device.label} channel=${channel} deviceId=${deviceId} emp=${employee.id} date=${workDate} in=${inAt} out=${timeOut} hours=${hoursWorked}`,
-      );
+      logInfo("device_clocked_out", {
+        label: device.label,
+        channel,
+        deviceId,
+        employeeId: employee.id,
+        workDate,
+        hoursWorked,
+      });
       return json(200, {
         ok: true,
         code: "CLOCKED_OUT",
@@ -430,9 +433,14 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       });
     }
 
-    console.log(
-      `[device-clockin] clocked_in label=${device.label} channel=${channel} deviceId=${deviceId} emp=${employee.id} date=${workDate} time=${timeIn} late=${lateMinutes}`,
-    );
+    logInfo("device_clocked_in", {
+      label: device.label,
+      channel,
+      deviceId,
+      employeeId: employee.id,
+      workDate,
+      lateMinutes,
+    });
     return json(201, {
       ok: true,
       code: "CLOCKED_IN",
@@ -442,8 +450,9 @@ export async function handleDeviceClockIn(request: Request): Promise<Response> {
       lateMinutes,
     });
   } catch (err) {
-    // Never leak SQL/stack to the device.
-    console.error("[device-clockin] server_error", err);
+    // Never leak SQL/stack to the device — but DO record it. The response stays
+    // an opaque SERVER_ERROR; the diagnosis lives in Cloud Logging.
+    logError("device_clockin_server_error", err);
     return json(500, { ok: false, code: "SERVER_ERROR" });
   }
 }

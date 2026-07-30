@@ -1,15 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { authMiddleware, assertUser, assertHR } from "@/lib/auth-middleware";
-
-// Company-wide tardiness rule: any clock-in after 09:00 is late, regardless of
-// the employee's shift. Returns minutes past 09:00 (0 = on time).
-const LATE_CUTOFF_MINUTES = 9 * 60; // 09:00
-function lateMinutesFor(timeIn: string): number {
-  const [h, m] = timeIn.split(":").map(Number);
-  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
-  return Math.max(0, h * 60 + m - LATE_CUTOFF_MINUTES);
-}
+import { computeDayFlags, leaveCoverageFor } from "@/lib/work-hours";
 
 // PH calendar date (UTC+8, no DST) as YYYY-MM-DD. Server-authoritative "today"
 // for absence computation — Cloud Run runs in UTC, so we offset explicitly
@@ -296,7 +288,14 @@ export const clockInDTR = createServerFn({ method: "POST" })
         await import("@/lib/office-network-functions");
       await assertOnOfficeNetwork(pool, resolveClientIp(getRequest()));
     }
-    const lateMinutes = isOfficialBusiness ? 0 : lateMinutesFor(data.timeIn);
+    // An approved AM half-day (or full-day) leave means the employee isn't due in
+    // until the afternoon, so the 09:00 cutoff is waived for this date.
+    const coverage = await leaveCoverageFor(pool, context.user.dbUserId, data.workDate);
+    const { lateMinutes } = computeDayFlags({
+      timeIn: data.timeIn,
+      shiftLabel: data.shiftLabel,
+      coverage,
+    });
     const loc = normalizeLocation(data.location);
     await pool.query(
       `INSERT INTO daily_time_reports (employee_id, work_date, time_in, shift_label, cutoff_id, is_undertime, undertime_minutes, late_minutes, clock_in_lat, clock_in_lon, clock_in_accuracy, clock_in_loc_status)
@@ -332,13 +331,15 @@ export const clockOutDTR = createServerFn({ method: "POST" })
     const {
       rows: [row],
     } = await pool.query<{
+      work_date: string;
       time_in: string | null;
       time_out: string | null;
       hours_worked: number | null;
       is_undertime: boolean | null;
       undertime_minutes: number | null;
     }>(
-      `SELECT time_in, time_out, hours_worked, is_undertime, undertime_minutes
+      `SELECT to_char(work_date, 'YYYY-MM-DD') AS work_date,
+              time_in, time_out, hours_worked, is_undertime, undertime_minutes
          FROM daily_time_reports WHERE id = $1 AND employee_id = $2`,
       [data.dtrId, context.user.dbUserId],
     );
@@ -359,13 +360,15 @@ export const clockOutDTR = createServerFn({ method: "POST" })
     // SERVER-authoritative clock-out moment (PH). A crafted `data.timeOut` can't
     // backdate or extend the punch.
     const timeOut = phNowHHMM();
-    const [ih, im] = row.time_in.split(":").map(Number);
-    const [oh, om] = timeOut.split(":").map(Number);
-    const totalMins = oh * 60 + om - (ih * 60 + im);
-    const hoursWorked = Math.max(0, Math.round((totalMins / 60) * 100) / 100);
-    const STANDARD = 9;
-    const isUndertime = hoursWorked < STANDARD;
-    const undertimeMins = isUndertime ? Math.max(0, Math.round(STANDARD * 60 - totalMins)) : 0;
+    // The bar is a full 9h day UNLESS an approved leave covers part of this date
+    // (a half-day leave halves it) — otherwise working the other half of a
+    // half-day would be flagged undertime.
+    const coverage = await leaveCoverageFor(pool, context.user.dbUserId, row.work_date);
+    const { hoursWorked, isUndertime, undertimeMins } = computeDayFlags({
+      timeIn: row.time_in,
+      timeOut,
+      coverage,
+    });
     const loc = normalizeLocation(data.location);
 
     // `AND time_out IS NULL` = write-once + race-safe (two concurrent clock-outs:

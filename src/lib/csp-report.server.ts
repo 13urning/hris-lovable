@@ -27,7 +27,8 @@ export async function handleCspReport(request: Request): Promise<Response> {
       // Log a bounded slice only — reports can be large and are attacker-influenced.
       // Not parsed, not stored; the newline strip keeps it to one log line.
       const slice = raw.slice(0, MAX_LOG_BYTES).replace(/[\r\n]+/g, " ");
-      console.warn(`[csp-report] ${slice}`);
+      const { logWarn } = await import("@/lib/log.server");
+      logWarn("csp_violation", { cspReport: slice });
     }
   } catch {
     // Reporting must never error back to the browser.
