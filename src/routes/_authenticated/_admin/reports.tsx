@@ -75,7 +75,9 @@ function ReportsPage() {
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
           Export attendance, leave, and overtime records to a single CSV. Attendance rows are
           selected by work date; leave and OT rows by the date the request was filed (Philippine
-          time). Use the record_type column to filter each dataset in a spreadsheet.
+          time). Use the record_type column to filter each dataset in a spreadsheet. Remarks appear
+          in two columns — requester_remarks (the leave reason or OT justification) and
+          approver_remarks (the reviewer&rsquo;s note).
         </p>
       </div>
 

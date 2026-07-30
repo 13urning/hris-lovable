@@ -17,6 +17,19 @@ export type ActivityReportResult = {
 
 // One unified column set across the three record types; irrelevant columns are
 // blank for a given record_type so the file filters cleanly in a spreadsheet.
+//
+// REMARKS COLUMNS. `reason_or_notes` is kept EXACTLY as it was — it is the
+// original column and saved spreadsheets key on it — but it is ambiguous: it
+// carries the REQUESTER's text on a leave row and the APPROVER's on an OT row,
+// so each type was silently missing half its commentary. The two explicit
+// columns below carry both halves for every type, and are appended at the end so
+// no existing column position shifts.
+//
+// The database keeps ONE `review_notes` per request, overwritten by each
+// approver (`COALESCE($new, review_notes)`), so on a multi-step chain only the
+// last approver who actually typed something survives. `approver_remarks` is
+// therefore the surviving note, not a full per-step history — that history was
+// never recorded and no export can reconstruct it.
 const REPORT_HEADERS = [
   "record_type",
   "employee_code",
@@ -42,7 +55,25 @@ const REPORT_HEADERS = [
   "status",
   "reason_or_notes",
   "requested_at_ph",
+  "requester_remarks",
+  "approver_remarks",
+  "reviewed_by_name",
+  "reviewed_at_ph",
 ] as const;
+
+// Exported for the header-contract test: the column set is an interface other
+// people's spreadsheets bind to, so a reordering or rename should fail a test
+// rather than a finance report.
+export const REPORT_COLUMNS: readonly string[] = REPORT_HEADERS;
+
+// Header row + one line per record, CRLF-terminated. Split out of the handler so
+// the escaping can actually be tested — the remarks columns are free text and
+// routinely contain the commas, quotes and newlines that break a naive CSV.
+export function buildReportCsv(rows: Record<string, unknown>[]): string {
+  const lines = [REPORT_HEADERS.join(",")];
+  for (const r of rows) lines.push(REPORT_HEADERS.map((h) => csvEscape(r[h])).join(","));
+  return lines.join("\r\n") + "\r\n";
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -100,7 +131,14 @@ export const generateActivityReport = createServerFn({ method: "POST" })
                     NULL::numeric AS ot_requested_hours, NULL AS ot_request_type, NULL AS ot_target_month,
                     d.overtime_hours, d.approval_status::text AS status,
                     d.notes AS reason_or_notes,
-                    to_char(d.created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS requested_at_ph
+                    to_char(d.created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS requested_at_ph,
+                    -- A DTR carries one free-text note and no reviewer of its
+                    -- own (approval_status mirrors the cutoff submission), so
+                    -- the approver/reviewer columns stay blank for attendance.
+                    d.notes AS requester_remarks,
+                    NULL AS approver_remarks,
+                    NULL AS reviewed_by_name,
+                    NULL AS reviewed_at_ph
                FROM daily_time_reports d
                JOIN users u ON u.id = d.employee_id
                LEFT JOIN profiles p ON p.id = d.employee_id
@@ -126,10 +164,17 @@ export const generateActivityReport = createServerFn({ method: "POST" })
                     NULL::numeric AS ot_requested_hours, NULL AS ot_request_type, NULL AS ot_target_month,
                     NULL::numeric AS overtime_hours, lr.status::text AS status,
                     lr.reason AS reason_or_notes,
-                    to_char(lr.created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS requested_at_ph
+                    to_char(lr.created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS requested_at_ph,
+                    lr.reason AS requester_remarks,
+                    lr.review_notes AS approver_remarks,
+                    rp.full_name AS reviewed_by_name,
+                    to_char(lr.reviewed_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS reviewed_at_ph
                FROM leave_requests lr
                JOIN users u ON u.id = lr.employee_id
                LEFT JOIN profiles p ON p.id = lr.employee_id
+               -- Deciding approver. LEFT JOIN so a still-pending request (no
+               -- reviewed_by yet) keeps its row instead of dropping out.
+               LEFT JOIN profiles rp ON rp.id = lr.reviewed_by
               WHERE lr.created_at >= $1::timestamp AT TIME ZONE 'Asia/Manila'
                 AND lr.created_at < ($2::date + 1)::timestamp AT TIME ZONE 'Asia/Manila'
                 AND COALESCE(u.email, p.email) IS DISTINCT FROM $3
@@ -150,7 +195,15 @@ export const generateActivityReport = createServerFn({ method: "POST" })
                     to_char(r.target_month, 'YYYY-MM') AS ot_target_month,
                     NULL::numeric AS overtime_hours, r.status,
                     r.review_notes AS reason_or_notes,
-                    to_char(r.created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS requested_at_ph
+                    to_char(r.created_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS requested_at_ph,
+                    -- The filing form requires a justification, so this is the
+                    -- OT requester's own words — never exported until now.
+                    r.justification AS requester_remarks,
+                    r.review_notes AS approver_remarks,
+                    -- ot_approval_requests has no reviewed_by column, so the OT
+                    -- reviewer's NAME is genuinely unavailable; the timestamp is.
+                    NULL AS reviewed_by_name,
+                    to_char(r.reviewed_at AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS reviewed_at_ph
                FROM ot_approval_requests r
                JOIN profiles p ON p.id = r.employee_id
                LEFT JOIN users u ON u.id = r.employee_id
@@ -170,11 +223,8 @@ export const generateActivityReport = createServerFn({ method: "POST" })
       ...(ot?.rows ?? []),
     ] as Record<string, unknown>[];
 
-    const lines = [REPORT_HEADERS.join(",")];
-    for (const r of rows) lines.push(REPORT_HEADERS.map((h) => csvEscape(r[h])).join(","));
-
     return {
-      csv: lines.join("\r\n") + "\r\n",
+      csv: buildReportCsv(rows),
       filename: `hris-report_${startDate}_to_${endDate}.csv`,
       counts: {
         attendance: attendance?.rowCount ?? 0,
