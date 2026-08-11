@@ -144,8 +144,7 @@ function OfficeNetworksPage() {
                     <>
                       Label: <span className="text-foreground">{label || "—"}</span>
                       <br />
-                      Range:{" "}
-                      <span className="font-mono text-foreground">{cidr || "—"}</span>
+                      Range: <span className="font-mono text-foreground">{cidr || "—"}</span>
                     </>
                   ),
                   confirmLabel: "Add network",
@@ -203,8 +202,7 @@ function OfficeNetworksPage() {
                             <>
                               Label: <span className="text-foreground">{n.label}</span>
                               <br />
-                              Range:{" "}
-                              <span className="font-mono text-foreground">{n.cidr}</span>
+                              Range: <span className="font-mono text-foreground">{n.cidr}</span>
                             </>
                           ),
                           confirmLabel: v ? "Activate" : "Deactivate",
@@ -230,8 +228,7 @@ function OfficeNetworksPage() {
                             <>
                               Label: <span className="text-foreground">{n.label}</span>
                               <br />
-                              Range:{" "}
-                              <span className="font-mono text-foreground">{n.cidr}</span>
+                              Range: <span className="font-mono text-foreground">{n.cidr}</span>
                             </>
                           ),
                           confirmLabel: "Remove network",

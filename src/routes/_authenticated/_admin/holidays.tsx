@@ -186,10 +186,7 @@ function HolidaysPage() {
                     "The date is excluded from absence tracking for everyone and appears on the dashboard.",
                   details: (
                     <>
-                      Date:{" "}
-                      <span className="text-foreground">
-                        {date ? formatDate(date) : "—"}
-                      </span>
+                      Date: <span className="text-foreground">{date ? formatDate(date) : "—"}</span>
                       <br />
                       Name: <span className="text-foreground">{name || "—"}</span>
                     </>
@@ -249,9 +246,7 @@ function HolidaysPage() {
                               Holiday: <span className="text-foreground">{h.name}</span>
                               <br />
                               Date:{" "}
-                              <span className="text-foreground">
-                                {formatDate(h.holiday_date)}
-                              </span>
+                              <span className="text-foreground">{formatDate(h.holiday_date)}</span>
                             </>
                           ),
                           confirmLabel: v ? "Activate" : "Deactivate",
@@ -276,9 +271,7 @@ function HolidaysPage() {
                               Holiday: <span className="text-foreground">{h.name}</span>
                               <br />
                               Date:{" "}
-                              <span className="text-foreground">
-                                {formatDate(h.holiday_date)}
-                              </span>
+                              <span className="text-foreground">{formatDate(h.holiday_date)}</span>
                             </>
                           ),
                           confirmLabel: "Remove holiday",

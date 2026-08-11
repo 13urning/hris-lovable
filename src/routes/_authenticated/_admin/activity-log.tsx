@@ -122,7 +122,9 @@ function LocationBadge({
         title={`${lat}, ${lon}${accuracy != null ? ` (±${Math.round(accuracy)}m)` : ""}`}
       >
         <MapPin className="h-3 w-3" /> Map
-        {accuracy != null ? <span className="text-muted-foreground">±{Math.round(accuracy)}m</span> : null}
+        {accuracy != null ? (
+          <span className="text-muted-foreground">±{Math.round(accuracy)}m</span>
+        ) : null}
       </a>
     );
   }

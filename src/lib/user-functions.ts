@@ -106,8 +106,7 @@ export const clearPasswordChangeFlag = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
-    await pool.query(
-      `UPDATE profiles SET must_change_password = FALSE WHERE id = $1`,
-      [context.user.dbUserId],
-    );
+    await pool.query(`UPDATE profiles SET must_change_password = FALSE WHERE id = $1`, [
+      context.user.dbUserId,
+    ]);
   });

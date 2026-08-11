@@ -449,15 +449,10 @@ function CalendarPage() {
                                   <>
                                     Event: <span className="text-foreground">{e.title}</span>
                                     <br />
-                                    When:{" "}
-                                    <span className="text-foreground">
-                                      {formatWhen(e)}
-                                    </span>
+                                    When: <span className="text-foreground">{formatWhen(e)}</span>
                                   </>
                                 ),
-                                confirmLabel: e.series_id
-                                  ? "Delete occurrence"
-                                  : "Delete event",
+                                confirmLabel: e.series_id ? "Delete occurrence" : "Delete event",
                                 pendingLabel: "Deleting…",
                                 destructive: true,
                                 onConfirm: () => remove.mutateAsync(e.id),
@@ -486,16 +481,11 @@ function CalendarPage() {
                                       Series: <span className="text-foreground">{e.title}</span>
                                       <br />
                                       Occurrences:{" "}
-                                      <span className="text-foreground">
-                                        {count ?? "all"}
-                                      </span>
+                                      <span className="text-foreground">{count ?? "all"}</span>
                                       <br />
                                       Repeats:{" "}
                                       <span className="text-foreground">
-                                        {seriesLabel(
-                                          e.series_frequency!,
-                                          e.series_interval ?? 1,
-                                        )}
+                                        {seriesLabel(e.series_frequency!, e.series_interval ?? 1)}
                                       </span>
                                     </>
                                   ),

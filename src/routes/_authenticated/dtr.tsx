@@ -328,9 +328,7 @@ function AttendancePage() {
                                   </span>
                                   <br />
                                   Date:{" "}
-                                  <span className="text-foreground">
-                                    {formatDate(d.work_date)}
-                                  </span>
+                                  <span className="text-foreground">{formatDate(d.work_date)}</span>
                                   <br />
                                   Change:{" "}
                                   <span className="tabular-nums text-foreground">
@@ -675,9 +673,7 @@ function AttendancePage() {
                               details: (
                                 <>
                                   Date:{" "}
-                                  <span className="text-foreground">
-                                    {formatDate(d.work_date)}
-                                  </span>
+                                  <span className="text-foreground">{formatDate(d.work_date)}</span>
                                   <br />
                                   Requested:{" "}
                                   <span className="tabular-nums text-foreground">

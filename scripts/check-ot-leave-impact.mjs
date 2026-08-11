@@ -8,23 +8,34 @@ import { Pool } from "pg";
 function loadEnv() {
   const env = {};
   let raw = "";
-  try { raw = readFileSync(new URL("../.env", import.meta.url), "utf8"); } catch { return env; }
+  try {
+    raw = readFileSync(new URL("../.env", import.meta.url), "utf8");
+  } catch {
+    return env;
+  }
   for (const line of raw.split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
     if (!m) continue;
     let v = m[2].trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+      v = v.slice(1, -1);
     env[m[1]] = v;
   }
   return env;
 }
 
 const [, , dbName] = process.argv;
-if (!dbName) { console.error("Usage: node scripts/check-ot-leave-impact.mjs <db-name>"); process.exit(1); }
+if (!dbName) {
+  console.error("Usage: node scripts/check-ot-leave-impact.mjs <db-name>");
+  process.exit(1);
+}
 const env = loadEnv();
 const pool = new Pool({
-  host: env.DB_HOST ?? "127.0.0.1", port: parseInt(env.DB_PORT ?? "5432", 10),
-  database: dbName, user: env.DB_USER ?? "postgres", password: env.DB_PASSWORD,
+  host: env.DB_HOST ?? "127.0.0.1",
+  port: parseInt(env.DB_PORT ?? "5432", 10),
+  database: dbName,
+  user: env.DB_USER ?? "postgres",
+  password: env.DB_PASSWORD,
   connectionTimeoutMillis: 8000,
 });
 
@@ -80,19 +91,29 @@ try {
   console.log(`### Database: ${dbName}\n`);
   console.log("== OT: 'Used'/'Remaining' before vs after (only rows the fix changes) ==");
   const ot = await client.query(OT_SQL);
-  if (!ot.rows.length) console.log("  (no employee/month affected — no non-approved filed OT against an approved budget)");
+  if (!ot.rows.length)
+    console.log(
+      "  (no employee/month affected — no non-approved filed OT against an approved budget)",
+    );
   for (const r of ot.rows) {
     const excluded = Number(r.used_old) - Number(r.used_new);
     console.log(`  ${r.employee} · ${r.month} · budget ${Number(r.budget).toFixed(1)}h`);
-    console.log(`     Used:      ${Number(r.used_old).toFixed(1)}h  ->  ${Number(r.used_new).toFixed(1)}h   (−${excluded.toFixed(1)}h: cancelled ${Number(r.cancelled_h).toFixed(1)}, rejected ${Number(r.rejected_h).toFixed(1)}, pending ${Number(r.pending_h).toFixed(1)})`);
-    console.log(`     Remaining: ${Number(r.remaining_old).toFixed(1)}h  ->  ${Number(r.remaining_new).toFixed(1)}h`);
+    console.log(
+      `     Used:      ${Number(r.used_old).toFixed(1)}h  ->  ${Number(r.used_new).toFixed(1)}h   (−${excluded.toFixed(1)}h: cancelled ${Number(r.cancelled_h).toFixed(1)}, rejected ${Number(r.rejected_h).toFixed(1)}, pending ${Number(r.pending_h).toFixed(1)})`,
+    );
+    console.log(
+      `     Remaining: ${Number(r.remaining_old).toFixed(1)}h  ->  ${Number(r.remaining_new).toFixed(1)}h`,
+    );
   }
 
   console.log("\n== Leaves: 'Total filed' before vs after (employees with cancelled leaves) ==");
   const lv = await client.query(LEAVE_SQL);
-  if (!lv.rows.length) console.log("  (no employee has cancelled leaves — count unchanged for everyone)");
+  if (!lv.rows.length)
+    console.log("  (no employee has cancelled leaves — count unchanged for everyone)");
   for (const r of lv.rows) {
-    console.log(`  ${r.employee}:  ${r.total_old}  ->  ${r.total_new}   (−${r.cancelled} cancelled; ${r.rejected} rejected still counted)`);
+    console.log(
+      `  ${r.employee}:  ${r.total_old}  ->  ${r.total_new}   (−${r.cancelled} cancelled; ${r.rejected} rejected still counted)`,
+    );
   }
 } catch (err) {
   console.error("ERROR:", err.message);

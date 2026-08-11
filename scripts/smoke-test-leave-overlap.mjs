@@ -17,7 +17,8 @@ function loadEnv() {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
     if (!m) continue;
     let v = m[2].trim();
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
+      v = v.slice(1, -1);
     env[m[1]] = v;
   }
   return env;
@@ -75,30 +76,65 @@ try {
   if (con.length !== 1) throw new Error("Constraint missing — aborting smoke test.");
 
   const { rows: users } = await client.query(`SELECT id FROM users LIMIT 1`);
-  if (!users.length) throw new Error("No users row available to satisfy the FK — cannot smoke test inserts.");
+  if (!users.length)
+    throw new Error("No users row available to satisfy the FK — cannot smoke test inserts.");
   const emp = users[0].id;
-  console.log(`Using employee_id ${emp}\nAll inserts run inside a transaction that is rolled back.\n`);
+  console.log(
+    `Using employee_id ${emp}\nAll inserts run inside a transaction that is rolled back.\n`,
+  );
 
   await client.query("BEGIN");
 
   // Baseline full-day multi-day leave 2099-01-10..2099-01-12
-  check("seed full-day 01-10..01-12", await tryInsert(emp, { start: "2099-01-10", end: "2099-01-12" }), "OK");
+  check(
+    "seed full-day 01-10..01-12",
+    await tryInsert(emp, { start: "2099-01-10", end: "2099-01-12" }),
+    "OK",
+  );
   // Overlapping full-day 01-11..01-13 -> blocked
-  check("overlap full-day 01-11..01-13 rejected", await tryInsert(emp, { start: "2099-01-11", end: "2099-01-13" }), "23P01");
+  check(
+    "overlap full-day 01-11..01-13 rejected",
+    await tryInsert(emp, { start: "2099-01-11", end: "2099-01-13" }),
+    "23P01",
+  );
   // Consecutive full-day 01-13..01-13 (day after the 01-12 end) -> allowed (half-open)
-  check("consecutive full-day 01-13 allowed", await tryInsert(emp, { start: "2099-01-13", end: "2099-01-13" }), "OK");
+  check(
+    "consecutive full-day 01-13 allowed",
+    await tryInsert(emp, { start: "2099-01-13", end: "2099-01-13" }),
+    "OK",
+  );
 
   // Half-day AM on a fresh day
-  check("half-day AM 01-20 allowed", await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20", half: true, period: "AM" }), "OK");
+  check(
+    "half-day AM 01-20 allowed",
+    await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20", half: true, period: "AM" }),
+    "OK",
+  );
   // Half-day PM same day, different period -> allowed
-  check("half-day PM 01-20 allowed (diff period)", await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20", half: true, period: "PM" }), "OK");
+  check(
+    "half-day PM 01-20 allowed (diff period)",
+    await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20", half: true, period: "PM" }),
+    "OK",
+  );
   // Half-day AM same day again -> blocked (same period)
-  check("half-day AM 01-20 again rejected", await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20", half: true, period: "AM" }), "23P01");
+  check(
+    "half-day AM 01-20 again rejected",
+    await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20", half: true, period: "AM" }),
+    "23P01",
+  );
   // Full-day on 01-20 -> blocked (overlaps both halves)
-  check("full-day 01-20 rejected (overlaps halves)", await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20" }), "23P01");
+  check(
+    "full-day 01-20 rejected (overlaps halves)",
+    await tryInsert(emp, { start: "2099-01-20", end: "2099-01-20" }),
+    "23P01",
+  );
 
   // Cancelled overlapping leave -> allowed (partial index ignores inactive)
-  check("cancelled overlap 01-10..01-12 allowed", await tryInsert(emp, { start: "2099-01-10", end: "2099-01-12", status: "cancelled" }), "OK");
+  check(
+    "cancelled overlap 01-10..01-12 allowed",
+    await tryInsert(emp, { start: "2099-01-10", end: "2099-01-12", status: "cancelled" }),
+    "OK",
+  );
 
   await client.query("ROLLBACK");
   console.log(`\nRolled back. Result: ${passed} passed, ${failed} failed.`);

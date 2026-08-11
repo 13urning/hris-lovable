@@ -260,8 +260,7 @@ function Dashboard() {
                       "This ends your workday and records your total hours. You can't clock in again today — if the time is wrong afterwards you'd have to file an attendance correction.",
                     details: (
                       <>
-                        Clocked in:{" "}
-                        <span className="text-foreground">{todayEntry!.time_in}</span>
+                        Clocked in: <span className="text-foreground">{todayEntry!.time_in}</span>
                         <br />
                         Shift:{" "}
                         <span className="text-foreground">

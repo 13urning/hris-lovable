@@ -794,9 +794,7 @@ function LeavesPage() {
                 <Label>Half-day period</Label>
                 <Select
                   value={form.half_day_period}
-                  onValueChange={(v) =>
-                    setForm({ ...form, half_day_period: v as "AM" | "PM" })
-                  }
+                  onValueChange={(v) => setForm({ ...form, half_day_period: v as "AM" | "PM" })}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -1203,9 +1201,7 @@ function LeavesPage() {
                                   details: (
                                     <>
                                       Employee:{" "}
-                                      <span className="text-foreground">
-                                        {p?.full_name ?? "—"}
-                                      </span>
+                                      <span className="text-foreground">{p?.full_name ?? "—"}</span>
                                       <br />
                                       Leave:{" "}
                                       <span className="text-foreground">

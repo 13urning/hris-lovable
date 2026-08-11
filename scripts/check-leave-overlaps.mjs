@@ -75,7 +75,9 @@ try {
             (SELECT count(*) FROM leave_requests) AS total,
             (SELECT count(*) FROM leave_requests WHERE status IN ('pending','approved')) AS active`,
   );
-  console.log(`Connected to "${meta[0].db}"  |  leave_requests: ${meta[0].total} total, ${meta[0].active} active (pending/approved)`);
+  console.log(
+    `Connected to "${meta[0].db}"  |  leave_requests: ${meta[0].total} total, ${meta[0].active} active (pending/approved)`,
+  );
 
   const { rows } = await client.query(OVERLAP_PAIRS);
   console.log(`\nOverlapping active pairs that would VIOLATE the constraint: ${rows.length}`);

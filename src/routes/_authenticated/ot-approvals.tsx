@@ -123,7 +123,9 @@ function StepBadge({ row }: { row: { current_approver_index: number; approver_ch
  * Cancelling reads the same on the budget table, the filed-hours table, and the
  * next-month summary card, so all three build their confirmation from here.
  */
-function cancelConfirmCopy(r: Pick<OTRequest, "request_type" | "requested_hours" | "target_month" | "work_date">) {
+function cancelConfirmCopy(
+  r: Pick<OTRequest, "request_type" | "requested_hours" | "target_month" | "work_date">,
+) {
   const isBudget = r.request_type === "pre_approved";
   return {
     title: isBudget ? "Cancel this OT budget request?" : "Cancel these filed OT hours?",

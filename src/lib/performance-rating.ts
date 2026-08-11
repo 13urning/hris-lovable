@@ -9,7 +9,7 @@ export const RATINGS = [
   "Partially Meets",
   "Below Expectations",
 ] as const;
-export type OverallRating = typeof RATINGS[number];
+export type OverallRating = (typeof RATINGS)[number];
 
 // kpi-behavioral key (rounded 1–5)
 const MATRIX: Record<string, OverallRating> = {
@@ -57,17 +57,42 @@ export function computeOverallRating(
 }
 
 export const RATING_COLORS: Record<OverallRating, { bg: string; text: string; border: string }> = {
-  "Outstanding":          { bg: "bg-emerald-100 dark:bg-emerald-950/40", text: "text-emerald-700 dark:text-emerald-400", border: "border-emerald-500/40" },
-  "Exceeds Expectations": { bg: "bg-green-100 dark:bg-green-950/40",     text: "text-green-700 dark:text-green-400",     border: "border-green-500/40" },
-  "Meets Expectations":   { bg: "bg-blue-100 dark:bg-blue-950/40",       text: "text-blue-700 dark:text-blue-400",       border: "border-blue-500/40" },
-  "Partially Meets":      { bg: "bg-yellow-100 dark:bg-yellow-950/40",   text: "text-yellow-700 dark:text-yellow-400",   border: "border-yellow-500/40" },
-  "Below Expectations":   { bg: "bg-red-100 dark:bg-red-950/40",         text: "text-red-700 dark:text-red-400",         border: "border-red-500/40" },
+  Outstanding: {
+    bg: "bg-emerald-100 dark:bg-emerald-950/40",
+    text: "text-emerald-700 dark:text-emerald-400",
+    border: "border-emerald-500/40",
+  },
+  "Exceeds Expectations": {
+    bg: "bg-green-100 dark:bg-green-950/40",
+    text: "text-green-700 dark:text-green-400",
+    border: "border-green-500/40",
+  },
+  "Meets Expectations": {
+    bg: "bg-blue-100 dark:bg-blue-950/40",
+    text: "text-blue-700 dark:text-blue-400",
+    border: "border-blue-500/40",
+  },
+  "Partially Meets": {
+    bg: "bg-yellow-100 dark:bg-yellow-950/40",
+    text: "text-yellow-700 dark:text-yellow-400",
+    border: "border-yellow-500/40",
+  },
+  "Below Expectations": {
+    bg: "bg-red-100 dark:bg-red-950/40",
+    text: "text-red-700 dark:text-red-400",
+    border: "border-red-500/40",
+  },
 };
 
 export const RATING_DESCRIPTIONS: Record<OverallRating, string> = {
-  "Outstanding":          "Exceptional performance on both KPIs and behavioral competencies. Role model for others.",
-  "Exceeds Expectations": "Surpassed most KPI targets and consistently demonstrated behavioral competencies.",
-  "Meets Expectations":   "Achieved all KPI targets and demonstrated behavioral competencies at the expected level.",
-  "Partially Meets":      "Met some KPI targets or behavioral expectations but requires improvement in key areas.",
-  "Below Expectations":   "Did not meet most KPI targets and/or behavioral competencies. Requires immediate improvement plan.",
+  Outstanding:
+    "Exceptional performance on both KPIs and behavioral competencies. Role model for others.",
+  "Exceeds Expectations":
+    "Surpassed most KPI targets and consistently demonstrated behavioral competencies.",
+  "Meets Expectations":
+    "Achieved all KPI targets and demonstrated behavioral competencies at the expected level.",
+  "Partially Meets":
+    "Met some KPI targets or behavioral expectations but requires improvement in key areas.",
+  "Below Expectations":
+    "Did not meet most KPI targets and/or behavioral competencies. Requires immediate improvement plan.",
 };

@@ -23,7 +23,12 @@ export const fetchProfilesForOrg = createServerFn({ method: "POST" })
     const { rows } = await pool.query(
       `SELECT id, full_name, position, department FROM profiles ORDER BY full_name`,
     );
-    return rows as { id: string; full_name: string; position: string | null; department: string | null }[];
+    return rows as {
+      id: string;
+      full_name: string;
+      position: string | null;
+      department: string | null;
+    }[];
   });
 
 // Org chart is readable to any signed-in user (chain resolution depends on it).
@@ -34,20 +39,30 @@ export const fetchAllOrgNodes = createServerFn({ method: "POST" })
     const { pool } = await import("@/lib/db.server");
     const { rows } = await pool.query(`SELECT * FROM org_nodes`);
     return rows as {
-      id: string; employee_id: string; parent_id: string | null;
-      team_label: string | null; is_dept_head: boolean;
-      position_x: number; position_y: number;
+      id: string;
+      employee_id: string;
+      parent_id: string | null;
+      team_label: string | null;
+      is_dept_head: boolean;
+      position_x: number;
+      position_y: number;
     }[];
   });
 
 type OrgNodeInsert = {
-  employee_id: string; team_label: string | null;
-  is_dept_head: boolean; position_x: number; position_y: number;
+  employee_id: string;
+  team_label: string | null;
+  is_dept_head: boolean;
+  position_x: number;
+  position_y: number;
 };
 
 export const saveOrgChartData = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { nodes: OrgNodeInsert[]; edgePairs: { childEmpId: string; parentEmpId: string }[] }) => data)
+  .inputValidator(
+    (data: { nodes: OrgNodeInsert[]; edgePairs: { childEmpId: string; parentEmpId: string }[] }) =>
+      data,
+  )
   .handler(async ({ data, context }) => {
     assertAdmin(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -83,10 +98,10 @@ export const saveOrgChartData = createServerFn({ method: "POST" })
         const childOrgNodeId = empToNodeId[childEmpId];
         const parentOrgNodeId = empToNodeId[parentEmpId];
         if (childOrgNodeId && parentOrgNodeId) {
-          await client.query(
-            `UPDATE org_nodes SET parent_id = $1 WHERE id = $2`,
-            [parentOrgNodeId, childOrgNodeId],
-          );
+          await client.query(`UPDATE org_nodes SET parent_id = $1 WHERE id = $2`, [
+            parentOrgNodeId,
+            childOrgNodeId,
+          ]);
         }
       }
 
