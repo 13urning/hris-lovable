@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "wave-hris-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8080
+    },
+    {
+      "name": "wave-hris-prod-build",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/server/index.mjs"],
+      "port": 3000
+    },
+    {
+      "name": "wave-hris-prod-enforced",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["-e", "process.env.CSP_ENFORCE='true'; import('./dist/server/index.mjs');"],
+      "port": 3000
+    }
+  ]
+}
