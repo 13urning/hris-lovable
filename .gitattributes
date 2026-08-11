@@ -1,0 +1,24 @@
+# Line endings
+#
+# The repo stores text as LF and the app is built and served from Linux, but
+# core.autocrlf=true on Windows checks files out as CRLF. Prettier's endOfLine
+# defaults to "lf", so every line of every checked-out file was reported as an
+# error. Pinning eol=lf makes the working tree match the index on all platforms.
+* text=auto eol=lf
+
+# Binary assets — never convert these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+*.pptx  binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
