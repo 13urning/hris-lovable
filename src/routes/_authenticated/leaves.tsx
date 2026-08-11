@@ -880,7 +880,41 @@ function LeavesPage() {
               )}
             </div>
             <Button
-              onClick={() => fileLeave.mutate()}
+              onClick={() =>
+                confirm.ask({
+                  title: "File this leave request?",
+                  description:
+                    "This sends the request to your approver chain. While it's pending you can cancel it, but the dates are already reserved against your balance.",
+                  details: (
+                    <>
+                      Leave:{" "}
+                      <span className="text-foreground">
+                        {formTypeLabel} · {formDays} {formDays === 1 ? "day" : "days"}
+                      </span>
+                      <br />
+                      Dates:{" "}
+                      <span className="text-foreground">
+                        {form.half_day
+                          ? `${formatDate(form.start_date)} (half day · ${form.half_day_period})`
+                          : `${formatDate(form.start_date)} → ${formatDate(form.end_date)}`}
+                      </span>
+                      {!isHR && (
+                        <>
+                          <br />
+                          Balance after:{" "}
+                          <span className="text-foreground">
+                            VL {form.leave_type === "VL" ? vlRemaining - formDays : vlRemaining} ·
+                            SL {form.leave_type === "SL" ? slRemaining - formDays : slRemaining}
+                          </span>
+                        </>
+                      )}
+                    </>
+                  ),
+                  confirmLabel: "File leave",
+                  pendingLabel: "Filing…",
+                  onConfirm: () => fileLeave.mutateAsync(),
+                })
+              }
               disabled={fileLeave.isPending || insufficientBalance}
             >
               File leave
@@ -1023,7 +1057,50 @@ function LeavesPage() {
                   </span>
                 </span>
               </label>
-              <Button onClick={() => fileBehalf.mutate()} disabled={fileBehalf.isPending}>
+              <Button
+                onClick={() => {
+                  const emp = filingProfiles?.find((p) => p.id === behalf.employee_id);
+                  const days = behalf.half_day
+                    ? 0.5
+                    : daysBetween(behalf.start_date, behalf.end_date);
+                  const typeLabel =
+                    LEAVE_TYPES.find((t) => t.value === behalf.leave_type)?.label ??
+                    behalf.leave_type;
+                  confirm.ask({
+                    title: behalf.auto_approve
+                      ? "File and approve this leave now?"
+                      : "File this leave for the employee?",
+                    description: behalf.auto_approve
+                      ? "This files the leave on the employee's behalf and approves it immediately, skipping their supervisor chain entirely. The days are deducted from their balance right away."
+                      : "This files the leave on the employee's behalf and routes it through their supervisor chain for approval.",
+                    details: (
+                      <>
+                        Employee:{" "}
+                        <span className="text-foreground">
+                          {emp?.full_name ?? "— none selected —"}
+                        </span>
+                        <br />
+                        Leave:{" "}
+                        <span className="text-foreground">
+                          {typeLabel} · {days} {days === 1 ? "day" : "days"}
+                        </span>
+                        <br />
+                        Dates:{" "}
+                        <span className="text-foreground">
+                          {behalf.half_day
+                            ? `${formatDate(behalf.start_date)} (half day · ${behalf.half_day_period})`
+                            : `${formatDate(behalf.start_date)} → ${formatDate(behalf.end_date)}`}
+                        </span>
+                      </>
+                    ),
+                    confirmLabel: behalf.auto_approve ? "File and approve" : "File leave",
+                    pendingLabel: "Filing…",
+                    destructive: behalf.auto_approve,
+                    onConfirm: () => fileBehalf.mutateAsync(),
+                  });
+                }}
+                disabled={fileBehalf.isPending}
+              >
                 File for employee
               </Button>
             </div>
