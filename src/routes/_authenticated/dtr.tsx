@@ -15,6 +15,8 @@ import { TableSkeleton } from "@/components/TableSkeleton";
 import { usePagination } from "@/hooks/use-pagination";
 import { DisputeAttendanceDialog } from "@/components/DisputeAttendanceDialog";
 import { RejectReasonDialog } from "@/components/RejectReasonDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   fetchMyDisputes,
   fetchMyPendingDisputeApprovals,
@@ -87,6 +89,7 @@ function AttendancePage() {
   const [disputeOpen, setDisputeOpen] = useState(false);
   // Id of the dispute awaiting a rejection reason (drives the reject dialog).
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const { data: myDisputes } = useQuery({
     queryKey: ["my-disputes", user?.id],
@@ -307,7 +310,41 @@ function AttendancePage() {
                           size="icon"
                           variant="ghost"
                           title="Approve"
-                          onClick={() => approveDispute.mutate(d.id)}
+                          onClick={() =>
+                            confirm.ask({
+                              title:
+                                d.current_approver_index + 1 === d.approver_chain.length
+                                  ? "Approve this correction?"
+                                  : "Approve and pass to the next approver?",
+                              description:
+                                d.current_approver_index + 1 === d.approver_chain.length
+                                  ? "This is the final approval. The attendance record is overwritten with the requested times and hours are recomputed."
+                                  : `This records your approval and moves the correction to approver ${d.current_approver_index + 2} of ${d.approver_chain.length}.`,
+                              details: (
+                                <>
+                                  Employee:{" "}
+                                  <span className="text-foreground">
+                                    {d.employee_full_name ?? "—"}
+                                  </span>
+                                  <br />
+                                  Date:{" "}
+                                  <span className="text-foreground">
+                                    {formatDate(d.work_date)}
+                                  </span>
+                                  <br />
+                                  Change:{" "}
+                                  <span className="tabular-nums text-foreground">
+                                    {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
+                                    {"  ⇒  "}
+                                    {disputeTimes(d)}
+                                  </span>
+                                </>
+                              ),
+                              confirmLabel: "Approve",
+                              pendingLabel: "Approving…",
+                              onConfirm: () => approveDispute.mutateAsync(d.id),
+                            })
+                          }
                           disabled={approveDispute.isPending || rejectDispute.isPending}
                         >
                           <Check className="h-4 w-4 text-success" />
@@ -383,7 +420,41 @@ function AttendancePage() {
                         size="sm"
                         variant="outline"
                         title="Approve now, bypassing the approver chain"
-                        onClick={() => adminApprove.mutate(d.id)}
+                        onClick={() =>
+                          confirm.ask({
+                            title: "Approve now, bypassing the chain?",
+                            description:
+                              "This skips the remaining approvers and applies the correction immediately. The attendance record is overwritten and hours are recomputed. The bypass is recorded in the activity log.",
+                            details: (
+                              <>
+                                Employee:{" "}
+                                <span className="text-foreground">
+                                  {d.employee_full_name ?? "—"}
+                                </span>
+                                <br />
+                                Date:{" "}
+                                <span className="text-foreground">{formatDate(d.work_date)}</span>
+                                <br />
+                                Skipping:{" "}
+                                <span className="text-foreground">
+                                  {d.current_approver_name ?? "—"} (step{" "}
+                                  {d.current_approver_index + 1} of {d.approver_chain.length})
+                                </span>
+                                <br />
+                                Change:{" "}
+                                <span className="tabular-nums text-foreground">
+                                  {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
+                                  {"  ⇒  "}
+                                  {disputeTimes(d)}
+                                </span>
+                              </>
+                            ),
+                            confirmLabel: "Approve now",
+                            pendingLabel: "Approving…",
+                            destructive: true,
+                            onConfirm: () => adminApprove.mutateAsync(d.id),
+                          })
+                        }
                         disabled={adminApprove.isPending}
                       >
                         <ShieldCheck className="mr-1.5 h-4 w-4 text-accent" /> Approve
@@ -596,7 +667,31 @@ function AttendancePage() {
                           size="icon"
                           variant="ghost"
                           title="Cancel dispute"
-                          onClick={() => cancelMyDispute.mutate(d.id)}
+                          onClick={() =>
+                            confirm.ask({
+                              title: "Cancel this correction request?",
+                              description:
+                                "The request is withdrawn from the approval queue and your attendance record stays as it is. You'd need to file a new request to correct it.",
+                              details: (
+                                <>
+                                  Date:{" "}
+                                  <span className="text-foreground">
+                                    {formatDate(d.work_date)}
+                                  </span>
+                                  <br />
+                                  Requested:{" "}
+                                  <span className="tabular-nums text-foreground">
+                                    {disputeTimes(d)}
+                                  </span>
+                                </>
+                              ),
+                              confirmLabel: "Cancel request",
+                              cancelLabel: "Keep request",
+                              pendingLabel: "Cancelling…",
+                              destructive: true,
+                              onConfirm: () => cancelMyDispute.mutateAsync(d.id),
+                            })
+                          }
                           disabled={cancelMyDispute.isPending}
                         >
                           <Ban className="h-4 w-4 text-warning-foreground" />
@@ -610,6 +705,8 @@ function AttendancePage() {
           </CardContent>
         </Card>
       )}
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

@@ -25,6 +25,8 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { RejectReasonDialog } from "@/components/RejectReasonDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   Select,
   SelectContent,
@@ -211,6 +213,7 @@ function LeavesPage() {
   const [endOpen, setEndOpen] = useState(false);
   // Id of the leave request awaiting a rejection reason (drives the reject dialog).
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   // ── Admin: file a leave on an employee's behalf ──────────────────────────
   const [behalf, setBehalf] = useState(() => {
@@ -664,7 +667,42 @@ function LeavesPage() {
                             size="icon"
                             variant="ghost"
                             title="Approve"
-                            onClick={() => approveStep.mutate({ id: l.id })}
+                            onClick={() =>
+                              confirm.ask({
+                                title:
+                                  step === total
+                                    ? "Approve this leave request?"
+                                    : "Approve and pass to the next approver?",
+                                description:
+                                  step === total
+                                    ? "This is the final approval. The leave is granted, the employee is notified, and the days are deducted from their balance."
+                                    : `This records your approval and moves the request to approver ${step + 1} of ${total}.`,
+                                details: (
+                                  <>
+                                    Employee:{" "}
+                                    <span className="text-foreground">
+                                      {l.employee_full_name ?? "—"}
+                                    </span>
+                                    <br />
+                                    Leave:{" "}
+                                    <span className="text-foreground">
+                                      {typeLabel} · {leaveDays(l)}{" "}
+                                      {leaveDays(l) === 1 ? "day" : "days"}
+                                    </span>
+                                    <br />
+                                    Dates:{" "}
+                                    <span className="text-foreground">
+                                      {l.half_day
+                                        ? `${formatDate(l.start_date)} (half day · ${l.half_day_period})`
+                                        : `${formatDate(l.start_date)} → ${formatDate(l.end_date)}`}
+                                    </span>
+                                  </>
+                                ),
+                                confirmLabel: "Approve",
+                                pendingLabel: "Approving…",
+                                onConfirm: () => approveStep.mutateAsync({ id: l.id }),
+                              })
+                            }
                             disabled={approveStep.isPending || rejectStep.isPending}
                           >
                             <Check className="h-4 w-4 text-success" />
@@ -1119,7 +1157,34 @@ function LeavesPage() {
                               size="icon"
                               variant="ghost"
                               title="Cancel request"
-                              onClick={() => cancelLeave.mutate(l.id)}
+                              onClick={() =>
+                                confirm.ask({
+                                  title: "Cancel this leave request?",
+                                  description:
+                                    "The request is withdrawn from the approval queue and approvers stop seeing it. You'd need to file a new request to take these days.",
+                                  details: (
+                                    <>
+                                      Leave:{" "}
+                                      <span className="text-foreground">
+                                        {typeLabel} · {leaveDays(l)}{" "}
+                                        {leaveDays(l) === 1 ? "day" : "days"}
+                                      </span>
+                                      <br />
+                                      Dates:{" "}
+                                      <span className="text-foreground">
+                                        {l.half_day
+                                          ? `${formatDate(l.start_date)} (half day · ${l.half_day_period})`
+                                          : `${formatDate(l.start_date)} → ${formatDate(l.end_date)}`}
+                                      </span>
+                                    </>
+                                  ),
+                                  confirmLabel: "Cancel request",
+                                  cancelLabel: "Keep request",
+                                  pendingLabel: "Cancelling…",
+                                  destructive: true,
+                                  onConfirm: () => cancelLeave.mutateAsync(l.id),
+                                })
+                              }
                               disabled={cancelLeave.isPending}
                             >
                               <Ban className="h-4 w-4 text-warning-foreground" />
@@ -1130,7 +1195,38 @@ function LeavesPage() {
                               size="icon"
                               variant="ghost"
                               title="Delete permanently"
-                              onClick={() => deleteLeave.mutate(l.id)}
+                              onClick={() =>
+                                confirm.ask({
+                                  title: "Delete this leave record?",
+                                  description:
+                                    "This permanently removes the request and its approval history from the system. It will no longer appear in reports or exports. This cannot be undone.",
+                                  details: (
+                                    <>
+                                      Employee:{" "}
+                                      <span className="text-foreground">
+                                        {p?.full_name ?? "—"}
+                                      </span>
+                                      <br />
+                                      Leave:{" "}
+                                      <span className="text-foreground">
+                                        {typeLabel} · {leaveDays(l)}{" "}
+                                        {leaveDays(l) === 1 ? "day" : "days"} · {l.status}
+                                      </span>
+                                      <br />
+                                      Dates:{" "}
+                                      <span className="text-foreground">
+                                        {l.half_day
+                                          ? `${formatDate(l.start_date)} (half day · ${l.half_day_period})`
+                                          : `${formatDate(l.start_date)} → ${formatDate(l.end_date)}`}
+                                      </span>
+                                    </>
+                                  ),
+                                  confirmLabel: "Delete permanently",
+                                  pendingLabel: "Deleting…",
+                                  destructive: true,
+                                  onConfirm: () => deleteLeave.mutateAsync(l.id),
+                                })
+                              }
                               disabled={deleteLeave.isPending}
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
@@ -1160,6 +1256,8 @@ function LeavesPage() {
           />
         </CardContent>
       </Card>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

@@ -15,6 +15,8 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Target, ShieldAlert, FileDown } from "lucide-react";
 import { exportRowsToCSV } from "@/lib/csv-export";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 
 export const Route = createFileRoute("/_authenticated/_admin/kpi-builder")({ component: KpiBuilderPage });
 
@@ -51,6 +53,7 @@ function KpiBuilderPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<KpiTemplate | null>(null);
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
+  const confirm = useConfirm();
 
   const { data: kpis = [], isLoading } = useQuery({
     queryKey: ["kpi-templates"],
@@ -245,7 +248,24 @@ function KpiBuilderPage() {
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
                               <Button size="sm" variant="ghost"
-                                onClick={() => { if (confirm("Delete this KPI?")) remove.mutate(k.id); }}
+                                onClick={() =>
+                                  confirm.ask({
+                                    title: "Delete this KPI?",
+                                    description:
+                                      "This removes the KPI template from the library. Evaluations already scored against it keep their recorded values.",
+                                    details: (
+                                      <>
+                                        KPI: <span className="text-foreground">{k.title}</span>
+                                        <br />
+                                        Team: <span className="text-foreground">{k.team}</span>
+                                      </>
+                                    ),
+                                    confirmLabel: "Delete KPI",
+                                    pendingLabel: "Deleting…",
+                                    destructive: true,
+                                    onConfirm: () => remove.mutateAsync(k.id),
+                                  })
+                                }
                                 className="text-destructive hover:text-destructive">
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
@@ -327,6 +347,8 @@ function KpiBuilderPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

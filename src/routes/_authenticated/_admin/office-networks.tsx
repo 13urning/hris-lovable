@@ -15,6 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { ShieldCheck, Trash2, MapPin } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/_admin/office-networks")({
@@ -25,6 +27,7 @@ function OfficeNetworksPage() {
   const qc = useQueryClient();
   const [label, setLabel] = useState("");
   const [cidr, setCidr] = useState("");
+  const confirm = useConfirm();
 
   const { data: networks, isLoading } = useQuery({
     queryKey: ["office-networks"],
@@ -128,7 +131,29 @@ function OfficeNetworksPage() {
             >
               <MapPin className="mr-2 h-4 w-4" /> Use my current IP
             </Button>
-            <Button onClick={() => add.mutate()} disabled={add.isPending}>
+            <Button
+              disabled={add.isPending}
+              onClick={() =>
+                confirm.ask({
+                  title: "Add this network?",
+                  description:
+                    activeCount === 0
+                      ? "Clock-in is currently unrestricted. Adding an active network starts enforcing it — from then on only people on an allowed range can clock in."
+                      : "People connecting from this range will be allowed to clock in.",
+                  details: (
+                    <>
+                      Label: <span className="text-foreground">{label || "—"}</span>
+                      <br />
+                      Range:{" "}
+                      <span className="font-mono text-foreground">{cidr || "—"}</span>
+                    </>
+                  ),
+                  confirmLabel: "Add network",
+                  pendingLabel: "Adding…",
+                  onConfirm: () => add.mutateAsync(),
+                })
+              }
+            >
               Add
             </Button>
           </div>
@@ -166,14 +191,55 @@ function OfficeNetworksPage() {
                   <td className="px-4 py-2">
                     <Switch
                       checked={n.is_active}
-                      onCheckedChange={(v) => toggle.mutate({ id: n.id, isActive: v })}
+                      onCheckedChange={(v) =>
+                        confirm.ask({
+                          title: v ? "Activate this network?" : "Deactivate this network?",
+                          description: v
+                            ? "People connecting from this range will be allowed to clock in."
+                            : !v && activeCount === 1
+                              ? "This is the last active network. Turning it off leaves no ranges enforced, so clock-in becomes unrestricted for everyone."
+                              : "People on this range will no longer be able to clock in unless another active network covers them.",
+                          details: (
+                            <>
+                              Label: <span className="text-foreground">{n.label}</span>
+                              <br />
+                              Range:{" "}
+                              <span className="font-mono text-foreground">{n.cidr}</span>
+                            </>
+                          ),
+                          confirmLabel: v ? "Activate" : "Deactivate",
+                          pendingLabel: "Saving…",
+                          destructive: !v && activeCount === 1,
+                          onConfirm: () => toggle.mutateAsync({ id: n.id, isActive: v }),
+                        })
+                      }
                     />
                   </td>
                   <td className="px-4 py-2 text-right">
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => remove.mutate(n.id)}
+                      onClick={() =>
+                        confirm.ask({
+                          title: "Remove this network?",
+                          description:
+                            n.is_active && activeCount === 1
+                              ? "This is the last active network. Removing it leaves no ranges enforced, so clock-in becomes unrestricted for everyone."
+                              : "People on this range will no longer be able to clock in unless another active network covers them.",
+                          details: (
+                            <>
+                              Label: <span className="text-foreground">{n.label}</span>
+                              <br />
+                              Range:{" "}
+                              <span className="font-mono text-foreground">{n.cidr}</span>
+                            </>
+                          ),
+                          confirmLabel: "Remove network",
+                          pendingLabel: "Removing…",
+                          destructive: true,
+                          onConfirm: () => remove.mutateAsync(n.id),
+                        })
+                      }
                       aria-label="Remove network"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
@@ -190,6 +256,8 @@ function OfficeNetworksPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

@@ -41,6 +41,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { TablePagination } from "@/components/TablePagination";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { usePagination } from "@/hooks/use-pagination";
 import { BellRing, CalendarClock, Pencil, Plus, Repeat, Trash2, X } from "lucide-react";
 
@@ -170,6 +172,7 @@ function CalendarPage() {
   // Reminder-row inputs, shared by create (staged) and edit (immediate) modes.
   const [remRecipient, setRemRecipient] = useState("me");
   const [remOffset, setRemOffset] = useState("1440");
+  const confirm = useConfirm();
 
   const isEditing = !!form.id;
 
@@ -434,7 +437,32 @@ function CalendarPage() {
                             variant="ghost"
                             className="text-destructive hover:bg-destructive/10"
                             title={e.series_id ? "Delete this occurrence" : "Delete event"}
-                            onClick={() => remove.mutate(e.id)}
+                            onClick={() =>
+                              confirm.ask({
+                                title: e.series_id
+                                  ? "Delete this occurrence?"
+                                  : "Delete this event?",
+                                description: e.series_id
+                                  ? "This removes only this one occurrence and its reminders. The rest of the series is left in place."
+                                  : "This removes the event and its reminders. Notifications already delivered are kept. This cannot be undone.",
+                                details: (
+                                  <>
+                                    Event: <span className="text-foreground">{e.title}</span>
+                                    <br />
+                                    When:{" "}
+                                    <span className="text-foreground">
+                                      {formatWhen(e)}
+                                    </span>
+                                  </>
+                                ),
+                                confirmLabel: e.series_id
+                                  ? "Delete occurrence"
+                                  : "Delete event",
+                                pendingLabel: "Deleting…",
+                                destructive: true,
+                                onConfirm: () => remove.mutateAsync(e.id),
+                              })
+                            }
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
@@ -449,13 +477,33 @@ function CalendarPage() {
                                 const count = events?.filter(
                                   (x) => x.series_id === e.series_id,
                                 ).length;
-                                if (
-                                  window.confirm(
-                                    `Delete the whole “${e.title}” series (${count ?? "all"} occurrences) and its reminders? Notifications already delivered are kept.`,
-                                  )
-                                ) {
-                                  removeSeries.mutate(e.series_id!);
-                                }
+                                confirm.ask({
+                                  title: "Delete the whole series?",
+                                  description:
+                                    "This removes every occurrence in the series and all of their reminders. Notifications already delivered are kept. This cannot be undone.",
+                                  details: (
+                                    <>
+                                      Series: <span className="text-foreground">{e.title}</span>
+                                      <br />
+                                      Occurrences:{" "}
+                                      <span className="text-foreground">
+                                        {count ?? "all"}
+                                      </span>
+                                      <br />
+                                      Repeats:{" "}
+                                      <span className="text-foreground">
+                                        {seriesLabel(
+                                          e.series_frequency!,
+                                          e.series_interval ?? 1,
+                                        )}
+                                      </span>
+                                    </>
+                                  ),
+                                  confirmLabel: "Delete series",
+                                  pendingLabel: "Deleting…",
+                                  destructive: true,
+                                  onConfirm: () => removeSeries.mutateAsync(e.series_id!),
+                                });
                               }}
                             >
                               <Repeat className="mr-0.5 h-3.5 w-3.5" />
@@ -705,7 +753,30 @@ function CalendarPage() {
                         <button
                           type="button"
                           aria-label="Remove reminder"
-                          onClick={() => removeRem.mutate(r.id)}
+                          onClick={() =>
+                            confirm.ask({
+                              title: "Remove this reminder?",
+                              description:
+                                "This recipient will no longer be notified ahead of the event. Notifications already delivered are kept.",
+                              details: (
+                                <>
+                                  Recipient:{" "}
+                                  <span className="text-foreground">
+                                    {r.notify_user_name ?? "—"}
+                                  </span>
+                                  <br />
+                                  Sends:{" "}
+                                  <span className="text-foreground">
+                                    {offsetLabel(r.offset_minutes)}
+                                  </span>
+                                </>
+                              ),
+                              confirmLabel: "Remove reminder",
+                              pendingLabel: "Removing…",
+                              destructive: true,
+                              onConfirm: () => removeRem.mutateAsync(r.id),
+                            })
+                          }
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -756,6 +827,8 @@ function CalendarPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

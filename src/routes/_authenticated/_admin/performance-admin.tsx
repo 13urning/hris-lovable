@@ -21,6 +21,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Plus, Users, ClipboardList, CheckCircle2, ChevronDown, ChevronUp, ShieldAlert, Heart, Target, FileDown } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { computeOverallRating, RATING_COLORS, RATING_DESCRIPTIONS } from "@/lib/performance-rating";
 import { exportRowsToCSV } from "@/lib/csv-export";
 
@@ -100,6 +102,7 @@ function PerformanceAdminPage() {
   const [groupHeadNotes, setGroupHeadNotes] = useState("");
   const [expandedEvals, setExpandedEvals] = useState<Set<string>>(new Set());
   const [ratingFilter, setRatingFilter] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const [periodForm, setPeriodForm] = useState({
     title: "", period_type: "quarterly", start_date: "", end_date: "",
@@ -420,12 +423,55 @@ function PerformanceAdminPage() {
               </p>
               <div className="mt-3 flex gap-2">
                 {p.status === "draft" && (
-                  <Button size="sm" onClick={(e) => { e.stopPropagation(); updatePeriodStatus.mutate({ id: p.id, status: "active" }); }}>
+                  <Button size="sm" onClick={(e) => {
+                    e.stopPropagation();
+                    confirm.ask({
+                      title: "Activate this evaluation period?",
+                      description:
+                        "The period opens for evaluations — employees can start their self-assessments and group heads can review them. Only one period is active at a time.",
+                      details: (
+                        <>
+                          Period: <span className="text-foreground">{p.title}</span>
+                          <br />
+                          Covers:{" "}
+                          <span className="text-foreground">
+                            {new Date(p.start_date).toLocaleDateString()} –{" "}
+                            {new Date(p.end_date).toLocaleDateString()}
+                          </span>
+                        </>
+                      ),
+                      confirmLabel: "Activate period",
+                      pendingLabel: "Activating…",
+                      onConfirm: () => updatePeriodStatus.mutateAsync({ id: p.id, status: "active" }),
+                    });
+                  }}>
                     Activate
                   </Button>
                 )}
                 {p.status === "active" && (
-                  <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); updatePeriodStatus.mutate({ id: p.id, status: "closed" }); }}>
+                  <Button size="sm" variant="outline" onClick={(e) => {
+                    e.stopPropagation();
+                    confirm.ask({
+                      title: "Close this evaluation period?",
+                      description:
+                        "Employees can no longer submit or change their self-assessments and group heads can no longer score them. Evaluations still awaiting approval stay unfinished.",
+                      details: (
+                        <>
+                          Period: <span className="text-foreground">{p.title}</span>
+                          <br />
+                          Covers:{" "}
+                          <span className="text-foreground">
+                            {new Date(p.start_date).toLocaleDateString()} –{" "}
+                            {new Date(p.end_date).toLocaleDateString()}
+                          </span>
+                        </>
+                      ),
+                      confirmLabel: "Close period",
+                      pendingLabel: "Closing…",
+                      destructive: true,
+                      onConfirm: () => updatePeriodStatus.mutateAsync({ id: p.id, status: "closed" }),
+                    });
+                  }}>
                     Close
                   </Button>
                 )}
@@ -450,7 +496,24 @@ function PerformanceAdminPage() {
                 <FileDown className="mr-1.5 h-4 w-4" /> Export CSV
               </Button>
               {activePeriod.status === "active" && (
-                <Button onClick={() => generateEvaluations.mutate(activePeriod.id)}
+                <Button onClick={() =>
+                    confirm.ask({
+                      title: "Generate evaluations for everyone?",
+                      description:
+                        "This creates a blank evaluation for every active employee who doesn't already have one in this period, using the KPI templates that match their team and designation. Evaluations already in progress are left untouched.",
+                      details: (
+                        <>
+                          Period: <span className="text-foreground">{activePeriod.title}</span>
+                          <br />
+                          Existing evaluations:{" "}
+                          <span className="text-foreground">{evaluations.length}</span>
+                        </>
+                      ),
+                      confirmLabel: "Generate evaluations",
+                      pendingLabel: "Generating…",
+                      onConfirm: () => generateEvaluations.mutateAsync(activePeriod.id),
+                    })
+                  }
                   disabled={generateEvaluations.isPending}>
                   <Users className="mr-1.5 h-4 w-4" />
                   {generateEvaluations.isPending ? "Generating…" : "Generate for All"}
@@ -867,6 +930,8 @@ function PerformanceAdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }
