@@ -3,10 +3,13 @@ import {
   computeDayFlags,
   computeWorkedHours,
   FULL_DAY_COVERAGE,
+  hhmmOfMinutes,
   lateMinutesFor,
   leaveCoverageFor,
   minutesOfDay,
+  selfReportCapMinutes,
   STANDARD_HOURS,
+  validateSelfReportedTimeOut,
 } from "@/lib/work-hours";
 
 const HALF_DAY = STANDARD_HOURS / 2;
@@ -207,5 +210,87 @@ describe("leaveCoverageFor", () => {
       standardHours: 4.5,
       lateExempt: false,
     });
+  });
+});
+
+describe("selfReportCapMinutes", () => {
+  it("caps each fixed shift at its own end, a standard day after it starts", () => {
+    expect(selfReportCapMinutes("6-3", "06:00")).toBe(15 * 60);
+    expect(selfReportCapMinutes("7-4", "07:00")).toBe(16 * 60);
+    expect(selfReportCapMinutes("8-5", "08:00")).toBe(17 * 60);
+    expect(selfReportCapMinutes("9-6", "09:00")).toBe(18 * 60);
+  });
+
+  it("keeps the shift's own end even when the employee clocked in early or late", () => {
+    // The bar is the roster, not the punch: arriving early cannot extend the day,
+    // and arriving late cannot push the ceiling later to make up for it.
+    expect(selfReportCapMinutes("8-5", "06:30")).toBe(17 * 60);
+    expect(selfReportCapMinutes("8-5", "10:45")).toBe(17 * 60);
+  });
+
+  it("measures Official Business from the actual clock-in, having no fixed end", () => {
+    expect(selfReportCapMinutes("OB", "07:15")).toBe(7 * 60 + 15 + STANDARD_HOURS * 60);
+  });
+
+  it("falls back to a standard day from clock-in for a missing or junk shift", () => {
+    expect(selfReportCapMinutes(null, "08:00")).toBe(8 * 60 + STANDARD_HOURS * 60);
+    expect(selfReportCapMinutes("", "08:00")).toBe(8 * 60 + STANDARD_HOURS * 60);
+    expect(selfReportCapMinutes("nonsense", "08:00")).toBe(8 * 60 + STANDARD_HOURS * 60);
+  });
+});
+
+describe("validateSelfReportedTimeOut", () => {
+  const base = { timeIn: "08:00", shiftLabel: "8-5" };
+
+  it("accepts a time inside the shift", () => {
+    expect(validateSelfReportedTimeOut({ ...base, timeOut: "16:30" })).toBeNull();
+  });
+
+  it("accepts the shift end exactly", () => {
+    expect(validateSelfReportedTimeOut({ ...base, timeOut: "17:00" })).toBeNull();
+  });
+
+  it("rejects even one minute past the shift end", () => {
+    expect(validateSelfReportedTimeOut({ ...base, timeOut: "17:01" })).toBe("AFTER_SHIFT_END");
+  });
+
+  it("rejects a time that would manufacture a long day", () => {
+    expect(validateSelfReportedTimeOut({ ...base, timeOut: "23:59" })).toBe("AFTER_SHIFT_END");
+  });
+
+  it("rejects clocking out before or exactly at clock-in", () => {
+    expect(validateSelfReportedTimeOut({ ...base, timeOut: "07:30" })).toBe("BEFORE_CLOCK_IN");
+    expect(validateSelfReportedTimeOut({ ...base, timeOut: "08:00" })).toBe("BEFORE_CLOCK_IN");
+  });
+
+  it("rejects malformed input rather than coercing it", () => {
+    for (const timeOut of ["", "5pm", "17", "17:60", "24:00", "1730", "17:0"]) {
+      expect(validateSelfReportedTimeOut({ ...base, timeOut })).toBe("BAD_FORMAT");
+    }
+  });
+
+  it("still caps a late arrival at the shift end, leaving the day undertime", () => {
+    // Clocked in at 10:00 on an 8-5 and forgot to clock out: the most they can
+    // claim is 17:00, i.e. 7h, which stays undertime rather than being rounded up.
+    expect(
+      validateSelfReportedTimeOut({ timeIn: "10:00", shiftLabel: "8-5", timeOut: "17:00" }),
+    ).toBeNull();
+    expect(computeWorkedHours("10:00", "17:00")).toMatchObject({
+      hoursWorked: 7,
+      isUndertime: true,
+    });
+  });
+});
+
+describe("hhmmOfMinutes", () => {
+  it("formats with zero padding", () => {
+    expect(hhmmOfMinutes(0)).toBe("00:00");
+    expect(hhmmOfMinutes(9 * 60 + 5)).toBe("09:05");
+    expect(hhmmOfMinutes(17 * 60)).toBe("17:00");
+  });
+
+  it("clamps out-of-range values into the day", () => {
+    expect(hhmmOfMinutes(-30)).toBe("00:00");
+    expect(hhmmOfMinutes(99 * 60)).toBe("23:59");
   });
 });
