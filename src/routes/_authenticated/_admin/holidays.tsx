@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { TablePagination } from "@/components/TablePagination";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { usePagination } from "@/hooks/use-pagination";
 import { CalendarDays, Trash2, RefreshCw, Plus } from "lucide-react";
 
@@ -37,6 +39,7 @@ function HolidaysPage() {
   const [date, setDate] = useState("");
   const [name, setName] = useState("");
   const [syncYear, setSyncYear] = useState(String(new Date().getFullYear()));
+  const confirm = useConfirm();
 
   const { data: holidays, isLoading } = useQuery({
     queryKey: ["holidays"],
@@ -126,7 +129,24 @@ function HolidaysPage() {
                 onChange={(e) => setSyncYear(e.target.value)}
               />
             </div>
-            <Button onClick={() => sync.mutate()} disabled={sync.isPending}>
+            <Button
+              disabled={sync.isPending}
+              onClick={() =>
+                confirm.ask({
+                  title: "Sync holidays for this year?",
+                  description:
+                    "This pulls the national holiday list from the public PH calendar and adds any that are missing. Existing entries and the ones you added manually are left untouched.",
+                  details: (
+                    <>
+                      Year: <span className="text-foreground">{syncYear}</span>
+                    </>
+                  ),
+                  confirmLabel: "Sync holidays",
+                  pendingLabel: "Syncing…",
+                  onConfirm: () => sync.mutateAsync(),
+                })
+              }
+            >
               <RefreshCw className="mr-1.5 h-4 w-4" /> {sync.isPending ? "Syncing…" : "Sync"}
             </Button>
           </CardContent>
@@ -156,7 +176,27 @@ function HolidaysPage() {
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
-            <Button variant="outline" onClick={() => add.mutate()} disabled={add.isPending}>
+            <Button
+              variant="outline"
+              disabled={add.isPending}
+              onClick={() =>
+                confirm.ask({
+                  title: "Add this holiday?",
+                  description:
+                    "The date is excluded from absence tracking for everyone and appears on the dashboard.",
+                  details: (
+                    <>
+                      Date: <span className="text-foreground">{date ? formatDate(date) : "—"}</span>
+                      <br />
+                      Name: <span className="text-foreground">{name || "—"}</span>
+                    </>
+                  ),
+                  confirmLabel: "Add holiday",
+                  pendingLabel: "Adding…",
+                  onConfirm: () => add.mutateAsync(),
+                })
+              }
+            >
               <Plus className="mr-1.5 h-4 w-4" /> Add
             </Button>
           </CardContent>
@@ -195,7 +235,25 @@ function HolidaysPage() {
                   <td className="px-4 py-2 text-center">
                     <Switch
                       checked={h.is_active}
-                      onCheckedChange={(v) => toggle.mutate({ id: h.id, isActive: v })}
+                      onCheckedChange={(v) =>
+                        confirm.ask({
+                          title: v ? "Activate this holiday?" : "Deactivate this holiday?",
+                          description: v
+                            ? "The date will again be excluded from absence tracking and shown on the dashboard."
+                            : "The date will count as a regular working day for absence tracking and drop off the dashboard.",
+                          details: (
+                            <>
+                              Holiday: <span className="text-foreground">{h.name}</span>
+                              <br />
+                              Date:{" "}
+                              <span className="text-foreground">{formatDate(h.holiday_date)}</span>
+                            </>
+                          ),
+                          confirmLabel: v ? "Activate" : "Deactivate",
+                          pendingLabel: "Saving…",
+                          onConfirm: () => toggle.mutateAsync({ id: h.id, isActive: v }),
+                        })
+                      }
                     />
                   </td>
                   <td className="px-4 py-2 text-right">
@@ -203,7 +261,25 @@ function HolidaysPage() {
                       size="sm"
                       variant="ghost"
                       className="text-destructive hover:bg-destructive/10"
-                      onClick={() => remove.mutate(h.id)}
+                      onClick={() =>
+                        confirm.ask({
+                          title: "Remove this holiday?",
+                          description:
+                            "The date goes back to being a regular working day for absence tracking. You can re-add or re-sync it later.",
+                          details: (
+                            <>
+                              Holiday: <span className="text-foreground">{h.name}</span>
+                              <br />
+                              Date:{" "}
+                              <span className="text-foreground">{formatDate(h.holiday_date)}</span>
+                            </>
+                          ),
+                          confirmLabel: "Remove holiday",
+                          pendingLabel: "Removing…",
+                          destructive: true,
+                          onConfirm: () => remove.mutateAsync(h.id),
+                        })
+                      }
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -229,6 +305,8 @@ function HolidaysPage() {
           />
         </CardContent>
       </Card>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

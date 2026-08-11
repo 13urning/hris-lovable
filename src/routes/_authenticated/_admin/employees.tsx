@@ -45,6 +45,8 @@ import {
 } from "lucide-react";
 import { TablePagination } from "@/components/TablePagination";
 import { TableSkeleton } from "@/components/TableSkeleton";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { usePagination } from "@/hooks/use-pagination";
 import { toast } from "sonner";
 
@@ -164,6 +166,22 @@ function displayName(r: Row): string {
   const mi = middleInitial(r.middle_name);
   return [first, mi, last].filter(Boolean).join(" ");
 }
+
+// ── Role change copy ──────────────────────────────────────────────────────────
+
+const ROLE_LABEL: Record<"employee" | "hr" | "admin", string> = {
+  employee: "Employee",
+  hr: "HR",
+  admin: "Admin",
+};
+
+const ROLE_CONSEQUENCE: Record<"employee" | "hr" | "admin", string> = {
+  employee:
+    "They lose access to the admin screens and will only see their own records. Any approvals still waiting on them will need to be reassigned.",
+  hr: "They gain access to employee records, leave and overtime approvals, reports, and the KPI library across the whole company.",
+  admin:
+    "They gain full control, including deleting employees, resetting passwords, and changing anyone's role — including yours. Grant this sparingly.",
+};
 
 // ── CSV helpers ───────────────────────────────────────────────────────────────
 
@@ -454,6 +472,9 @@ function EmployeesPage() {
 
   // Delete confirm dialog state
   const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
+
+  // Shared confirmation for the inline row actions (role, tracking, saving edits)
+  const confirm = useConfirm();
 
   // Reset-password dialog state. resetResult holds the generated temp password
   // once the reset succeeds (shown once, then cleared on close).
@@ -806,12 +827,30 @@ function EmployeesPage() {
                             <Select
                               value={role}
                               disabled={!isAdmin}
-                              onValueChange={(v) =>
-                                setRole.mutate({
-                                  userId: r.id,
-                                  role: v as "employee" | "hr" | "admin",
-                                })
-                              }
+                              onValueChange={(v) => {
+                                const next = v as "employee" | "hr" | "admin";
+                                if (next === role) return;
+                                confirm.ask({
+                                  title: "Change this employee's role?",
+                                  description: ROLE_CONSEQUENCE[next],
+                                  details: (
+                                    <>
+                                      Employee:{" "}
+                                      <span className="text-foreground">{displayName(r)}</span>
+                                      <br />
+                                      Role:{" "}
+                                      <span className="text-foreground">
+                                        {ROLE_LABEL[role]} → {ROLE_LABEL[next]}
+                                      </span>
+                                    </>
+                                  ),
+                                  confirmLabel: `Make ${ROLE_LABEL[next]}`,
+                                  pendingLabel: "Updating…",
+                                  destructive: next === "admin",
+                                  onConfirm: () =>
+                                    setRole.mutateAsync({ userId: r.id, role: next }),
+                                });
+                              }}
                             >
                               <SelectTrigger className="w-28 h-8">
                                 <SelectValue />
@@ -836,7 +875,26 @@ function EmployeesPage() {
                                 checked={!r.exclude_from_attendance}
                                 disabled={setTracking.isPending}
                                 onCheckedChange={(checked) =>
-                                  setTracking.mutate({ id: r.id, excluded: !checked })
+                                  confirm.ask({
+                                    title: checked
+                                      ? "Turn attendance tracking on?"
+                                      : "Turn attendance tracking off?",
+                                    description: checked
+                                      ? "This employee will be monitored for absences again and will appear in attendance reports."
+                                      : "This employee stops being monitored for absences and drops out of absence reporting. Existing attendance records are kept.",
+                                    details: (
+                                      <>
+                                        Employee:{" "}
+                                        <span className="text-foreground">{displayName(r)}</span>
+                                      </>
+                                    ),
+                                    confirmLabel: checked
+                                      ? "Turn tracking on"
+                                      : "Turn tracking off",
+                                    pendingLabel: "Saving…",
+                                    onConfirm: () =>
+                                      setTracking.mutateAsync({ id: r.id, excluded: !checked }),
+                                  })
                                 }
                               />
                             </div>
@@ -1612,6 +1670,8 @@ function EmployeesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

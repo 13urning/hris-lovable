@@ -18,6 +18,8 @@ import { TeamDashboard } from "@/components/TeamDashboard";
 import { formatDate, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane, PartyPopper } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({ component: Dashboard });
@@ -91,6 +93,7 @@ function Dashboard() {
   });
 
   const [showShiftPicker, setShowShiftPicker] = useState(false);
+  const confirm = useConfirm();
   // Location is captured best-effort for audit only and never blocks clock-in.
   // We kick the GPS request off when the shift picker opens so a fix is usually
   // ready by the time a shift is chosen; the mutation just awaits this promise.
@@ -250,7 +253,29 @@ function Dashboard() {
                 size="lg"
                 variant="destructive"
                 className="h-16 w-48 text-lg font-semibold"
-                onClick={() => clockOut.mutate()}
+                onClick={() =>
+                  confirm.ask({
+                    title: "Clock out for today?",
+                    description:
+                      "This ends your workday and records your total hours. You can't clock in again today — if the time is wrong afterwards you'd have to file an attendance correction.",
+                    details: (
+                      <>
+                        Clocked in: <span className="text-foreground">{todayEntry!.time_in}</span>
+                        <br />
+                        Shift:{" "}
+                        <span className="text-foreground">
+                          {todayEntry!.shift_label === "OB"
+                            ? "Official Business"
+                            : `${todayEntry!.shift_label} shift`}
+                        </span>
+                      </>
+                    ),
+                    confirmLabel: "Clock out",
+                    pendingLabel: "Clocking out…",
+                    destructive: true,
+                    onConfirm: () => clockOut.mutateAsync(),
+                  })
+                }
                 disabled={clockOut.isPending}
               >
                 <Clock3 className="mr-2 h-5 w-5" /> Clock Out
@@ -573,6 +598,8 @@ function Dashboard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

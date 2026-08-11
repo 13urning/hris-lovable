@@ -17,7 +17,10 @@ const XFF_DEPTH = Math.max(1, Number(process.env.OFFICE_IP_XFF_DEPTH ?? "1"));
 
 export function resolveClientIp(req: Request): string {
   const xff = req.headers.get("x-forwarded-for") ?? "";
-  const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+  const parts = xff
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (parts.length) {
     const ip = parts[parts.length - XFF_DEPTH] ?? parts[0];
     return normalizeIp(ip);
@@ -135,9 +138,6 @@ export const deleteOfficeNetwork = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertAdmin(context.user);
     const { pool } = await import("@/lib/db.server");
-    const { rowCount } = await pool.query(
-      `DELETE FROM office_networks WHERE id = $1`,
-      [data.id],
-    );
+    const { rowCount } = await pool.query(`DELETE FROM office_networks WHERE id = $1`, [data.id]);
     if (!rowCount) throw new Error("NOT_FOUND");
   });

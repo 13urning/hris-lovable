@@ -18,7 +18,9 @@ export const fetchMyEvaluations = createServerFn({ method: "POST" })
       [context.user.dbUserId],
     );
     return rows.map((r) => ({
-      id: r.id as string, period_id: r.period_id as string, status: r.status as string,
+      id: r.id as string,
+      period_id: r.period_id as string,
+      status: r.status as string,
       overall_score: r.overall_score as number | null,
       kpi_score: r.kpi_score as number | null,
       behavioral_score: r.behavioral_score as number | null,
@@ -26,13 +28,15 @@ export const fetchMyEvaluations = createServerFn({ method: "POST" })
       self_assessment_submitted_at: r.self_assessment_submitted_at as string | null,
       approved_at: r.approved_at as string | null,
       group_head_notes: r.group_head_notes as string | null,
-      period: r.period_title ? {
-        title: r.period_title as string,
-        period_type: r.period_type as string,
-        start_date: r.period_start_date as string,
-        end_date: r.period_end_date as string,
-        status: r.period_status as string,
-      } : null,
+      period: r.period_title
+        ? {
+            title: r.period_title as string,
+            period_type: r.period_type as string,
+            start_date: r.period_start_date as string,
+            end_date: r.period_end_date as string,
+            status: r.period_status as string,
+          }
+        : null,
     }));
   });
 
@@ -40,7 +44,9 @@ export const fetchMyEvaluations = createServerFn({ method: "POST" })
 async function assertCanReadEvaluation(evaluationId: string, dbUserId: string, isHR: boolean) {
   if (isHR) return;
   const { pool } = await import("@/lib/db.server");
-  const { rows: [row] } = await pool.query<{ employee_id: string }>(
+  const {
+    rows: [row],
+  } = await pool.query<{ employee_id: string }>(
     `SELECT employee_id FROM performance_evaluations WHERE id = $1`,
     [evaluationId],
   );
@@ -52,7 +58,9 @@ async function assertCanReadEvaluation(evaluationId: string, dbUserId: string, i
 // these endpoints are only for self-assessment writes).
 async function assertOwnsKpiScore(scoreId: string, dbUserId: string) {
   const { pool } = await import("@/lib/db.server");
-  const { rows: [row] } = await pool.query<{ employee_id: string }>(
+  const {
+    rows: [row],
+  } = await pool.query<{ employee_id: string }>(
     `SELECT pe.employee_id FROM evaluation_kpi_scores eks
        JOIN performance_evaluations pe ON pe.id = eks.evaluation_id
       WHERE eks.id = $1`,
@@ -64,7 +72,9 @@ async function assertOwnsKpiScore(scoreId: string, dbUserId: string) {
 
 async function assertOwnsBehavioralScore(scoreId: string, dbUserId: string) {
   const { pool } = await import("@/lib/db.server");
-  const { rows: [row] } = await pool.query<{ employee_id: string }>(
+  const {
+    rows: [row],
+  } = await pool.query<{ employee_id: string }>(
     `SELECT pe.employee_id FROM evaluation_behavioral_scores ebs
        JOIN performance_evaluations pe ON pe.id = ebs.evaluation_id
       WHERE ebs.id = $1`,
@@ -86,9 +96,17 @@ export const fetchKpiScoresByEvalId = createServerFn({ method: "POST" })
       [data.evaluationId],
     );
     return rows as {
-      id: string; kpi_title: string; kpi_weight: number; kpi_target: number; kpi_metric_unit: string;
-      self_actual_value: number | null; self_score: number | null; self_comments: string | null;
-      hr_actual_value: number | null; hr_score: number | null; hr_comments: string | null;
+      id: string;
+      kpi_title: string;
+      kpi_weight: number;
+      kpi_target: number;
+      kpi_metric_unit: string;
+      self_actual_value: number | null;
+      self_score: number | null;
+      self_comments: string | null;
+      hr_actual_value: number | null;
+      hr_score: number | null;
+      hr_comments: string | null;
       final_score: number | null;
     }[];
   });
@@ -125,7 +143,14 @@ export const fetchBehavioralScoresByEvalId = createServerFn({ method: "POST" })
 
 export const updateKpiSelfScore = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { id: string; selfScore: number | null; selfActualValue: number | null; selfComments: string | null }) => data)
+  .inputValidator(
+    (data: {
+      id: string;
+      selfScore: number | null;
+      selfActualValue: number | null;
+      selfComments: string | null;
+    }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     await assertOwnsKpiScore(data.id, context.user.dbUserId);
@@ -140,7 +165,10 @@ export const updateKpiSelfScore = createServerFn({ method: "POST" })
 
 export const updateBehavioralSelfScore = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { id: string; employeeRating: number | null; employeeAccomplishments: string | null }) => data)
+  .inputValidator(
+    (data: { id: string; employeeRating: number | null; employeeAccomplishments: string | null }) =>
+      data,
+  )
   .handler(async ({ data, context }) => {
     assertUser(context.user);
     await assertOwnsBehavioralScore(data.id, context.user.dbUserId);
@@ -176,9 +204,7 @@ export const fetchEvaluationPeriods = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
-    const { rows } = await pool.query(
-      `SELECT * FROM evaluation_periods ORDER BY created_at DESC`,
-    );
+    const { rows } = await pool.query(`SELECT * FROM evaluation_periods ORDER BY created_at DESC`);
     return rows;
   });
 
@@ -198,7 +224,12 @@ export const fetchEvaluationsByPeriod = createServerFn({ method: "POST" })
     );
     return rows.map((r) => ({
       ...r,
-      employee: { full_name: r.full_name, email: r.email, department: r.department, position: r.position },
+      employee: {
+        full_name: r.full_name,
+        email: r.email,
+        department: r.department,
+        position: r.position,
+      },
     }));
   });
 
@@ -216,9 +247,7 @@ export const fetchActiveKpiTemplates = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
-    const { rows } = await pool.query(
-      `SELECT * FROM kpi_templates WHERE is_active = TRUE`,
-    );
+    const { rows } = await pool.query(`SELECT * FROM kpi_templates WHERE is_active = TRUE`);
     return rows;
   });
 
@@ -236,22 +265,41 @@ export const fetchActiveBehavioralCompetencies = createServerFn({ method: "POST"
 // Explicit allowlists for the dynamic-INSERT endpoints below. Even though these
 // are HR/admin-only, the dynamic column injection was a latent SQLi.
 const PERIOD_INSERT_COLS = new Set([
-  "title", "period_type", "start_date", "end_date", "status", "created_by",
+  "title",
+  "period_type",
+  "start_date",
+  "end_date",
+  "status",
+  "created_by",
 ]);
 const KPI_SCORE_INSERT_COLS = new Set([
-  "evaluation_id", "kpi_template_id", "kpi_title", "kpi_weight", "kpi_target",
+  "evaluation_id",
+  "kpi_template_id",
+  "kpi_title",
+  "kpi_weight",
+  "kpi_target",
   "kpi_metric_unit",
 ]);
 const BEHAVIORAL_SCORE_INSERT_COLS = new Set([
-  "evaluation_id", "competency_id", "competency_name", "competency_indicators",
+  "evaluation_id",
+  "competency_id",
+  "competency_name",
+  "competency_indicators",
 ]);
 
-function buildSafeInsert(table: string, payload: Record<string, unknown>, allow: Set<string>): { sql: string; vals: unknown[] } {
+function buildSafeInsert(
+  table: string,
+  payload: Record<string, unknown>,
+  allow: Set<string>,
+): { sql: string; vals: unknown[] } {
   const safe = Object.entries(payload).filter(([k]) => allow.has(k));
   if (safe.length === 0) throw new Error("EMPTY_INSERT");
   const cols = safe.map(([k]) => `"${k}"`).join(", ");
   const placeholders = safe.map((_, i) => `$${i + 1}`).join(", ");
-  return { sql: `INSERT INTO ${table} (${cols}) VALUES (${placeholders}) RETURNING *`, vals: safe.map(([, v]) => v) };
+  return {
+    sql: `INSERT INTO ${table} (${cols}) VALUES (${placeholders}) RETURNING *`,
+    vals: safe.map(([, v]) => v),
+  };
 }
 
 export const insertEvaluationPeriod = createServerFn({ method: "POST" })
@@ -271,15 +319,17 @@ export const updateEvaluationPeriodStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
-    await pool.query(
-      `UPDATE evaluation_periods SET status = $1 WHERE id = $2`,
-      [data.status, data.id],
-    );
+    await pool.query(`UPDATE evaluation_periods SET status = $1 WHERE id = $2`, [
+      data.status,
+      data.id,
+    ]);
   });
 
 export const insertEvaluationsForPeriod = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { evaluations: { employee_id: string; period_id: string; status: string }[] }) => data)
+  .inputValidator(
+    (data: { evaluations: { employee_id: string; period_id: string; status: string }[] }) => data,
+  )
   .handler(async ({ data, context }): Promise<{ id: string; employee_id: string }[]> => {
     assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -294,7 +344,11 @@ export const insertEvaluationsForPeriod = createServerFn({ method: "POST" })
     return results;
   });
 
-function buildSafeBulkInsert(table: string, rows: Record<string, unknown>[], allow: Set<string>): { sql: string; vals: unknown[] } {
+function buildSafeBulkInsert(
+  table: string,
+  rows: Record<string, unknown>[],
+  allow: Set<string>,
+): { sql: string; vals: unknown[] } {
   if (rows.length === 0) throw new Error("EMPTY_INSERT");
   const cols = Object.keys(rows[0]).filter((k) => allow.has(k));
   if (cols.length === 0) throw new Error("EMPTY_INSERT");
@@ -313,7 +367,11 @@ export const insertKpiScores = createServerFn({ method: "POST" })
     assertHR(context.user);
     if (data.scores.length === 0) return;
     const { pool } = await import("@/lib/db.server");
-    const { sql, vals } = buildSafeBulkInsert("evaluation_kpi_scores", data.scores, KPI_SCORE_INSERT_COLS);
+    const { sql, vals } = buildSafeBulkInsert(
+      "evaluation_kpi_scores",
+      data.scores,
+      KPI_SCORE_INSERT_COLS,
+    );
     await pool.query(sql, vals);
   });
 
@@ -324,13 +382,25 @@ export const insertBehavioralScores = createServerFn({ method: "POST" })
     assertHR(context.user);
     if (data.scores.length === 0) return;
     const { pool } = await import("@/lib/db.server");
-    const { sql, vals } = buildSafeBulkInsert("evaluation_behavioral_scores", data.scores, BEHAVIORAL_SCORE_INSERT_COLS);
+    const { sql, vals } = buildSafeBulkInsert(
+      "evaluation_behavioral_scores",
+      data.scores,
+      BEHAVIORAL_SCORE_INSERT_COLS,
+    );
     await pool.query(sql, vals);
   });
 
 export const updateKpiHrScore = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { id: string; hrScore: number | null; hrActualValue: number | null; hrComments: string | null; finalScore: number | null }) => data)
+  .inputValidator(
+    (data: {
+      id: string;
+      hrScore: number | null;
+      hrActualValue: number | null;
+      hrComments: string | null;
+      finalScore: number | null;
+    }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -344,7 +414,14 @@ export const updateKpiHrScore = createServerFn({ method: "POST" })
 
 export const updateBehavioralGhScore = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: { id: string; ghRating: number | null; ghComments: string | null; finalRating: number | null }) => data)
+  .inputValidator(
+    (data: {
+      id: string;
+      ghRating: number | null;
+      ghComments: string | null;
+      finalRating: number | null;
+    }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -359,10 +436,17 @@ export const updateBehavioralGhScore = createServerFn({ method: "POST" })
 // approvedBy is derived from the verified session, not the body.
 export const approveEvaluation = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .inputValidator((data: {
-    id: string; approvedAt: string; groupHeadNotes: string | null;
-    kpiScore: number | null; behavioralScore: number | null; overallScore: number | null; overallRating: string | null;
-  }) => data)
+  .inputValidator(
+    (data: {
+      id: string;
+      approvedAt: string;
+      groupHeadNotes: string | null;
+      kpiScore: number | null;
+      behavioralScore: number | null;
+      overallScore: number | null;
+      overallRating: string | null;
+    }) => data,
+  )
   .handler(async ({ data, context }) => {
     assertHR(context.user);
     const { pool } = await import("@/lib/db.server");
@@ -371,6 +455,15 @@ export const approveEvaluation = createServerFn({ method: "POST" })
        SET status = 'approved', approved_at = $1, approved_by = $2, group_head_notes = $3,
            kpi_score = $4, behavioral_score = $5, overall_score = $6, overall_rating = $7
        WHERE id = $8`,
-      [data.approvedAt, context.user.dbUserId, data.groupHeadNotes, data.kpiScore, data.behavioralScore, data.overallScore, data.overallRating, data.id],
+      [
+        data.approvedAt,
+        context.user.dbUserId,
+        data.groupHeadNotes,
+        data.kpiScore,
+        data.behavioralScore,
+        data.overallScore,
+        data.overallRating,
+        data.id,
+      ],
     );
   });

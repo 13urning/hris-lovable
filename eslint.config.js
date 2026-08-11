@@ -6,7 +6,22 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  // Build artifacts. Keep this in step with .gitignore — anything generated that
+  // lands in the working tree gets linted otherwise, and bundled output is both
+  // enormous and hopeless to satisfy. .vercel/output alone carries thousands of
+  // .mjs chunks that made `npm run lint` take minutes and report ~19k errors.
+  {
+    ignores: [
+      "dist",
+      "dist-ssr",
+      ".output",
+      ".vinxi",
+      ".vercel",
+      ".tanstack",
+      ".nitro",
+      "api/_server",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

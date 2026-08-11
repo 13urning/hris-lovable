@@ -70,9 +70,7 @@ function EmployeeNode({ data }: { data: EmployeeNodeData }) {
         </div>
       )}
       <p className="font-semibold text-sm leading-tight">{data.label}</p>
-      {data.position && (
-        <p className="text-xs text-muted-foreground mt-0.5">{data.position}</p>
-      )}
+      {data.position && <p className="text-xs text-muted-foreground mt-0.5">{data.position}</p>}
       {data.team_label && (
         <p className="mt-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
           {data.team_label}
@@ -103,9 +101,7 @@ function computeAutoLayout(orgNodes: OrgNode[]): Record<string, { x: number; y: 
   for (const n of orgNodes) {
     if (n.parent_id && idSet.has(n.parent_id)) children[n.parent_id].push(n.id);
   }
-  const roots = orgNodes
-    .filter((n) => !n.parent_id || !idSet.has(n.parent_id))
-    .map((n) => n.id);
+  const roots = orgNodes.filter((n) => !n.parent_id || !idSet.has(n.parent_id)).map((n) => n.id);
 
   // Width = number of leaf descendants. Each leaf occupies one slot.
   const widthOf: Record<string, number> = {};
@@ -114,7 +110,10 @@ function computeAutoLayout(orgNodes: OrgNode[]): Record<string, { x: number; y: 
     if (seen.has(id)) return 1; // cycle guard — shouldn't happen
     seen.add(id);
     const kids = children[id];
-    if (!kids || kids.length === 0) { widthOf[id] = 1; return 1; }
+    if (!kids || kids.length === 0) {
+      widthOf[id] = 1;
+      return 1;
+    }
     const w = kids.reduce((s, k) => s + calcWidth(k, seen), 0);
     widthOf[id] = Math.max(1, w);
     return widthOf[id];
@@ -221,12 +220,10 @@ function OrgChartPage() {
     (changes) => {
       onNodesChange(changes);
       // Only mark dirty for meaningful changes (position, data) — not selection
-      const hasMutation = changes.some(
-        (c) => c.type === "position" || c.type === "remove"
-      );
+      const hasMutation = changes.some((c) => c.type === "position" || c.type === "remove");
       if (hasMutation) markDirty();
     },
-    [onNodesChange, markDirty]
+    [onNodesChange, markDirty],
   );
 
   const handleEdgesChange: typeof onEdgesChange = useCallback(
@@ -234,7 +231,7 @@ function OrgChartPage() {
       onEdgesChange(changes);
       if (changes.some((c) => c.type === "remove")) markDirty();
     },
-    [onEdgesChange, markDirty]
+    [onEdgesChange, markDirty],
   );
 
   const onConnect = useCallback(
@@ -242,7 +239,7 @@ function OrgChartPage() {
       setEdges((eds) => addEdge({ ...connection, type: "smoothstep" }, eds));
       markDirty();
     },
-    [setEdges, markDirty]
+    [setEdges, markDirty],
   );
 
   // ── Node click → open sheet ──────────────────────────────────────────────
@@ -268,8 +265,8 @@ function OrgChartPage() {
                 is_dept_head: isDeptHeadDraft,
               },
             }
-          : n
-      )
+          : n,
+      ),
     );
     markDirty();
   }, [selectedNode, teamLabelDraft, isDeptHeadDraft, setNodes, markDirty]);
@@ -278,9 +275,7 @@ function OrgChartPage() {
     if (!selectedNode) return;
     setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id));
     setEdges((eds) =>
-      eds.filter(
-        (e) => e.source !== selectedNode.id && e.target !== selectedNode.id
-      )
+      eds.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id),
     );
     setSheetOpen(false);
     setSelectedNode(null);
@@ -288,13 +283,9 @@ function OrgChartPage() {
   }, [selectedNode, setNodes, setEdges, markDirty]);
 
   // ── Add employee dialog ──────────────────────────────────────────────────
-  const assignedEmployeeIds = new Set(
-    nodes.map((n) => (n.data as EmployeeNodeData).employee_id)
-  );
+  const assignedEmployeeIds = new Set(nodes.map((n) => (n.data as EmployeeNodeData).employee_id));
 
-  const unassignedProfiles = profiles.filter(
-    (p) => !assignedEmployeeIds.has(p.id)
-  );
+  const unassignedProfiles = profiles.filter((p) => !assignedEmployeeIds.has(p.id));
 
   const addEmployeeToChart = useCallback(
     (profile: Profile) => {
@@ -317,7 +308,7 @@ function OrgChartPage() {
       setAddDialogOpen(false);
       markDirty();
     },
-    [setNodes, markDirty]
+    [setNodes, markDirty],
   );
 
   // ── Save ─────────────────────────────────────────────────────────────────
@@ -433,9 +424,7 @@ function OrgChartPage() {
         <SheetContent className="w-80">
           <SheetHeader>
             <SheetTitle>
-              {selectedNode
-                ? (selectedNode.data as EmployeeNodeData).label
-                : "Employee"}
+              {selectedNode ? (selectedNode.data as EmployeeNodeData).label : "Employee"}
             </SheetTitle>
           </SheetHeader>
 
@@ -485,11 +474,7 @@ function OrgChartPage() {
                 >
                   Apply changes
                 </Button>
-                <Button
-                  variant="destructive"
-                  className="w-full"
-                  onClick={removeNodeFromChart}
-                >
+                <Button variant="destructive" className="w-full" onClick={removeNodeFromChart}>
                   Remove from chart
                 </Button>
               </div>

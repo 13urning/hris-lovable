@@ -4,7 +4,9 @@ import type { Pool } from "pg";
 // of approver employee_ids — immediate supervisor first, group head last.
 // Returns [] if the filer sits at the top of the tree (no parent).
 export async function resolveChain(pool: Pool, employeeId: string): Promise<string[]> {
-  const { rows: [myRow] } = await pool.query<{ id: string; parent_id: string | null }>(
+  const {
+    rows: [myRow],
+  } = await pool.query<{ id: string; parent_id: string | null }>(
     `SELECT id, parent_id FROM org_nodes WHERE employee_id = $1 LIMIT 1`,
     [employeeId],
   );
@@ -34,10 +36,9 @@ export async function resolveChain(pool: Pool, employeeId: string): Promise<stri
 export async function resolveSubordinates(pool: Pool, employeeId: string): Promise<string[]> {
   const {
     rows: [myRow],
-  } = await pool.query<{ id: string }>(
-    `SELECT id FROM org_nodes WHERE employee_id = $1 LIMIT 1`,
-    [employeeId],
-  );
+  } = await pool.query<{ id: string }>(`SELECT id FROM org_nodes WHERE employee_id = $1 LIMIT 1`, [
+    employeeId,
+  ]);
   if (!myRow) return [];
 
   const { rows } = await pool.query<{ employee_id: string }>(

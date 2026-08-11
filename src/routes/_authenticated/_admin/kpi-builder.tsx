@@ -7,16 +7,32 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Target, ShieldAlert, FileDown } from "lucide-react";
 import { exportRowsToCSV } from "@/lib/csv-export";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 
-export const Route = createFileRoute("/_authenticated/_admin/kpi-builder")({ component: KpiBuilderPage });
+export const Route = createFileRoute("/_authenticated/_admin/kpi-builder")({
+  component: KpiBuilderPage,
+});
 
 const TEAMS = [
   "Enterprise Applications",
@@ -40,8 +56,14 @@ type KpiTemplate = {
 };
 
 const EMPTY: Omit<KpiTemplate, "id" | "created_at"> = {
-  title: "", description: "", metric_unit: "%", target_value: 100,
-  weight: 0, team: TEAMS[0], designation: null, is_active: true,
+  title: "",
+  description: "",
+  metric_unit: "%",
+  target_value: 100,
+  weight: 0,
+  team: TEAMS[0],
+  designation: null,
+  is_active: true,
 };
 
 function KpiBuilderPage() {
@@ -51,6 +73,7 @@ function KpiBuilderPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<KpiTemplate | null>(null);
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
+  const confirm = useConfirm();
 
   const { data: kpis = [], isLoading } = useQuery({
     queryKey: ["kpi-templates"],
@@ -81,19 +104,39 @@ function KpiBuilderPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setShowForm(true); };
-  const openEdit = (k: KpiTemplate) => {
-    setEditing(k);
-    setForm({ title: k.title, description: k.description ?? "", metric_unit: k.metric_unit,
-      target_value: k.target_value, weight: k.weight, team: k.team,
-      designation: k.designation, is_active: k.is_active });
+  const openCreate = () => {
+    setEditing(null);
+    setForm(EMPTY);
     setShowForm(true);
   };
-  const closeForm = () => { setShowForm(false); setEditing(null); };
+  const openEdit = (k: KpiTemplate) => {
+    setEditing(k);
+    setForm({
+      title: k.title,
+      description: k.description ?? "",
+      metric_unit: k.metric_unit,
+      target_value: k.target_value,
+      weight: k.weight,
+      team: k.team,
+      designation: k.designation,
+      is_active: k.is_active,
+    });
+    setShowForm(true);
+  };
+  const closeForm = () => {
+    setShowForm(false);
+    setEditing(null);
+  };
 
   const handleSubmit = () => {
-    if (!form.title.trim()) { toast.error("Title is required"); return; }
-    if (form.weight < 0 || form.weight > 100) { toast.error("Weight must be 0–100"); return; }
+    if (!form.title.trim()) {
+      toast.error("Title is required");
+      return;
+    }
+    if (form.weight < 0 || form.weight > 100) {
+      toast.error("Weight must be 0–100");
+      return;
+    }
     upsert.mutate({ ...form, ...(editing ? { id: editing.id } : {}) });
   };
 
@@ -123,7 +166,8 @@ function KpiBuilderPage() {
   }, {});
 
   const totalWeight = (team: string) =>
-    kpis.filter((k) => k.team === team && k.is_active && !k.designation)
+    kpis
+      .filter((k) => k.team === team && k.is_active && !k.designation)
       .reduce((s, k) => s + k.weight, 0);
 
   if (loading || rolesLoading) {
@@ -152,7 +196,9 @@ function KpiBuilderPage() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Group Head Tools</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            Group Head Tools
+          </p>
           <h1 className="mt-1 font-display text-4xl flex items-center gap-3">
             <Target className="h-8 w-8 text-accent" /> KPI Builder
           </h1>
@@ -164,17 +210,22 @@ function KpiBuilderPage() {
           <Button variant="outline" onClick={handleExport} disabled={filtered.length === 0}>
             <FileDown className="mr-1.5 h-4 w-4" /> Export CSV
           </Button>
-          <Button onClick={openCreate}><Plus className="mr-1.5 h-4 w-4" /> New KPI</Button>
+          <Button onClick={openCreate}>
+            <Plus className="mr-1.5 h-4 w-4" /> New KPI
+          </Button>
         </div>
       </div>
 
       {/* Team filter */}
       <div className="flex flex-wrap gap-2">
         {["all", ...TEAMS].map((t) => (
-          <button key={t}
+          <button
+            key={t}
             onClick={() => setTeamFilter(t)}
             className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-              teamFilter === t ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground hover:bg-secondary"
+              teamFilter === t
+                ? "bg-primary text-primary-foreground border-primary"
+                : "text-muted-foreground hover:bg-secondary"
             }`}
           >
             {t === "all" ? "All teams" : t}
@@ -196,7 +247,15 @@ function KpiBuilderPage() {
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {teamKpis.length} KPI{teamKpis.length !== 1 ? "s" : ""}
                     {" · "}
-                    <span className={w === 100 ? "text-green-600" : w > 100 ? "text-destructive" : "text-warning-foreground"}>
+                    <span
+                      className={
+                        w === 100
+                          ? "text-green-600"
+                          : w > 100
+                            ? "text-destructive"
+                            : "text-warning-foreground"
+                      }
+                    >
                       {w}% total weight
                     </span>
                     {w !== 100 && " (should be 100%)"}
@@ -224,15 +283,23 @@ function KpiBuilderPage() {
                         <tr key={k.id} className="border-t">
                           <td className="px-4 py-2">
                             <p className="font-medium">{k.title}</p>
-                            {k.description && <p className="text-xs text-muted-foreground">{k.description}</p>}
+                            {k.description && (
+                              <p className="text-xs text-muted-foreground">{k.description}</p>
+                            )}
                           </td>
                           <td className="px-4 py-2 text-muted-foreground">{k.metric_unit}</td>
-                          <td className="px-4 py-2 text-right">{k.target_value} {k.metric_unit}</td>
+                          <td className="px-4 py-2 text-right">
+                            {k.target_value} {k.metric_unit}
+                          </td>
                           <td className="px-4 py-2 text-right font-medium">{k.weight}%</td>
                           <td className="px-4 py-2">
-                            {k.designation
-                              ? <Badge variant="outline" className="text-xs">{k.designation}</Badge>
-                              : <span className="text-xs text-muted-foreground">All</span>}
+                            {k.designation ? (
+                              <Badge variant="outline" className="text-xs">
+                                {k.designation}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">All</span>
+                            )}
                           </td>
                           <td className="px-4 py-2">
                             <Badge variant={k.is_active ? "default" : "secondary"}>
@@ -244,9 +311,29 @@ function KpiBuilderPage() {
                               <Button size="sm" variant="ghost" onClick={() => openEdit(k)}>
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
-                              <Button size="sm" variant="ghost"
-                                onClick={() => { if (confirm("Delete this KPI?")) remove.mutate(k.id); }}
-                                className="text-destructive hover:text-destructive">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() =>
+                                  confirm.ask({
+                                    title: "Delete this KPI?",
+                                    description:
+                                      "This removes the KPI template from the library. Evaluations already scored against it keep their recorded values.",
+                                    details: (
+                                      <>
+                                        KPI: <span className="text-foreground">{k.title}</span>
+                                        <br />
+                                        Team: <span className="text-foreground">{k.team}</span>
+                                      </>
+                                    ),
+                                    confirmLabel: "Delete KPI",
+                                    pendingLabel: "Deleting…",
+                                    destructive: true,
+                                    onConfirm: () => remove.mutateAsync(k.id),
+                                  })
+                                }
+                                className="text-destructive hover:text-destructive"
+                              >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
@@ -271,62 +358,96 @@ function KpiBuilderPage() {
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Title *</Label>
-              <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                placeholder="e.g. Feature Delivery Rate" />
+              <Input
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="e.g. Feature Delivery Rate"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Description</Label>
-              <Textarea value={form.description ?? ""} rows={2}
+              <Textarea
+                value={form.description ?? ""}
+                rows={2}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                placeholder="What does this KPI measure?" />
+                placeholder="What does this KPI measure?"
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Metric Unit</Label>
-                <Input value={form.metric_unit}
+                <Input
+                  value={form.metric_unit}
                   onChange={(e) => setForm((f) => ({ ...f, metric_unit: e.target.value }))}
-                  placeholder="%, hrs, count, /5" />
+                  placeholder="%, hrs, count, /5"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Target Value</Label>
-                <Input type="number" value={form.target_value}
-                  onChange={(e) => setForm((f) => ({ ...f, target_value: parseFloat(e.target.value) || 0 }))} />
+                <Input
+                  type="number"
+                  value={form.target_value}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, target_value: parseFloat(e.target.value) || 0 }))
+                  }
+                />
               </div>
             </div>
             <div className="space-y-1.5">
               <Label>Weight (0–100%)</Label>
-              <Input type="number" min={0} max={100} value={form.weight}
-                onChange={(e) => setForm((f) => ({ ...f, weight: parseFloat(e.target.value) || 0 }))} />
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={form.weight}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, weight: parseFloat(e.target.value) || 0 }))
+                }
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Team</Label>
               <Select value={form.team} onValueChange={(v) => setForm((f) => ({ ...f, team: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  {TEAMS.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  {TEAMS.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Designation (leave blank = all in team)</Label>
-              <Input value={form.designation ?? ""}
+              <Input
+                value={form.designation ?? ""}
                 onChange={(e) => setForm((f) => ({ ...f, designation: e.target.value || null }))}
-                placeholder="e.g. Team Lead, Senior Engineer" />
+                placeholder="e.g. Team Lead, Senior Engineer"
+              />
             </div>
             <div className="flex items-center gap-3">
-              <Switch checked={form.is_active}
-                onCheckedChange={(v) => setForm((f) => ({ ...f, is_active: v }))} />
+              <Switch
+                checked={form.is_active}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, is_active: v }))}
+              />
               <Label>Active</Label>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={closeForm}>Cancel</Button>
+            <Button variant="outline" onClick={closeForm}>
+              Cancel
+            </Button>
             <Button onClick={handleSubmit} disabled={upsert.isPending}>
               {editing ? "Save changes" : "Create KPI"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

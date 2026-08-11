@@ -30,6 +30,8 @@ import {
 import { formatDate } from "@/lib/dtr";
 import { computeOtHours, formatOtRange } from "@/lib/ot-hours";
 import { exportRowsToCSV } from "@/lib/csv-export";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { useConfirm } from "@/hooks/use-confirm";
 import { toast } from "sonner";
 import { Clock3, CheckCircle2, XCircle, Send, CalendarClock, FileDown, Ban } from "lucide-react";
 
@@ -117,6 +119,36 @@ function StepBadge({ row }: { row: { current_approver_index: number; approver_ch
   );
 }
 
+/**
+ * Cancelling reads the same on the budget table, the filed-hours table, and the
+ * next-month summary card, so all three build their confirmation from here.
+ */
+function cancelConfirmCopy(
+  r: Pick<OTRequest, "request_type" | "requested_hours" | "target_month" | "work_date">,
+) {
+  const isBudget = r.request_type === "pre_approved";
+  return {
+    title: isBudget ? "Cancel this OT budget request?" : "Cancel these filed OT hours?",
+    description: isBudget
+      ? "The request is withdrawn from the approval queue. Any hours you file against this budget later will have nothing to draw from until a new budget is approved."
+      : "The filed hours are withdrawn from the approval queue and released back to your remaining budget. You'd need to file them again to be paid for them.",
+    details: (
+      <>
+        Hours: <span className="text-foreground">{r.requested_hours}h</span>
+        <br />
+        {isBudget ? "Month" : "Date"}:{" "}
+        <span className="text-foreground">
+          {isBudget ? formatMonth(r.target_month) : formatDate(r.work_date)}
+        </span>
+      </>
+    ),
+    confirmLabel: "Cancel request",
+    cancelLabel: "Keep request",
+    pendingLabel: "Cancelling…",
+    destructive: true,
+  };
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 function OTApprovalsPage() {
@@ -145,6 +177,7 @@ function OTApprovalsPage() {
   // The pending request being reviewed (null = modal closed) + the approver's
   // notes / rejection reason.
   const [reviewing, setReviewing] = useState<PendingOTRow | null>(null);
+  const confirm = useConfirm();
   const [decisionNotes, setDecisionNotes] = useState("");
 
   function openReview(row: PendingOTRow) {
@@ -452,7 +485,12 @@ function OTApprovalsPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => cancelRequest.mutate(nextMonthBudget.id)}
+                    onClick={() =>
+                      confirm.ask({
+                        ...cancelConfirmCopy(nextMonthBudget),
+                        onConfirm: () => cancelRequest.mutateAsync(nextMonthBudget.id),
+                      })
+                    }
                     disabled={cancelRequest.isPending}
                   >
                     <Ban className="mr-2 h-4 w-4" /> Cancel request
@@ -607,7 +645,12 @@ function OTApprovalsPage() {
                               size="icon"
                               variant="ghost"
                               title="Cancel request"
-                              onClick={() => cancelRequest.mutate(r.id)}
+                              onClick={() =>
+                                confirm.ask({
+                                  ...cancelConfirmCopy(r),
+                                  onConfirm: () => cancelRequest.mutateAsync(r.id),
+                                })
+                              }
                               disabled={cancelRequest.isPending}
                             >
                               <Ban className="h-4 w-4 text-warning-foreground" />
@@ -717,7 +760,12 @@ function OTApprovalsPage() {
                               size="icon"
                               variant="ghost"
                               title="Cancel request"
-                              onClick={() => cancelRequest.mutate(r.id)}
+                              onClick={() =>
+                                confirm.ask({
+                                  ...cancelConfirmCopy(r),
+                                  onConfirm: () => cancelRequest.mutateAsync(r.id),
+                                })
+                              }
                               disabled={cancelRequest.isPending}
                             >
                               <Ban className="h-4 w-4 text-warning-foreground" />
@@ -1182,6 +1230,8 @@ function OTApprovalsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog {...confirm.dialogProps} />
     </div>
   );
 }

@@ -36,11 +36,7 @@ type Column<T> = {
  * Build a CSV from a column spec and rows, then trigger a download.
  * The filename is suffixed with today's date: `name-YYYY-MM-DD.csv`.
  */
-export function exportRowsToCSV<T>(
-  rows: T[],
-  columns: Column<T>[],
-  filenamePrefix: string,
-) {
+export function exportRowsToCSV<T>(rows: T[], columns: Column<T>[], filenamePrefix: string) {
   const lines = [columns.map((c) => csvEscape(c.header)).join(",")];
   for (const row of rows) {
     lines.push(columns.map((c) => csvEscape(c.value(row))).join(","));

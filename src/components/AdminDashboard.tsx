@@ -10,12 +10,7 @@ import {
 } from "@/lib/admin-dashboard-functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Users,
   UserCheck,
@@ -117,7 +112,9 @@ export function ApprovalTile({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <span className={`font-display text-2xl tabular-nums ${active ? "" : "text-muted-foreground"}`}>
+        <span
+          className={`font-display text-2xl tabular-nums ${active ? "" : "text-muted-foreground"}`}
+        >
           {count}
         </span>
         <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -406,7 +403,9 @@ export function RosterDialog({
 }: {
   category: RosterCategory | null;
   onClose: () => void;
-  roster: { present: RosterEntry[]; onLeave: RosterEntry[]; notClockedIn: RosterEntry[] } | undefined;
+  roster:
+    | { present: RosterEntry[]; onLeave: RosterEntry[]; notClockedIn: RosterEntry[] }
+    | undefined;
   loading: boolean;
 }) {
   const entries = category && roster ? entriesFor(category, roster) : [];
