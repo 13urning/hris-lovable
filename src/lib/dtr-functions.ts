@@ -435,7 +435,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
         pool.query(
           `SELECT d.id, d.employee_id, d.work_date, d.time_in, d.time_out,
                   d.hours_worked, d.shift_label, d.is_undertime, d.undertime_minutes, d.late_minutes, d.created_at,
-                  d.clockout_channel,
+                  d.clockout_channel, d.time_out_self_reported,
                   d.clock_in_lat, d.clock_in_lon, d.clock_in_accuracy, d.clock_in_loc_status,
                   d.clock_out_lat, d.clock_out_lon, d.clock_out_accuracy, d.clock_out_loc_status,
                   p.full_name, p.employee_code, p.department
@@ -477,6 +477,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       late_minutes: number | null;
       created_at: string | null;
       clockout_channel: string | null;
+      time_out_self_reported: boolean | null;
       clock_in_lat: number | null;
       clock_in_lon: number | null;
       clock_in_accuracy: number | null;
@@ -506,6 +507,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
       late_minutes: r.late_minutes as number | null,
       created_at: r.created_at as string | null,
       clockout_channel: r.clockout_channel as string | null,
+      time_out_self_reported: r.time_out_self_reported === true,
       clock_in_lat: r.clock_in_lat as number | null,
       clock_in_lon: r.clock_in_lon as number | null,
       clock_in_accuracy: r.clock_in_accuracy as number | null,
@@ -564,6 +566,7 @@ export const getActivityLogDTRs = createServerFn({ method: "POST" })
           late_minutes: null,
           created_at: null,
           clockout_channel: null,
+          time_out_self_reported: false,
           clock_in_lat: null,
           clock_in_lon: null,
           clock_in_accuracy: null,
@@ -661,4 +664,160 @@ export const getTodayRoster = createServerFn({ method: "POST" })
       });
 
     return { date: today, isWeekend, holidayName, employees };
+  });
+
+// ── Missed clock-out: detect, and let the employee close the day themselves ───
+//
+// A forgotten clock-out used to cost a full attendance-dispute cycle. These two
+// functions let the employee close it directly the next working day, capped at
+// their shift end and tagged for HR (see the 20260811140000 migration).
+
+// How far back the banner looks. Nominally "yesterday", but a Friday evening is
+// the most common miss and the employee is not back until Monday, so the window
+// spans a weekend (and a long weekend) rather than stranding those days in the
+// dispute queue. Only the single most recent open day is ever offered.
+const MISSED_CLOCKOUT_LOOKBACK_DAYS = 4;
+
+type MissedClockOut = {
+  id: string;
+  workDate: string;
+  timeIn: string;
+  shiftLabel: string | null;
+  // Latest time the employee may claim, "HH:MM" — the shift's own end.
+  capTimeOut: string;
+};
+
+// The caller's most recent unclosed day, or null when there is nothing to fix.
+//
+// Deliberately excluded: today (still in progress), payroll-locked rows, and any
+// date that already has a dispute in flight — that day is under review and must
+// not be edited out from under the approver.
+export const getMissedClockOut = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<MissedClockOut | null> => {
+    assertUser(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const { selfReportCapMinutes, hhmmOfMinutes } = await import("@/lib/work-hours");
+
+    const today = phTodayIso();
+    const {
+      rows: [row],
+    } = await pool.query<{
+      id: string;
+      work_date: string;
+      time_in: string;
+      shift_label: string | null;
+    }>(
+      `SELECT d.id, to_char(d.work_date, 'YYYY-MM-DD') AS work_date, d.time_in, d.shift_label
+         FROM daily_time_reports d
+        WHERE d.employee_id = $1
+          AND d.time_in IS NOT NULL
+          AND d.time_out IS NULL
+          AND d.work_date < $2::date
+          AND d.work_date >= $3::date
+          AND d.locked_at IS NULL
+          AND NOT EXISTS (
+                SELECT 1 FROM attendance_disputes ad
+                 WHERE ad.employee_id = d.employee_id
+                   AND ad.work_date = d.work_date
+                   AND ad.status IN ('pending', 'approved')
+              )
+        ORDER BY d.work_date DESC
+        LIMIT 1`,
+      [context.user.dbUserId, today, isoDaysBefore(today, MISSED_CLOCKOUT_LOOKBACK_DAYS)],
+    );
+    if (!row) return null;
+
+    const timeIn = row.time_in.slice(0, 5);
+    return {
+      id: row.id,
+      workDate: row.work_date,
+      timeIn,
+      shiftLabel: row.shift_label,
+      capTimeOut: hhmmOfMinutes(selfReportCapMinutes(row.shift_label, timeIn)),
+    };
+  });
+
+// Close a forgotten day with a time the employee supplies.
+//
+// This is the one path where a client-submitted clock-out time is honoured, so
+// every constraint the interactive clock-out gets for free has to be asserted
+// here instead:
+//   - the row is the caller's own, open, unlocked, and inside the window
+//   - no dispute is already in flight for that date
+//   - the time is well-formed, after the clock-in, and at or before the shift end
+//   - `AND time_out IS NULL` in the UPDATE keeps it write-once under a race
+// The day is then graded by the same computeDayFlags every other write path uses,
+// so an approved leave still shortens what was owed and a late arrival still
+// lands as undertime.
+export const selfReportClockOut = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .inputValidator((data: { dtrId: string; timeOut: string }) => data)
+  .handler(async ({ data, context }) => {
+    assertUser(context.user);
+    const { pool } = await import("@/lib/db.server");
+    const { validateSelfReportedTimeOut } = await import("@/lib/work-hours");
+
+    const today = phTodayIso();
+    const {
+      rows: [row],
+    } = await pool.query<{
+      work_date: string;
+      time_in: string | null;
+      time_out: string | null;
+      shift_label: string | null;
+    }>(
+      `SELECT to_char(work_date, 'YYYY-MM-DD') AS work_date, time_in, time_out, shift_label
+         FROM daily_time_reports
+        WHERE id = $1 AND employee_id = $2 AND locked_at IS NULL`,
+      [data.dtrId, context.user.dbUserId],
+    );
+    if (!row) throw new Error("NOT_FOUND");
+    if (!row.time_in) throw new Error("NOT_CLOCKED_IN");
+    if (row.time_out) throw new Error("ALREADY_CLOCKED_OUT");
+    if (row.work_date >= today) throw new Error("DAY_NOT_OVER");
+    if (row.work_date < isoDaysBefore(today, MISSED_CLOCKOUT_LOOKBACK_DAYS)) {
+      throw new Error("TOO_OLD");
+    }
+
+    const { rows: disputes } = await pool.query(
+      `SELECT 1 FROM attendance_disputes
+        WHERE employee_id = $1 AND work_date = $2::date AND status IN ('pending', 'approved')
+        LIMIT 1`,
+      [context.user.dbUserId, row.work_date],
+    );
+    if (disputes.length > 0) throw new Error("DISPUTE_IN_FLIGHT");
+
+    const timeIn = row.time_in.slice(0, 5);
+    const rejection = validateSelfReportedTimeOut({
+      timeIn,
+      timeOut: data.timeOut,
+      shiftLabel: row.shift_label,
+    });
+    if (rejection) throw new Error(rejection);
+
+    const coverage = await leaveCoverageFor(pool, context.user.dbUserId, row.work_date);
+    const { hoursWorked, isUndertime, undertimeMins } = computeDayFlags({
+      timeIn,
+      timeOut: data.timeOut,
+      shiftLabel: row.shift_label,
+      coverage,
+    });
+
+    const { rowCount } = await pool.query(
+      `UPDATE daily_time_reports
+          SET time_out = $1, hours_worked = $2, is_undertime = $3, undertime_minutes = $4,
+              time_out_self_reported = TRUE, time_out_reported_at = now()
+        WHERE id = $5 AND employee_id = $6 AND time_out IS NULL AND locked_at IS NULL`,
+      [data.timeOut, hoursWorked, isUndertime, undertimeMins, data.dtrId, context.user.dbUserId],
+    );
+    if (rowCount === 0) throw new Error("ALREADY_CLOCKED_OUT");
+
+    return {
+      workDate: row.work_date,
+      timeOut: data.timeOut,
+      hoursWorked,
+      isUndertime,
+      undertimeMins,
+    };
   });

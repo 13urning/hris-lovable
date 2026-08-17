@@ -51,6 +51,7 @@ type LogEntry = {
   late_minutes: number | null;
   created_at: string | null;
   clockout_channel: string | null;
+  time_out_self_reported: boolean | null;
   clock_in_lat: number | null;
   clock_in_lon: number | null;
   clock_in_accuracy: number | null;
@@ -285,7 +286,12 @@ function ActivityLogPage() {
         { header: "Undertime (min)", value: (e) => e.undertime_minutes ?? "" },
         {
           header: "Clock-Out Source",
-          value: (e) => (e.time_out ? (e.clockout_channel ?? "web") : ""),
+          value: (e) =>
+            e.time_out
+              ? e.time_out_self_reported
+                ? "self-reported"
+                : (e.clockout_channel ?? "web")
+              : "",
         },
         { header: "Status", value: statusText },
       ],
@@ -350,6 +356,18 @@ function ActivityLogPage() {
           className="bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-100"
         >
           Device out · {entry.clockout_channel}
+        </Badge>,
+      );
+    // Added alongside whatever else the day earned, not instead of it: these
+    // hours were declared by the employee rather than punched, and that stays
+    // worth seeing even on a day that is otherwise unremarkable.
+    if (entry.time_out_self_reported)
+      badges.push(
+        <Badge
+          key="self-out"
+          className="bg-sky-50 text-sky-800 border border-sky-200 hover:bg-sky-50"
+        >
+          Self-reported out
         </Badge>,
       );
     if (badges.length === 0)
