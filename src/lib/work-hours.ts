@@ -46,20 +46,19 @@ export function lateMinutesFor(timeIn: string): number {
   return Math.max(0, h * 60 + m - LATE_CUTOFF_MINUTES);
 }
 
-// Latest clock-out an employee may SELF-REPORT for a day they forgot to close.
+// The end of the employee's rostered shift, as minutes since midnight.
 //
 // Every fixed shift is STANDARD_HOURS long and its code names the start hour
-// ("8-5" -> 08:00, so the bar is 17:00). Official Business has no fixed end, so
-// the ceiling is a standard day measured from when they actually clocked in.
+// ("8-5" -> 08:00, so the shift ends at 17:00). Official Business has no fixed
+// end, so it is measured as a standard day from when they actually clocked in.
 //
-// This is the guard rail on the whole self-report path: because a self-report
-// skips the approver chain, it must never be able to manufacture a longer day
-// than the employee was rostered for. Anyone genuinely owed more files an
-// attendance dispute, where a human looks at it.
-export function selfReportCapMinutes(
-  shiftLabel: string | null | undefined,
-  timeIn: string,
-): number {
+// This was once a hard ceiling on self-reported clock-outs. It is now advisory
+// only: the UI points out when a claimed time runs past it, but nothing is
+// blocked. Hours beyond a rostered day therefore reach payroll reporting
+// without an approver -- deliberately, so that a genuinely long day does not
+// need a dispute cycle just to be recorded. The row is tagged as self-reported
+// either way, which is what HR reviews against.
+export function shiftEndMinutes(shiftLabel: string | null | undefined, timeIn: string): number {
   const inMins = minutesOfDay(timeIn);
   const startHour = Number(String(shiftLabel ?? "").split("-")[0]);
   if (shiftLabel === OB_SHIFT || !Number.isFinite(startHour) || startHour <= 0) {
@@ -68,19 +67,20 @@ export function selfReportCapMinutes(
   return startHour * 60 + STANDARD_HOURS * 60;
 }
 
-export type SelfReportRejection = "BAD_FORMAT" | "BEFORE_CLOCK_IN" | "AFTER_SHIFT_END";
+export type SelfReportRejection = "BAD_FORMAT" | "BEFORE_CLOCK_IN";
 
 // Validate a self-reported clock-out against its day. Returns null when the time
 // is acceptable, or the reason it is not.
+//
+// Only the two invariants that keep the row coherent are enforced: a parseable
+// time, and one that falls after the clock-in. How long the day ran is the
+// employee's to state.
 export function validateSelfReportedTimeOut(args: {
   timeIn: string;
   timeOut: string;
-  shiftLabel: string | null | undefined;
 }): SelfReportRejection | null {
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.timeOut)) return "BAD_FORMAT";
-  const out = minutesOfDay(args.timeOut);
-  if (out <= minutesOfDay(args.timeIn)) return "BEFORE_CLOCK_IN";
-  if (out > selfReportCapMinutes(args.shiftLabel, args.timeIn)) return "AFTER_SHIFT_END";
+  if (minutesOfDay(args.timeOut) <= minutesOfDay(args.timeIn)) return "BEFORE_CLOCK_IN";
   return null;
 }
 
