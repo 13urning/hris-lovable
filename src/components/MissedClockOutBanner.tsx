@@ -15,7 +15,6 @@ import { useConfirm } from "@/hooks/use-confirm";
 // authority on all of these — the input's own `max` is a convenience, not a
 // guard, so a hand-crafted request still lands here.
 const ERROR_COPY: Record<string, string> = {
-  AFTER_SHIFT_END: "That's past the end of your shift. File an attendance dispute for extra hours.",
   BEFORE_CLOCK_IN: "Your clock-out has to be after the time you clocked in.",
   BAD_FORMAT: "Enter a valid time.",
   ALREADY_CLOCKED_OUT: "That day already has a clock-out.",
@@ -30,10 +29,10 @@ const ERROR_COPY: Record<string, string> = {
 // clocked out, and lets them close it without an approver.
 //
 // The trade this makes: a forgotten tap used to cost a full attendance-dispute
-// cycle, which is heavy for something this common. In exchange the time is
-// capped at their shift end, so a self-report can never claim more than the day
-// they were rostered for, and the row is tagged so HR can see which hours were
-// declared rather than punched. Anything beyond the cap still goes to a human.
+// cycle, which is heavy for something this common. Any time after the clock-in
+// is accepted, including one past the end of the rostered shift — the dialog
+// says so plainly when that happens, and the row is tagged either way, so what
+// HR reviews is the self-reported flag rather than a blocked submission.
 export function MissedClockOutBanner() {
   const qc = useQueryClient();
   const confirm = useConfirm();
@@ -63,11 +62,16 @@ export function MissedClockOutBanner() {
 
   if (!missed) return null;
 
+  // Nothing stops a time past the rostered shift end, but the employee is told
+  // that is what they are claiming before it is written.
+  const pastShiftEnd = !!timeOut && timeOut > missed.shiftEnd;
+
   const ask = () =>
     confirm.ask({
       title: "Save this clock-out?",
-      description:
-        "This closes the day without going through your approvers, so it's recorded as self-reported and visible to HR. If the time is wrong afterwards you'll need to file an attendance dispute.",
+      description: pastShiftEnd
+        ? "This closes the day without going through your approvers, so it's recorded as self-reported and visible to HR. You're claiming time past the end of your shift, so make sure it's right — correcting it afterwards means filing an attendance dispute."
+        : "This closes the day without going through your approvers, so it's recorded as self-reported and visible to HR. If the time is wrong afterwards you'll need to file an attendance dispute.",
       details: (
         <>
           Date: <span className="text-foreground">{formatDate(missed.workDate)}</span>
@@ -75,6 +79,13 @@ export function MissedClockOutBanner() {
           Clocked in: <span className="tabular-nums text-foreground">{missed.timeIn}</span>
           <br />
           Clocking out: <span className="tabular-nums text-foreground">{timeOut}</span>
+          {pastShiftEnd && (
+            <>
+              <br />
+              Shift ends: <span className="tabular-nums text-foreground">{missed.shiftEnd}</span> —
+              you&rsquo;re claiming past it
+            </>
+          )}
         </>
       ),
       confirmLabel: "Save clock-out",
@@ -95,9 +106,7 @@ export function MissedClockOutBanner() {
           </p>
           <p className="text-xs text-muted-foreground">
             Clocked in at <span className="tabular-nums">{missed.timeIn}</span> ·{" "}
-            {shiftDisplay(missed.shiftLabel)}. Enter when you left — up to{" "}
-            <span className="tabular-nums">{missed.capTimeOut}</span>. For anything later, file an
-            attendance dispute.
+            {shiftDisplay(missed.shiftLabel)}. Enter when you actually left.
           </p>
         </div>
         <div className="flex items-end gap-2">
@@ -110,7 +119,6 @@ export function MissedClockOutBanner() {
               type="time"
               className="h-9 w-32"
               value={timeOut}
-              max={missed.capTimeOut}
               onChange={(e) => setTimeOut(e.target.value)}
             />
           </div>

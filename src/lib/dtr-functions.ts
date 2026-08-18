@@ -683,8 +683,9 @@ type MissedClockOut = {
   workDate: string;
   timeIn: string;
   shiftLabel: string | null;
-  // Latest time the employee may claim, "HH:MM" — the shift's own end.
-  capTimeOut: string;
+  // End of the rostered shift, "HH:MM". Advisory only — the UI notes a time
+  // past it, but any time after the clock-in is accepted.
+  shiftEnd: string;
 };
 
 // The caller's most recent unclosed day, or null when there is nothing to fix.
@@ -697,7 +698,7 @@ export const getMissedClockOut = createServerFn({ method: "POST" })
   .handler(async ({ context }): Promise<MissedClockOut | null> => {
     assertUser(context.user);
     const { pool } = await import("@/lib/db.server");
-    const { selfReportCapMinutes, hhmmOfMinutes } = await import("@/lib/work-hours");
+    const { shiftEndMinutes, hhmmOfMinutes } = await import("@/lib/work-hours");
 
     const today = phTodayIso();
     const {
@@ -734,7 +735,7 @@ export const getMissedClockOut = createServerFn({ method: "POST" })
       workDate: row.work_date,
       timeIn,
       shiftLabel: row.shift_label,
-      capTimeOut: hhmmOfMinutes(selfReportCapMinutes(row.shift_label, timeIn)),
+      shiftEnd: hhmmOfMinutes(shiftEndMinutes(row.shift_label, timeIn)),
     };
   });
 
@@ -745,7 +746,7 @@ export const getMissedClockOut = createServerFn({ method: "POST" })
 // here instead:
 //   - the row is the caller's own, open, unlocked, and inside the window
 //   - no dispute is already in flight for that date
-//   - the time is well-formed, after the clock-in, and at or before the shift end
+//   - the time is well-formed and falls after the clock-in
 //   - `AND time_out IS NULL` in the UPDATE keeps it write-once under a race
 // The day is then graded by the same computeDayFlags every other write path uses,
 // so an approved leave still shortens what was owed and a late arrival still
@@ -789,11 +790,7 @@ export const selfReportClockOut = createServerFn({ method: "POST" })
     if (disputes.length > 0) throw new Error("DISPUTE_IN_FLIGHT");
 
     const timeIn = row.time_in.slice(0, 5);
-    const rejection = validateSelfReportedTimeOut({
-      timeIn,
-      timeOut: data.timeOut,
-      shiftLabel: row.shift_label,
-    });
+    const rejection = validateSelfReportedTimeOut({ timeIn, timeOut: data.timeOut });
     if (rejection) throw new Error(rejection);
 
     const coverage = await leaveCoverageFor(pool, context.user.dbUserId, row.work_date);
