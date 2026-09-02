@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware, assertHR } from "@/lib/auth-middleware";
 import { csvEscape } from "@/lib/csv-export";
+import { computeAbsentDates, phDateOf, type LeaveSpan } from "@/lib/attendance-absence";
 
 // System/service account always excluded from attendance monitoring, matched by
 // email (its row id differs across environments). Kept in sync with
@@ -217,17 +218,137 @@ export const generateActivityReport = createServerFn({ method: "POST" })
         : null,
     ]);
 
-    const rows = [
-      ...(attendance?.rows ?? []),
-      ...(leaves?.rows ?? []),
-      ...(ot?.rows ?? []),
-    ] as Record<string, unknown>[];
+    // Absence is not a stored row — it is "a past workday with no clock-in and
+    // no covering leave", synthesized at read time (see attendance-absence).
+    // The attendance SELECT above can only return rows that physically exist, so
+    // absent employees would silently drop out of the export. Rebuild them here
+    // from the SAME computeAbsentDates the DTR/activity-log views use, so the CSV
+    // agrees with what HR sees on screen. Only worth the extra queries when
+    // attendance was actually requested.
+    const absenceRows: Record<string, unknown>[] = [];
+    if (types.has("attendance")) {
+      const { fetchActiveHolidayDates } = await import("@/lib/holiday-functions");
+      const [{ rows: roster }, { rows: rangeDtrs }, { rows: rangeLeaves }, holidays] =
+        await Promise.all([
+          pool.query<{
+            id: string;
+            employee_code: string | null;
+            full_name: string;
+            company: string | null;
+            department: string | null;
+            email: string | null;
+            created_at: string;
+          }>(
+            `SELECT p.id, p.employee_code, p.full_name, p.company, p.department,
+                    COALESCE(u.email, p.email) AS email, p.created_at
+               FROM profiles p
+               LEFT JOIN users u ON u.id = p.id
+              WHERE COALESCE(u.email, p.email) IS DISTINCT FROM $1
+                AND p.exclude_from_attendance IS NOT TRUE`,
+            [MONITORING_EXCLUDED_EMAIL],
+          ),
+          // Every DTR date in range (clock-ins AND leave-synced rows) so a day
+          // that already has a row is never double-counted as absent.
+          pool.query<{ employee_id: string; work_date: string }>(
+            `SELECT employee_id, to_char(work_date, 'YYYY-MM-DD') AS work_date
+               FROM daily_time_reports
+              WHERE work_date >= $1::date AND work_date <= $2::date`,
+            [startDate, endDate],
+          ),
+          // Approved AND pending leaves — a pending leave has no DTR row yet but
+          // still means the person was not expected in.
+          pool.query<{ employee_id: string; start_date: string; end_date: string }>(
+            `SELECT employee_id, to_char(start_date, 'YYYY-MM-DD') AS start_date,
+                    to_char(end_date, 'YYYY-MM-DD') AS end_date
+               FROM leave_requests
+              WHERE status IN ('approved', 'pending')
+                AND end_date >= $1::date AND start_date <= $2::date`,
+            [startDate, endDate],
+          ),
+          fetchActiveHolidayDates(pool, startDate, endDate),
+        ]);
+
+      const dtrByEmp = new Map<string, Set<string>>();
+      for (const d of rangeDtrs) {
+        let s = dtrByEmp.get(d.employee_id);
+        if (!s) dtrByEmp.set(d.employee_id, (s = new Set()));
+        s.add(d.work_date);
+      }
+      const leavesByEmp = new Map<string, LeaveSpan[]>();
+      for (const l of rangeLeaves) {
+        const arr = leavesByEmp.get(l.employee_id) ?? [];
+        arr.push({ start_date: l.start_date, end_date: l.end_date });
+        leavesByEmp.set(l.employee_id, arr);
+      }
+
+      for (const p of roster) {
+        const joinDate = p.created_at ? phDateOf(p.created_at) : startDate;
+        const absentDates = computeAbsentDates(
+          startDate,
+          endDate,
+          dtrByEmp.get(p.id) ?? new Set(),
+          leavesByEmp.get(p.id) ?? [],
+          joinDate,
+          holidays,
+        );
+        for (const date of absentDates) {
+          absenceRows.push({
+            record_type: "attendance",
+            employee_code: p.employee_code,
+            employee_name: p.full_name,
+            company: p.company,
+            department: p.department,
+            email: p.email,
+            date,
+            end_date: null,
+            time_in: null,
+            time_out: null,
+            hours_worked: 0,
+            late_minutes: null,
+            undertime_minutes: null,
+            is_absent: true,
+            leave_type: null,
+            leave_days: null,
+            half_day_period: null,
+            ot_requested_hours: null,
+            ot_request_type: null,
+            ot_target_month: null,
+            overtime_hours: 0,
+            status: null,
+            reason_or_notes: null,
+            requested_at_ph: null,
+            requester_remarks: null,
+            approver_remarks: null,
+            reviewed_by_name: null,
+            reviewed_at_ph: null,
+          });
+        }
+      }
+    }
+
+    // Real clock-in/leave rows plus synthesized absences, ordered by date then
+    // name so the attendance block reads as one coherent list.
+    const attendanceRows = [...(attendance?.rows ?? []), ...absenceRows] as Record<
+      string,
+      unknown
+    >[];
+    attendanceRows.sort((a, b) => {
+      const da = String(a.date ?? "");
+      const db = String(b.date ?? "");
+      if (da !== db) return da.localeCompare(db);
+      return String(a.employee_name ?? "").localeCompare(String(b.employee_name ?? ""));
+    });
+
+    const rows = [...attendanceRows, ...(leaves?.rows ?? []), ...(ot?.rows ?? [])] as Record<
+      string,
+      unknown
+    >[];
 
     return {
       csv: buildReportCsv(rows),
       filename: `hris-report_${startDate}_to_${endDate}.csv`,
       counts: {
-        attendance: attendance?.rowCount ?? 0,
+        attendance: attendanceRows.length,
         leave: leaves?.rowCount ?? 0,
         overtime: ot?.rowCount ?? 0,
       },

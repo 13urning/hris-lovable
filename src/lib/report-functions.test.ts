@@ -131,6 +131,29 @@ describe("buildReportCsv", () => {
     expect(cell(csv, "approver_remarks")).toBe("'=HYPERLINK(evil)");
   });
 
+  it("serializes a synthesized absence row", () => {
+    // Absences are computed, not stored; the export appends them as attendance
+    // rows with is_absent true and every request/approval column blank.
+    const csv = buildReportCsv([
+      {
+        record_type: "attendance",
+        employee_name: "Juan Dela Cruz",
+        date: "2026-09-01",
+        is_absent: true,
+        hours_worked: 0,
+        status: null,
+        requester_remarks: null,
+        approver_remarks: null,
+      },
+    ]);
+    expect(cell(csv, "record_type")).toBe("attendance");
+    expect(cell(csv, "is_absent")).toBe("true");
+    expect(cell(csv, "date")).toBe("2026-09-01");
+    expect(cell(csv, "hours_worked")).toBe("0");
+    expect(cell(csv, "status")).toBe("");
+    expect(cell(csv, "requester_remarks")).toBe("");
+  });
+
   it("emits one line per record, CRLF-terminated", () => {
     const csv = buildReportCsv([{ record_type: "leave" }, { record_type: "overtime" }]);
     expect(csv.endsWith("\r\n")).toBe(true);
