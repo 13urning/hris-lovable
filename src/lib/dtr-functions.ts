@@ -2,22 +2,18 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { authMiddleware, assertUser, assertHR } from "@/lib/auth-middleware";
 import { computeDayFlags, leaveCoverageFor } from "@/lib/work-hours";
-
-// PH calendar date (UTC+8, no DST) as YYYY-MM-DD. Server-authoritative "today"
-// for absence computation — Cloud Run runs in UTC, so we offset explicitly
-// rather than trust the caller's browser timezone.
-function phTodayIso(): string {
-  return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
+import {
+  computeAbsentDates,
+  isoDateFrom,
+  phDateOf,
+  phTodayIso,
+  type LeaveSpan,
+} from "@/lib/attendance-absence";
 
 // PH wall-clock time (UTC+8, no DST) as HH:MM. Server-authoritative "now" for the
 // clock-out moment — the client's submitted time is never trusted.
 function phNowHHMM(): string {
   return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(11, 16);
-}
-
-function isoDateFrom(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function isoDaysBefore(iso: string, days: number): string {
@@ -26,21 +22,10 @@ function isoDaysBefore(iso: string, days: number): string {
   return isoDateFrom(d);
 }
 
-// PH calendar date (YYYY-MM-DD) of a stored UTC timestamp.
-function phDateOf(isoTimestamp: string): string {
-  return new Date(new Date(isoTimestamp).getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-// Absence tracking went live on this date; days before it are never flagged
-// absent (no retroactive absences from before the system tracked attendance).
-const ABSENCE_TRACKING_START = "2026-06-16";
-
 // System/service account always excluded from attendance & absence monitoring,
 // matched by email (the row id differs across environments). Individual
 // employees can additionally opt out via profiles.exclude_from_attendance.
 const MONITORING_EXCLUDED_EMAIL = "localadmin@hris.local";
-
-type LeaveSpan = { start_date: string; end_date: string };
 
 // A synthesized "absent" record, shaped like a daily_time_reports row so report
 // renderers can treat it the same as a real one. Absence is computed live, never
@@ -66,10 +51,9 @@ function makeAbsentRow(employeeId: string, workDate: string): Record<string, unk
   };
 }
 
-// Weekdays (Mon–Fri) in [startDate, endDate] that fall strictly before PH-today
-// and have neither a clock-in (dtrDates) nor a covering approved/pending leave.
-// `notBefore` floors the scan at the employee's account-creation date so days
-// before they existed in the system aren't flagged absent.
+// Absent days in [startDate, endDate] as daily_time_reports-shaped rows. The
+// date logic lives in computeAbsentDates (shared with the admin data export);
+// this only shapes each absent date into a row the DTR renderers understand.
 function computeAbsentDays(
   employeeId: string,
   startDate: string,
@@ -79,25 +63,9 @@ function computeAbsentDays(
   notBefore: string,
   holidays: Set<string>,
 ): Record<string, unknown>[] {
-  const today = phTodayIso();
-  // Floor the scan at the later of: range start, the employee's hire date, and
-  // the global absence-tracking start date.
-  let from = startDate;
-  if (from < notBefore) from = notBefore;
-  if (from < ABSENCE_TRACKING_START) from = ABSENCE_TRACKING_START;
-  const out: Record<string, unknown>[] = [];
-  const cur = new Date(from + "T00:00:00");
-  for (;;) {
-    const iso = isoDateFrom(cur);
-    if (iso > endDate || iso >= today) break; // past the range or not yet over
-    const dow = cur.getDay(); // 0 Sun … 6 Sat
-    if (dow !== 0 && dow !== 6 && !holidays.has(iso)) {
-      const onLeave = leaves.some((l) => l.start_date <= iso && iso <= l.end_date);
-      if (!dtrDates.has(iso) && !onLeave) out.push(makeAbsentRow(employeeId, iso));
-    }
-    cur.setDate(cur.getDate() + 1);
-  }
-  return out;
+  return computeAbsentDates(startDate, endDate, dtrDates, leaves, notBefore, holidays).map((iso) =>
+    makeAbsentRow(employeeId, iso),
+  );
 }
 
 // Clock-in/out GPS coordinates are captured for HR audit ONLY and are surfaced
