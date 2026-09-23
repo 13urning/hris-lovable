@@ -59,7 +59,7 @@ export function AppShell() {
       to={to}
       onClick={() => setSheetOpen(false)}
       className={cn(
-        "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+        "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
         path === to || path.startsWith(to + "/")
           ? "bg-primary text-primary-foreground"
           : "text-foreground hover:bg-secondary",
@@ -70,7 +70,7 @@ export function AppShell() {
   );
 
   const sectionLabel = (label: string) => (
-    <p className="text-xs uppercase tracking-widest text-muted-foreground px-3 py-1 mt-4 first:mt-0">
+    <p className="text-xs uppercase tracking-widest text-muted-foreground px-3 pb-1 pt-3">
       {label}
     </p>
   );
@@ -82,35 +82,61 @@ export function AppShell() {
     </Button>
   );
 
+  // Drawer sections, filtered by role. A section with no visible links is
+  // dropped entirely, so an employee never sees an empty heading.
+  type DrawerLink = { to: string; label: string; icon: typeof Clock3; show?: boolean };
+  const drawerSections: { label?: string; links: DrawerLink[] }[] = [
+    { links: [{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard }] },
+    {
+      label: "My Work",
+      links: [
+        { to: "/dtr", label: "Attendance", icon: Clock3 },
+        { to: "/leaves", label: "Leaves", icon: Plane },
+        { to: "/ot-approvals", label: "OT Approvals", icon: Timer },
+      ],
+    },
+    {
+      label: "Manage",
+      links: [
+        { to: "/all-requests", label: "All Requests", icon: ClipboardList, show: isAdmin },
+        { to: "/employees", label: "Employees", icon: Users, show: isHR },
+        { to: "/activity-log", label: "Activity Log", icon: Activity, show: isHR },
+        { to: "/reports", label: "Data Export", icon: FileSpreadsheet, show: isHR },
+      ],
+    },
+    {
+      label: "Performance",
+      links: [
+        { to: "/performance", label: "Performance", icon: BarChart3 },
+        { to: "/kpi-builder", label: "KPI Builder", icon: Target, show: isHR },
+        { to: "/performance-admin", label: "Performance Admin", icon: BarChart3, show: isHR },
+      ],
+    },
+    {
+      label: "Settings",
+      links: [
+        { to: "/holidays", label: "Holidays", icon: CalendarDays, show: isHR },
+        { to: "/calendar", label: "Calendar Events", icon: CalendarClock, show: isAdmin },
+        { to: "/org-chart", label: "Org Chart", icon: GitBranch, show: isAdmin },
+        { to: "/office-networks", label: "Office Networks", icon: ShieldCheck, show: isAdmin },
+      ],
+    },
+  ];
+
+  // Scrolls on its own inside the sheet, so a short viewport never clips the
+  // bottom links. The small negative margin keeps focus rings from being cut.
   const drawerNav = (
-    <nav className="flex flex-col gap-0.5 pt-2">
-      {sectionLabel("My Account")}
-      {drawerItem("/dashboard", "Dashboard", LayoutDashboard)}
-
-      {sectionLabel("Attendance")}
-      {drawerItem("/dtr", "Attendance", Clock3)}
-      {isHR && drawerItem("/holidays", "Holidays", CalendarDays)}
-      {isAdmin && drawerItem("/calendar", "Calendar Events", CalendarClock)}
-
-      {sectionLabel("People")}
-      {isHR && drawerItem("/employees", "Employees", Users)}
-      {isHR && drawerItem("/activity-log", "Activity Log", Activity)}
-      {isAdmin && drawerItem("/org-chart", "Org Chart", GitBranch)}
-      {isAdmin && drawerItem("/office-networks", "Office Networks", ShieldCheck)}
-
-      {sectionLabel("Overtime")}
-      {drawerItem("/ot-approvals", "OT Approvals", Timer)}
-
-      {isAdmin && sectionLabel("Requests")}
-      {isAdmin && drawerItem("/all-requests", "All Requests", ClipboardList)}
-
-      {isHR && sectionLabel("Reports")}
-      {isHR && drawerItem("/reports", "Data Export", FileSpreadsheet)}
-
-      {sectionLabel("Performance")}
-      {isHR && drawerItem("/kpi-builder", "KPI Builder", Target)}
-      {isHR && drawerItem("/performance-admin", "Performance Admin", BarChart3)}
-      {drawerItem("/performance", "Performance", BarChart3)}
+    <nav className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 pt-1">
+      {drawerSections.map((section, i) => {
+        const links = section.links.filter((l) => l.show !== false);
+        if (links.length === 0) return null;
+        return (
+          <div key={section.label ?? i} className="flex flex-col gap-0.5">
+            {section.label && sectionLabel(section.label)}
+            {links.map((l) => drawerItem(l.to, l.label, l.icon))}
+          </div>
+        );
+      })}
     </nav>
   );
 
@@ -124,7 +150,7 @@ export function AppShell() {
             <div className={cn(isElevated ? "block" : "block md:hidden")}>
               <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
                 <SheetTrigger asChild>{hamburgerTrigger}</SheetTrigger>
-                <SheetContent side="left" className="w-64 p-4">
+                <SheetContent side="left" className="flex w-64 flex-col p-4">
                   <SheetHeader>
                     <SheetTitle>Menu</SheetTitle>
                   </SheetHeader>
