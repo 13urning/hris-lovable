@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TableSkeleton } from "@/components/TableSkeleton";
 import { AdminDashboard } from "@/components/AdminDashboard";
 import { TeamDashboard } from "@/components/TeamDashboard";
-import { formatDate, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
+import { formatDate, formatDateWithDay, todayIso, SHIFT_OPTIONS, type ShiftValue } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { Clock3, AlertCircle, CalendarCheck, Plane, PartyPopper } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -496,7 +496,7 @@ function Dashboard() {
                         </span>
                       </span>
                       <span className="text-muted-foreground">
-                        {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                        {formatDateWithDay(l.start_date)} → {formatDateWithDay(l.end_date)}
                       </span>
                     </div>
                   ))}

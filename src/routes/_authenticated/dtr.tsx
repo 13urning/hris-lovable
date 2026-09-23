@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { formatDate, shiftDisplay } from "@/lib/dtr";
+import { formatDate, formatDateWithDay, shiftDisplay } from "@/lib/dtr";
 import { exportRowsToCSV } from "@/lib/csv-export";
 import { TablePagination } from "@/components/TablePagination";
 import { TableSkeleton } from "@/components/TableSkeleton";
@@ -293,7 +293,9 @@ function AttendancePage() {
                         {d.employee_department ?? ""}
                       </div>
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">{formatDate(d.work_date)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {formatDateWithDay(d.work_date)}
+                    </td>
                     <td className="px-4 py-2 tabular-nums text-muted-foreground">
                       {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
                     </td>
@@ -328,7 +330,9 @@ function AttendancePage() {
                                   </span>
                                   <br />
                                   Date:{" "}
-                                  <span className="text-foreground">{formatDate(d.work_date)}</span>
+                                  <span className="text-foreground">
+                                    {formatDateWithDay(d.work_date)}
+                                  </span>
                                   <br />
                                   Change:{" "}
                                   <span className="tabular-nums text-foreground">
@@ -399,7 +403,9 @@ function AttendancePage() {
                         {d.employee_department ?? ""}
                       </div>
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">{formatDate(d.work_date)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {formatDateWithDay(d.work_date)}
+                    </td>
                     <td className="px-4 py-2 tabular-nums text-muted-foreground">
                       {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
                     </td>
@@ -431,7 +437,9 @@ function AttendancePage() {
                                 </span>
                                 <br />
                                 Date:{" "}
-                                <span className="text-foreground">{formatDate(d.work_date)}</span>
+                                <span className="text-foreground">
+                                  {formatDateWithDay(d.work_date)}
+                                </span>
                                 <br />
                                 Skipping:{" "}
                                 <span className="text-foreground">
@@ -638,7 +646,9 @@ function AttendancePage() {
               <tbody>
                 {myDisputes.map((d) => (
                   <tr key={d.id} className="border-t align-top">
-                    <td className="px-4 py-2 whitespace-nowrap">{formatDate(d.work_date)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {formatDateWithDay(d.work_date)}
+                    </td>
                     <td className="px-4 py-2 tabular-nums text-muted-foreground">
                       {d.original_time_in ?? "—"} → {d.original_time_out ?? "—"}
                     </td>
@@ -673,7 +683,9 @@ function AttendancePage() {
                               details: (
                                 <>
                                   Date:{" "}
-                                  <span className="text-foreground">{formatDate(d.work_date)}</span>
+                                  <span className="text-foreground">
+                                    {formatDateWithDay(d.work_date)}
+                                  </span>
                                   <br />
                                   Requested:{" "}
                                   <span className="tabular-nums text-foreground">

@@ -13,7 +13,7 @@ import {
   type RequestStatus,
 } from "@/lib/all-requests";
 import { phTodayIso } from "@/lib/attendance-absence";
-import { shiftDisplay } from "@/lib/dtr";
+import { formatDateWithDay, shiftDisplay } from "@/lib/dtr";
 import { leaveTypeLabel } from "@/lib/leave-types";
 import { to12Hour, formatOtRange } from "@/lib/ot-hours";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,24 +46,10 @@ function isoAddDays(iso: string, days: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
-// PH calendar date, e.g. "Sep 23, 2026". Pinned to Asia/Manila rather than the
-// browser's zone (dtr.ts formatDate) so a timestamp like reviewed_at lands on
-// the same day it does in PH. A bare "YYYY-MM-DD" parses as UTC midnight, which
-// is the same calendar day in PH, so this is safe for date columns too.
-function formatPhDate(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-PH", {
-    timeZone: "Asia/Manila",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-// Filed timestamp (UTC ISO) → PH date + time, e.g. "Sep 23, 2026, 2:04 PM".
+// Filed timestamp (UTC ISO) → PH date, weekday + time, e.g. "Sep 23, 2026 Wednesday, 2:04 PM".
 function formatFiledAt(iso: string): string {
   const d = new Date(iso);
-  const date = formatPhDate(iso);
+  const date = formatDateWithDay(iso);
   const time = d.toLocaleTimeString("en-PH", {
     timeZone: "Asia/Manila",
     hour: "numeric",
@@ -151,12 +137,12 @@ function RequestDetails({ row }: { row: AllRequestRow }) {
           <div className="text-xs text-muted-foreground">
             {row.half_day ? (
               <>
-                {formatPhDate(row.start_date)}{" "}
+                {formatDateWithDay(row.start_date)}{" "}
                 <span>(half day · {row.half_day_period ?? "—"})</span>
               </>
             ) : (
               <>
-                {formatPhDate(row.start_date)} → {formatPhDate(row.end_date)}
+                {formatDateWithDay(row.start_date)} → {formatDateWithDay(row.end_date)}
               </>
             )}
           </div>
@@ -174,7 +160,7 @@ function RequestDetails({ row }: { row: AllRequestRow }) {
       return (
         <div>
           <div className="font-medium">
-            {row.requested_hours ?? 0}h · {formatPhDate(row.work_date)}
+            {row.requested_hours ?? 0}h · {formatDateWithDay(row.work_date)}
           </div>
           {range && <div className="text-xs text-muted-foreground">{range}</div>}
         </div>
@@ -183,7 +169,7 @@ function RequestDetails({ row }: { row: AllRequestRow }) {
     case "dispute":
       return (
         <div>
-          <div className="font-medium">{formatPhDate(row.work_date)}</div>
+          <div className="font-medium">{formatDateWithDay(row.work_date)}</div>
           <div className="text-xs text-muted-foreground">
             {formatClockTime(row.original_time_in)} – {formatClockTime(row.original_time_out)}
             {row.original_shift_label ? ` (${shiftDisplay(row.original_shift_label)})` : ""}
@@ -214,7 +200,7 @@ function ApprovalCell({ row }: { row: AllRequestRow }) {
   if (!row.reviewed_at) return <span className="text-xs text-muted-foreground">—</span>;
   return (
     <span className="text-xs text-muted-foreground">
-      {formatPhDate(row.reviewed_at)}
+      {formatDateWithDay(row.reviewed_at)}
       {row.reviewed_by_name && (
         <>
           {" · by "}
