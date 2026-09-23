@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { formatDate, todayIso } from "@/lib/dtr";
+import { formatDateWithDay, todayIso } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
 import { LEAVE_TYPES } from "@/lib/leave-types";
 import {
@@ -158,7 +158,7 @@ function DatePickerField({
       <PopoverTrigger asChild>
         <Button variant="outline" className="w-full justify-start text-left font-normal">
           <CalendarDays className="mr-2 h-4 w-4" />
-          {formatDate(value)}
+          {formatDateWithDay(value)}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">
@@ -485,7 +485,7 @@ function LeavesPage() {
                 <CalendarCheck2 className="h-5 w-5 text-accent" /> Out today
               </CardTitle>
               <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                {formatDate(today)}
+                {formatDateWithDay(today)}
               </span>
             </div>
           </CardHeader>
@@ -523,7 +523,7 @@ function LeavesPage() {
                             {l.leave_type}
                           </span>
                           <span className="text-[11px] text-muted-foreground truncate">
-                            until {formatDate(l.end_date)}
+                            until {formatDateWithDay(l.end_date)}
                           </span>
                         </div>
                       </div>
@@ -564,7 +564,9 @@ function LeavesPage() {
                   return (
                     <div key={l.id} className="flex items-center justify-between text-xs">
                       <span className="truncate font-medium">{p?.full_name ?? "—"}</span>
-                      <span className="text-muted-foreground">{formatDate(l.start_date)}</span>
+                      <span className="text-muted-foreground">
+                        {formatDateWithDay(l.start_date)}
+                      </span>
                     </div>
                   );
                 })}
@@ -632,14 +634,14 @@ function LeavesPage() {
                       <td className="px-4 py-2">
                         {l.half_day ? (
                           <span>
-                            {formatDate(l.start_date)}{" "}
+                            {formatDateWithDay(l.start_date)}{" "}
                             <span className="text-muted-foreground">
                               (half day · {l.half_day_period})
                             </span>
                           </span>
                         ) : (
                           <>
-                            {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                            {formatDateWithDay(l.start_date)} → {formatDateWithDay(l.end_date)}
                           </>
                         )}
                       </td>
@@ -682,8 +684,8 @@ function LeavesPage() {
                                     Dates:{" "}
                                     <span className="text-foreground">
                                       {l.half_day
-                                        ? `${formatDate(l.start_date)} (half day · ${l.half_day_period})`
-                                        : `${formatDate(l.start_date)} → ${formatDate(l.end_date)}`}
+                                        ? `${formatDateWithDay(l.start_date)} (half day · ${l.half_day_period})`
+                                        : `${formatDateWithDay(l.start_date)} → ${formatDateWithDay(l.end_date)}`}
                                     </span>
                                   </>
                                 ),
@@ -758,7 +760,7 @@ function LeavesPage() {
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="w-full justify-start text-left font-normal">
                     <CalendarDays className="mr-2 h-4 w-4" />
-                    {formatDate(form.start_date)}
+                    {formatDateWithDay(form.start_date)}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
@@ -805,7 +807,7 @@ function LeavesPage() {
                       className="w-full justify-start text-left font-normal"
                     >
                       <CalendarDays className="mr-2 h-4 w-4" />
-                      {formatDate(form.end_date)}
+                      {formatDateWithDay(form.end_date)}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -884,8 +886,8 @@ function LeavesPage() {
                       Dates:{" "}
                       <span className="text-foreground">
                         {form.half_day
-                          ? `${formatDate(form.start_date)} (half day · ${form.half_day_period})`
-                          : `${formatDate(form.start_date)} → ${formatDate(form.end_date)}`}
+                          ? `${formatDateWithDay(form.start_date)} (half day · ${form.half_day_period})`
+                          : `${formatDateWithDay(form.start_date)} → ${formatDateWithDay(form.end_date)}`}
                       </span>
                       {!isHR && (
                         <>
@@ -1077,8 +1079,8 @@ function LeavesPage() {
                         Dates:{" "}
                         <span className="text-foreground">
                           {behalf.half_day
-                            ? `${formatDate(behalf.start_date)} (half day · ${behalf.half_day_period})`
-                            : `${formatDate(behalf.start_date)} → ${formatDate(behalf.end_date)}`}
+                            ? `${formatDateWithDay(behalf.start_date)} (half day · ${behalf.half_day_period})`
+                            : `${formatDateWithDay(behalf.start_date)} → ${formatDateWithDay(behalf.end_date)}`}
                         </span>
                       </>
                     ),
@@ -1183,14 +1185,14 @@ function LeavesPage() {
                         <div>
                           {l.half_day ? (
                             <span>
-                              {formatDate(l.start_date)}{" "}
+                              {formatDateWithDay(l.start_date)}{" "}
                               <span className="text-muted-foreground">
                                 (half day · {l.half_day_period})
                               </span>
                             </span>
                           ) : (
                             <>
-                              {formatDate(l.start_date)} → {formatDate(l.end_date)}
+                              {formatDateWithDay(l.start_date)} → {formatDateWithDay(l.end_date)}
                             </>
                           )}
                         </div>
@@ -1237,8 +1239,8 @@ function LeavesPage() {
                                       Dates:{" "}
                                       <span className="text-foreground">
                                         {l.half_day
-                                          ? `${formatDate(l.start_date)} (half day · ${l.half_day_period})`
-                                          : `${formatDate(l.start_date)} → ${formatDate(l.end_date)}`}
+                                          ? `${formatDateWithDay(l.start_date)} (half day · ${l.half_day_period})`
+                                          : `${formatDateWithDay(l.start_date)} → ${formatDateWithDay(l.end_date)}`}
                                       </span>
                                     </>
                                   ),
@@ -1278,8 +1280,8 @@ function LeavesPage() {
                                       Dates:{" "}
                                       <span className="text-foreground">
                                         {l.half_day
-                                          ? `${formatDate(l.start_date)} (half day · ${l.half_day_period})`
-                                          : `${formatDate(l.start_date)} → ${formatDate(l.end_date)}`}
+                                          ? `${formatDateWithDay(l.start_date)} (half day · ${l.half_day_period})`
+                                          : `${formatDateWithDay(l.start_date)} → ${formatDateWithDay(l.end_date)}`}
                                       </span>
                                     </>
                                   ),

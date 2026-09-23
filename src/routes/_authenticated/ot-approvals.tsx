@@ -27,7 +27,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { formatDate } from "@/lib/dtr";
+import { formatDate, formatDateWithDay } from "@/lib/dtr";
 import { computeOtHours, formatOtRange } from "@/lib/ot-hours";
 import { exportRowsToCSV } from "@/lib/csv-export";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -138,7 +138,7 @@ function cancelConfirmCopy(
         <br />
         {isBudget ? "Month" : "Date"}:{" "}
         <span className="text-foreground">
-          {isBudget ? formatMonth(r.target_month) : formatDate(r.work_date)}
+          {isBudget ? formatMonth(r.target_month) : formatDateWithDay(r.work_date)}
         </span>
       </>
     ),
@@ -277,7 +277,9 @@ function OTApprovalsPage() {
           value: (r) =>
             r.request_type === "pre_approved"
               ? formatMonth(r.target_month)
-              : formatDate(r.work_date),
+              : // Plain date, no weekday: spreadsheets parse "Aug 22, 2026" as a
+                // date but treat the weekday form as text, breaking sort/filter.
+                formatDate(r.work_date),
         },
         { header: "Hours", value: (r) => r.requested_hours },
         { header: "Justification", value: (r) => r.justification ?? "" },
@@ -726,7 +728,7 @@ function OTApprovalsPage() {
                     return (
                       <tr key={r.id} className="border-t">
                         <td className="px-4 py-2 font-medium">
-                          {formatDate(r.work_date)}
+                          {formatDateWithDay(r.work_date)}
                           {r.justification && (
                             <span className="mt-0.5 block max-w-[220px] text-[11px] font-normal italic text-muted-foreground">
                               "{r.justification}"
@@ -848,7 +850,7 @@ function OTApprovalsPage() {
                           </span>
                         </td>
                         <td className="px-4 py-2">
-                          {isBudget ? formatMonth(r.target_month) : formatDate(r.work_date)}
+                          {isBudget ? formatMonth(r.target_month) : formatDateWithDay(r.work_date)}
                         </td>
                         <td className="px-4 py-2 text-right">
                           {r.requested_hours}h
@@ -869,7 +871,7 @@ function OTApprovalsPage() {
                           <StepBadge row={r} />
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">
-                          {formatDate(r.created_at)}
+                          {formatDateWithDay(r.created_at)}
                         </td>
                         <td className="px-4 py-2">
                           <div className="flex justify-end">
@@ -1166,7 +1168,7 @@ function OTApprovalsPage() {
                   <p className="font-medium">
                     {reviewing.request_type === "pre_approved"
                       ? formatMonth(reviewing.target_month)
-                      : formatDate(reviewing.work_date)}
+                      : formatDateWithDay(reviewing.work_date)}
                   </p>
                 </div>
                 <div>
@@ -1204,7 +1206,7 @@ function OTApprovalsPage() {
               </div>
 
               <p className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                <StepBadge row={reviewing} /> · filed {formatDate(reviewing.created_at)}
+                <StepBadge row={reviewing} /> · filed {formatDateWithDay(reviewing.created_at)}
               </p>
             </div>
           )}

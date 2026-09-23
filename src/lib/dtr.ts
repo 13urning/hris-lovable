@@ -54,6 +54,24 @@ export function formatDate(iso: string | null | undefined) {
   });
 }
 
+// Request screens (leave, OT, disputes) show the weekday too — "Aug 22, 2026
+// Saturday" — so a weekend or a Monday is obvious at a glance. Pinned to PH time
+// rather than the browser's zone: with the weekday on screen, a machine set to
+// another zone must not shift the day. A bare "YYYY-MM-DD" parses as UTC
+// midnight, which is the same calendar day in PH, so date columns are safe too.
+export function formatDateWithDay(iso: string | null | undefined) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const weekday = d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", weekday: "long" });
+  return `${date} ${weekday}`;
+}
+
 export function formatDateTime(iso: string | null | undefined) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(undefined, {
