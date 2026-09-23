@@ -19,6 +19,7 @@ import {
   CalendarDays,
   CalendarClock,
   FileSpreadsheet,
+  ClipboardList,
 } from "lucide-react";
 import { NotificationBell } from "@/components/NotificationBell";
 import { CalendarEventBanner } from "@/components/CalendarEventBanner";
@@ -99,6 +100,9 @@ export function AppShell() {
 
       {sectionLabel("Overtime")}
       {drawerItem("/ot-approvals", "OT Approvals", Timer)}
+
+      {isAdmin && sectionLabel("Requests")}
+      {isAdmin && drawerItem("/all-requests", "All Requests", ClipboardList)}
 
       {isHR && sectionLabel("Reports")}
       {isHR && drawerItem("/reports", "Data Export", FileSpreadsheet)}

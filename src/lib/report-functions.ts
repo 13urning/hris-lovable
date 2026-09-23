@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware, assertHR } from "@/lib/auth-middleware";
 import { csvEscape } from "@/lib/csv-export";
 import { computeAbsentDates, phDateOf, type LeaveSpan } from "@/lib/attendance-absence";
+import { isRealDate } from "@/lib/date-validation";
 
 // System/service account always excluded from attendance monitoring, matched by
 // email (its row id differs across environments). Kept in sync with
@@ -76,15 +77,11 @@ export function buildReportCsv(rows: Record<string, unknown>[]): string {
   return lines.join("\r\n") + "\r\n";
 }
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-// Shape AND calendar validity — "2026-13-45" matches the regex but must not
-// reach the ::date casts (Postgres would throw a raw datetime error).
-export function isRealDate(s: string): boolean {
-  if (!DATE_RE.test(s)) return false;
-  const d = new Date(`${s}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
-}
+// isRealDate moved to date-validation.ts (pure, no server-fn imports) so
+// all-requests.ts can reuse it without pulling a server-function module into
+// the client bundle. Re-exported here so report-functions.test.ts (which
+// imports it from this module) keeps passing unchanged.
+export { isRealDate };
 
 const VALID_TYPES: readonly ReportRecordType[] = ["attendance", "leave", "overtime"];
 

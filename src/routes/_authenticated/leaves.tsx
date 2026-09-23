@@ -38,6 +38,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, todayIso } from "@/lib/dtr";
 import { businessDaysBetween } from "@/lib/utils";
+import { LEAVE_TYPES } from "@/lib/leave-types";
 import {
   Plane,
   Check,
@@ -71,18 +72,6 @@ type LeaveRow = {
   half_day: boolean;
   half_day_period: "AM" | "PM" | null;
 };
-
-const LEAVE_TYPES = [
-  { value: "VL", label: "Vacation Leave" },
-  { value: "SL", label: "Sick Leave" },
-  { value: "EL", label: "Emergency Leave" },
-  { value: "BDAY", label: "Birthday Leave" },
-  { value: "ML", label: "Maternity Leave" },
-  { value: "PL", label: "Paternity Leave" },
-  { value: "BL", label: "Bereavement Leave" },
-  { value: "WP", label: "Leave without Pay" },
-  { value: "Other", label: "Other" },
-];
 
 const STATUS_TONE: Record<LeaveStatus, string> = {
   pending: "bg-warning/20 text-warning-foreground",
