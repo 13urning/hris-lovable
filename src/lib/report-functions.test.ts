@@ -34,6 +34,12 @@ describe("isRealDate", () => {
     expect(isRealDate("2026-02-30")).toBe(false);
     expect(isRealDate("2025-02-29")).toBe(false); // not a leap year
   });
+
+  it("rejects dates before 1900 (year 0000 would reach Postgres and throw)", () => {
+    expect(isRealDate("0000-01-01")).toBe(false);
+    expect(isRealDate("1899-12-31")).toBe(false);
+    expect(isRealDate("1900-01-01")).toBe(true);
+  });
 });
 
 describe("report column contract", () => {

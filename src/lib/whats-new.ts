@@ -42,6 +42,18 @@ export type WhatsNewEntry = {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "admin-all-requests",
+    publishedAt: "2026-09-23",
+    title: "Every request, in one place",
+    highlights: [
+      "A new All Requests page lists leave, overtime and attendance disputes from every employee.",
+      "Filter by type, status, date filed or employee, and see who each pending request is waiting on.",
+      "It's view-only. Approvals still happen on the usual screens.",
+    ],
+    roles: ["admin"],
+    major: true,
+  },
+  {
     id: "calendar-event-banner",
     publishedAt: "2026-07-30",
     title: "Event reminders moved out of the bell",

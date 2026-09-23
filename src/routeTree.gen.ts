@@ -26,6 +26,7 @@ import { Route as AuthenticatedAdminKpiBuilderRouteImport } from './routes/_auth
 import { Route as AuthenticatedAdminHolidaysRouteImport } from './routes/_authenticated/_admin/holidays'
 import { Route as AuthenticatedAdminEmployeesRouteImport } from './routes/_authenticated/_admin/employees'
 import { Route as AuthenticatedAdminCalendarRouteImport } from './routes/_authenticated/_admin/calendar'
+import { Route as AuthenticatedAdminAllRequestsRouteImport } from './routes/_authenticated/_admin/all-requests'
 import { Route as AuthenticatedAdminActivityLogRouteImport } from './routes/_authenticated/_admin/activity-log'
 
 const LoginRoute = LoginRouteImport.update({
@@ -121,6 +122,12 @@ const AuthenticatedAdminCalendarRoute =
     path: '/calendar',
     getParentRoute: () => AuthenticatedAdminRoute,
   } as any)
+const AuthenticatedAdminAllRequestsRoute =
+  AuthenticatedAdminAllRequestsRouteImport.update({
+    id: '/all-requests',
+    path: '/all-requests',
+    getParentRoute: () => AuthenticatedAdminRoute,
+  } as any)
 const AuthenticatedAdminActivityLogRoute =
   AuthenticatedAdminActivityLogRouteImport.update({
     id: '/activity-log',
@@ -137,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/performance': typeof AuthenticatedPerformanceRoute
   '/activity-log': typeof AuthenticatedAdminActivityLogRoute
+  '/all-requests': typeof AuthenticatedAdminAllRequestsRoute
   '/calendar': typeof AuthenticatedAdminCalendarRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/holidays': typeof AuthenticatedAdminHolidaysRoute
@@ -155,6 +163,7 @@ export interface FileRoutesByTo {
   '/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/performance': typeof AuthenticatedPerformanceRoute
   '/activity-log': typeof AuthenticatedAdminActivityLogRoute
+  '/all-requests': typeof AuthenticatedAdminAllRequestsRoute
   '/calendar': typeof AuthenticatedAdminCalendarRoute
   '/employees': typeof AuthenticatedAdminEmployeesRoute
   '/holidays': typeof AuthenticatedAdminHolidaysRoute
@@ -176,6 +185,7 @@ export interface FileRoutesById {
   '/_authenticated/ot-approvals': typeof AuthenticatedOtApprovalsRoute
   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
   '/_authenticated/_admin/activity-log': typeof AuthenticatedAdminActivityLogRoute
+  '/_authenticated/_admin/all-requests': typeof AuthenticatedAdminAllRequestsRoute
   '/_authenticated/_admin/calendar': typeof AuthenticatedAdminCalendarRoute
   '/_authenticated/_admin/employees': typeof AuthenticatedAdminEmployeesRoute
   '/_authenticated/_admin/holidays': typeof AuthenticatedAdminHolidaysRoute
@@ -196,6 +206,7 @@ export interface FileRouteTypes {
     | '/ot-approvals'
     | '/performance'
     | '/activity-log'
+    | '/all-requests'
     | '/calendar'
     | '/employees'
     | '/holidays'
@@ -214,6 +225,7 @@ export interface FileRouteTypes {
     | '/ot-approvals'
     | '/performance'
     | '/activity-log'
+    | '/all-requests'
     | '/calendar'
     | '/employees'
     | '/holidays'
@@ -234,6 +246,7 @@ export interface FileRouteTypes {
     | '/_authenticated/ot-approvals'
     | '/_authenticated/performance'
     | '/_authenticated/_admin/activity-log'
+    | '/_authenticated/_admin/all-requests'
     | '/_authenticated/_admin/calendar'
     | '/_authenticated/_admin/employees'
     | '/_authenticated/_admin/holidays'
@@ -371,6 +384,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminCalendarRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
+    '/_authenticated/_admin/all-requests': {
+      id: '/_authenticated/_admin/all-requests'
+      path: '/all-requests'
+      fullPath: '/all-requests'
+      preLoaderRoute: typeof AuthenticatedAdminAllRequestsRouteImport
+      parentRoute: typeof AuthenticatedAdminRoute
+    }
     '/_authenticated/_admin/activity-log': {
       id: '/_authenticated/_admin/activity-log'
       path: '/activity-log'
@@ -383,6 +403,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedAdminRouteChildren {
   AuthenticatedAdminActivityLogRoute: typeof AuthenticatedAdminActivityLogRoute
+  AuthenticatedAdminAllRequestsRoute: typeof AuthenticatedAdminAllRequestsRoute
   AuthenticatedAdminCalendarRoute: typeof AuthenticatedAdminCalendarRoute
   AuthenticatedAdminEmployeesRoute: typeof AuthenticatedAdminEmployeesRoute
   AuthenticatedAdminHolidaysRoute: typeof AuthenticatedAdminHolidaysRoute
@@ -395,6 +416,7 @@ interface AuthenticatedAdminRouteChildren {
 
 const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
   AuthenticatedAdminActivityLogRoute: AuthenticatedAdminActivityLogRoute,
+  AuthenticatedAdminAllRequestsRoute: AuthenticatedAdminAllRequestsRoute,
   AuthenticatedAdminCalendarRoute: AuthenticatedAdminCalendarRoute,
   AuthenticatedAdminEmployeesRoute: AuthenticatedAdminEmployeesRoute,
   AuthenticatedAdminHolidaysRoute: AuthenticatedAdminHolidaysRoute,
