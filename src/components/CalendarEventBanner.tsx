@@ -52,12 +52,15 @@ export function CalendarEventBanner() {
         <div
           key={e.id}
           role="status"
-          className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3"
+          // Solid red so an imminent event can't be scrolled past. Dark mode's
+          // destructive is a lighter red that near-white text fails contrast on,
+          // so the fill is let partly through to the dark background there.
+          className="flex items-start gap-3 rounded-lg bg-destructive px-4 py-3 text-destructive-foreground shadow-sm dark:bg-destructive/75"
         >
-          <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <CalendarClock className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{e.title}</p>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+            <p className="text-sm font-semibold">{e.title}</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
               {e.body && <span>{e.body}</span>}
               {e.location && (
                 <span className="inline-flex items-center gap-1">
@@ -69,7 +72,7 @@ export function CalendarEventBanner() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+            className="h-6 w-6 shrink-0 hover:bg-destructive-foreground/15 hover:text-destructive-foreground focus-visible:ring-destructive-foreground"
             aria-label={`Dismiss ${e.title}`}
             onClick={() => dismiss.mutate(e.id)}
             disabled={dismiss.isPending}
